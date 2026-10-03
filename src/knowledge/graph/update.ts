@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync, statSync } from "node:fs";
 import { dirname, join, posix } from "node:path";
 import type {
   FileFacts,
@@ -35,8 +35,34 @@ export interface UpdateResult {
   readonly skipped: number;
 }
 
+/**
+ * The main checkout of a repository: a linked worktree (`.git` is a file pointing into
+ * `<main>/.git/worktrees/<name>`) maps to its main checkout, so the graph built for the project is
+ * the one agents find from a run's worktree.
+ */
+export function mainCheckoutOf(path: string): string {
+  try {
+    const dotGit = join(path, ".git");
+    if (statSync(dotGit).isFile()) {
+      const pointer = /^gitdir:\s*(.+)$/m.exec(readFileSync(dotGit, "utf8"))?.[1]?.trim();
+      const m = pointer ? /^(.*)[\\/]\.git[\\/]worktrees[\\/][^\\/]+$/.exec(pointer) : undefined;
+      if (m?.[1]) return m[1];
+    }
+  } catch {
+    // not a git checkout: the path itself identifies the repository
+  }
+  return path;
+}
+
 export function repoIdOf(repoRoot: string): string {
-  return createHash("sha256").update(repoRoot).digest("hex").slice(0, 12);
+  const main = mainCheckoutOf(repoRoot);
+  let canonical = main;
+  try {
+    canonical = realpathSync(main); // /tmp vs /private/tmp: the same checkout gets the same id
+  } catch {
+    // a path that does not exist yet identifies itself
+  }
+  return createHash("sha256").update(canonical).digest("hex").slice(0, 12);
 }
 
 interface IndexedFile {

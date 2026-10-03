@@ -1,5 +1,6 @@
 import { CapabilityRegistry } from "../../capabilities/registry.ts";
 import { changedFiles, checkStandards } from "../../knowledge/check.ts";
+import { repoIdOf, updateGraph } from "../../knowledge/graph/update.ts";
 import { loadStandards } from "../../knowledge/standards.ts";
 import type { DeterministicTool } from "../executors.ts";
 
@@ -33,6 +34,44 @@ export const BUILTIN_TOOLS: Record<string, DeterministicTool> = {
   "project.discover": async (ctx) => {
     const registry = ctx.runtime.capabilities ?? new CapabilityRegistry();
     const caps = await registry.discover(ctx.runtime.loaded.config, ctx.workspace.ref.path);
+    // The project graph is what impact analysis stands on: bring it up to date for this tree (cheap when
+    // nothing changed — facts come from the content-addressed cache) so agents never meet a stale or missing one.
+    try {
+      const extractors = (ctx.runtime.capabilities ?? registry)
+        .list()
+        .map((adapter) => adapter.graphExtractor?.())
+        .filter((e) => e !== undefined);
+      if (extractors.length > 0) {
+        const started = Date.now();
+        const result = await updateGraph({
+          workspace: ctx.workspace.ref.path,
+          repoId: repoIdOf(ctx.workspace.ref.path),
+          cacheRoot: ctx.runtime.loaded.home.cacheDir,
+          extractors,
+          store: ctx.runtime.graph,
+        });
+        ctx.runtime.events.emit({
+          kind: "graph.update",
+          runId: ctx.run.id,
+          stepId: ctx.step.id,
+          payload: {
+            snapshot: result.snapshot.id,
+            reused: result.reused,
+            extracted: result.extracted,
+            cacheHits: result.cacheHits,
+            ms: Date.now() - started,
+            trigger: "discover",
+          },
+        });
+      }
+    } catch (error) {
+      ctx.runtime.events.emit({
+        kind: "graph.update_failed",
+        runId: ctx.run.id,
+        stepId: ctx.step.id,
+        payload: { error: error instanceof Error ? error.message : String(error) },
+      });
+    }
     const artifact = ctx.runtime.artifacts.put({
       runId: ctx.run.id,
       type: "project-capabilities",

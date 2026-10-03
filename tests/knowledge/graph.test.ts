@@ -227,6 +227,80 @@ describe("incremental graph (ADR-0008)", () => {
   });
 });
 
+describe("the discover step keeps the graph current", () => {
+  it("builds the snapshot of the run's tree before any agent asks for impact", async () => {
+    sb.write(
+      "project/.jarvis/workflows/disc.yaml",
+      "name: disc\nversion: 1\nentry: discover\nsteps:\n  - { id: discover, kind: deterministic, tool: project.discover, transitions: { onSuccess: DONE } }\n",
+    );
+    git(["add", "-A"]);
+    git(["commit", "-q", "-m", "workflow"]);
+    rt = await testRuntime(sb);
+    expect(rt.graph.latest(repoIdOf(sb.project))).toBeUndefined();
+    let out = "";
+    const code = await run(["node", "jarvis", "work", "T-1", "--workflow", "disc"], {
+      streams: {
+        out: new Writable({
+          write(c, _e, cb) {
+            out += String(c);
+            cb();
+          },
+        }),
+        err: new Writable({
+          write(_c, _e, cb) {
+            cb();
+          },
+        }),
+      },
+      context: { cwd: sb.project, homeDir: sb.home, env: { PATH: process.env.PATH ?? "", ...gitEnv } },
+    });
+    expect(code, out).toBe(0);
+    const latest = rt.graph.latest(repoIdOf(sb.project));
+    expect(latest).toBeDefined();
+    expect(rt.graph.load((latest as { id: string }).id)?.nodes.length).toBeGreaterThan(0);
+  });
+});
+
+describe("graph lookup from a run's worktree", () => {
+  it("finds the snapshot built for the project when the agent works in a linked worktree", async () => {
+    rt = await testRuntime(sb);
+    const extractors = rt.capabilities
+      .list()
+      .map((a) => a.graphExtractor?.())
+      .filter((e) => e !== undefined);
+    await updateGraph({
+      workspace: sb.project,
+      repoId: repoIdOf(sb.project),
+      cacheRoot: rt.loaded.home.cacheDir,
+      extractors,
+      store: rt.graph,
+    });
+    const wt = join(sb.root, "wt");
+    git(["worktree", "add", "-q", "-b", "jarvis/x", wt]);
+    expect(repoIdOf(wt)).toBe(repoIdOf(sb.project));
+    const runRec = createRun(rt, "smoke");
+    rt.runs.transition(runRec.id, "RUNNING");
+    const lease = HeldLease.acquire(rt.runs, runRec.id, "cli:test", { heartbeatMs: 0 });
+    if (!lease) throw new Error("lease");
+    try {
+      const tools = rt.tools.bind({
+        run: rt.runs.require(runRec.id),
+        stepId: "impact",
+        iteration: 1,
+        lease,
+        workspacePath: wt,
+        agentCapabilities: ["graph.*"],
+        env: {},
+      });
+      const result = await tools.invoke("graph.impact", { files: ["src/util/money.ts"] });
+      expect(result.ok).toBe(true);
+      expect(result.text).toContain("src/orders/order.ts (distance 1)");
+    } finally {
+      lease.release();
+    }
+  });
+});
+
 describe("jarvis knowledge", () => {
   async function jarvis(args: string[]) {
     let out = "";
