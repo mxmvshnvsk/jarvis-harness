@@ -43,12 +43,15 @@ async function executeAndReport(
   engine: LocalWorkflowEngine,
   run: Run,
   steal: boolean,
+  extra: Record<string, unknown> = {},
 ): Promise<never> {
   const owner = leaseOwner(runtime.loaded.config.interactive ? "cli" : "ci");
   try {
     const result = await engine.execute(run.id, { owner, steal });
     const detail = runDetail(runtime, result.run);
-    ctx.out.result({ ...detail, exitCode: result.exitCode }, () => renderDetail(ctx, detail, new Date(), 8));
+    ctx.out.result({ ...extra, ...detail, exitCode: result.exitCode }, () =>
+      renderDetail(ctx, detail, new Date(), 8),
+    );
     throw new CliExit(result.exitCode);
   } catch (error) {
     if (error instanceof LeaseHeldError) {
@@ -205,12 +208,12 @@ export async function runApprove(ctx: CliContext, ref: string, options: ApproveO
       actor: `${actor.kind}:${actor.id}`,
       payload: { artifactId: latest.artifactId, version: latest.version, type, decision },
     });
-    ctx.out.result(approval, () =>
-      ctx.out.line(`${decision}: ${type}/${latest.name}@${latest.version} by ${actor.id}`),
-    );
+    const line = `${decision}: ${type}/${latest.name}@${latest.version} by ${actor.id}`;
     if (options.resume) {
-      await executeAndReport(ctx, runtime, createEngine(runtime), run, false);
+      if (!ctx.out.json) ctx.out.line(line);
+      await executeAndReport(ctx, runtime, createEngine(runtime), run, false, { approval });
     }
+    ctx.out.result(approval, () => ctx.out.line(line));
   } finally {
     runtime.close();
   }

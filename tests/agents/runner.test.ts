@@ -1,0 +1,371 @@
+import { execFileSync } from "node:child_process";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { BUILTIN_AGENTS } from "../../src/agents/builtin/index.ts";
+import { AgentRegistry } from "../../src/agents/definition.ts";
+import { AgentRuntimeRunner } from "../../src/agents/runner.ts";
+import type { Runtime } from "../../src/app/runtime.ts";
+import { AgenticExecutor, DeterministicExecutor } from "../../src/orchestration/executors.ts";
+import { LocalWorkflowEngine } from "../../src/orchestration/runtime.ts";
+import { BUILTIN_TOOLS } from "../../src/orchestration/tools/builtin.ts";
+import { ACTOR, testRuntime, workflowOf } from "../helpers/engine.ts";
+import {
+  type CapturedRequest,
+  completion,
+  type FakeOpenAi,
+  startFakeOpenAi,
+  toolCallCompletion,
+} from "../helpers/fakeOpenAi.ts";
+import { type Sandbox, sandbox } from "../helpers/tmp.ts";
+
+let sb: Sandbox;
+let server: FakeOpenAi;
+let rt: Runtime | undefined;
+
+const gitEnv = {
+  GIT_AUTHOR_NAME: "t",
+  GIT_AUTHOR_EMAIL: "t@t",
+  GIT_COMMITTER_NAME: "t",
+  GIT_COMMITTER_EMAIL: "t@t",
+};
+
+beforeEach(async () => {
+  sb = sandbox();
+  server = await startFakeOpenAi();
+  execFileSync("git", ["init", "-q", "-b", "main"], { cwd: sb.project, env: { ...process.env, ...gitEnv } });
+  mkdirSync(join(sb.project, "src"), { recursive: true });
+  writeFileSync(
+    join(sb.project, "src", "onboarding.ts"),
+    "export function canRestartOnboarding() {\n  return false;\n}\n",
+  );
+  sb.write(
+    "project/.jarvis/knowledge/domain.md",
+    "# Domain\nOnboarding = регистрация клиента. 'Повторная регистрация после отказа' → canRestartOnboarding().\n",
+  );
+  sb.write(
+    "home/.jarvis/config.yaml",
+    `version: 1
+models:
+  flash:
+    provider: openai-compatible
+    baseUrl: ${server.baseUrl}
+    model: flash
+    egress: private
+    contextWindow: 32000
+    maxOutput: 2000
+    supports: { tools: true, jsonMode: true }
+roles:
+  research: { models: [flash] }
+  implementation: { models: [flash] }
+  review: { models: [flash] }
+`,
+  );
+  execFileSync("git", ["add", "-A"], { cwd: sb.project });
+  execFileSync("git", ["commit", "-q", "-m", "init"], {
+    cwd: sb.project,
+    env: { ...process.env, ...gitEnv },
+  });
+});
+
+afterEach(async () => {
+  rt?.close();
+  await server.close();
+  sb.cleanup();
+});
+
+const RESEARCH_DOC = {
+  summary: "The task touches onboarding restart.",
+  findings: [
+    { topic: "restart", detail: "canRestartOnboarding returns false", sources: ["src/onboarding.ts:2"] },
+  ],
+  affectedAreas: ["src/onboarding.ts"],
+  existingImplementations: [],
+  unknowns: [],
+  sources: ["src/onboarding.ts"],
+  reasons: [],
+  outcome: "ok",
+};
+
+function engineWith(runtime: Runtime, workflow: ReturnType<typeof workflowOf>) {
+  const registry = new AgentRegistry(BUILTIN_AGENTS, runtime.loaded.project?.root);
+  return new LocalWorkflowEngine({
+    runtime,
+    workflows: new Map([[workflow.name, workflow]]),
+    executors: {
+      deterministic: new DeterministicExecutor(BUILTIN_TOOLS),
+      agentic: new AgenticExecutor(new AgentRuntimeRunner(registry)),
+    },
+    leaseOptions: { heartbeatMs: 0 },
+  });
+}
+
+function createRun(runtime: Runtime, workflow: string) {
+  return runtime.runs.create({
+    task: "ABC-1",
+    workflow,
+    owner: ACTOR,
+    workspace: { mode: "cwd", repoRoot: sb.project, path: sb.project, baseRef: "HEAD" },
+    dataClass: "confidential",
+  });
+}
+
+const researchOnly = workflowOf({
+  name: "r",
+  entry: "research",
+  steps: [
+    {
+      id: "research",
+      kind: "agentic",
+      agent: "research",
+      outputs: ["research"],
+      transitions: { onSuccess: "DONE" },
+    },
+  ],
+});
+
+function lastUserContent(req: CapturedRequest): string {
+  const messages = req.body.messages as Array<{ role: string; content: string | null }>;
+  return [...messages].reverse().find((m) => m.role === "user")?.content ?? "";
+}
+
+describe("AgentRuntimeRunner", () => {
+  it("builds layered context, runs the tool loop, finalizes a structured artifact", async () => {
+    sb.write("project/.jarvis/project.yaml", "version: 1\nworkspace: { mode: cwd }\n");
+    rt = await testRuntime(sb, { PATH: process.env.PATH ?? "" });
+    server.respond((_req, i) => {
+      if (i === 0) return toolCallCompletion("repo.search", { pattern: "canRestartOnboarding" });
+      if (i === 1) return toolCallCompletion("repo.read", { path: "src/onboarding.ts" });
+      if (i === 2) return completion("I have what I need.");
+      return completion(JSON.stringify(RESEARCH_DOC));
+    });
+    const engine = engineWith(rt, researchOnly);
+    const run = createRun(rt, "r");
+    const result = await engine.execute(run.id, { owner: "cli:t" });
+    expect(result.run.state).toBe("COMPLETED");
+
+    const first = server.requests[0] as CapturedRequest;
+    const messages = first.body.messages as Array<{ role: string; content: string }>;
+    expect(messages[0]?.role).toBe("system");
+    expect(messages[0]?.content).toContain("# Agent: research");
+    expect(messages[0]?.content).toContain("- repo.search:");
+    expect(messages[0]?.content).not.toContain("repo.write");
+    expect(messages[1]?.content).toContain("# Task ABC-1");
+    expect(messages[1]?.content).toContain("Knowledge domain.md");
+    expect(messages[1]?.content).toContain("canRestartOnboarding()");
+    expect(
+      (first.body.tools as unknown[]).map((t) => (t as { function: { name: string } }).function.name),
+    ).toEqual(expect.arrayContaining(["repo.read", "repo.search", "git.log"]));
+    // System layer is byte-identical across the tool rounds (ADR-0013 §4).
+    const systemTexts = server.requests
+      .slice(0, 3)
+      .map((r) => (r.body.messages as Array<{ content: string }>)[0]?.content);
+    expect(new Set(systemTexts).size).toBe(1);
+
+    const third = server.requests[2] as CapturedRequest;
+    const toolMsgs = (third.body.messages as Array<{ role: string; content: string }>).filter(
+      (m) => m.role === "tool",
+    );
+    expect(toolMsgs).toHaveLength(2);
+    expect(toolMsgs[0]?.content).toContain("[repo.search] ok");
+    expect(toolMsgs[0]?.content).toContain("src/onboarding.ts:1:");
+    expect(toolMsgs[1]?.content).toContain("export function canRestartOnboarding");
+
+    const final = server.requests[3] as CapturedRequest;
+    expect(lastUserContent(final)).toContain("Produce the result document");
+    expect((final.body.response_format as { type: string }).type).toBe("json_object");
+
+    const artifact = rt.artifacts.find(run.id, "research", "research.json");
+    expect(artifact?.provenance).toMatchObject({ kind: "agent", agentId: "research" });
+    expect(artifact?.sourceRefs).toEqual(["src/onboarding.ts"]);
+    expect(JSON.parse(rt.artifacts.text(artifact as NonNullable<typeof artifact>))).toMatchObject({
+      summary: RESEARCH_DOC.summary,
+    });
+    const finish = rt.events.list({ kind: "agent.finish" })[0]?.payload;
+    expect(finish).toMatchObject({ agent: "research", status: "success", toolCalls: 2, modelCalls: 4 });
+  });
+
+  it("feeds denied and malformed tool calls back to the model instead of failing", async () => {
+    sb.write("project/.jarvis/project.yaml", "version: 1\nworkspace: { mode: cwd }\n");
+    rt = await testRuntime(sb, { PATH: process.env.PATH ?? "" });
+    server.respond((_req, i) => {
+      if (i === 0) return toolCallCompletion("repo.write", { path: "x", content: "y" });
+      if (i === 1)
+        return {
+          body: {
+            choices: [
+              {
+                finish_reason: "tool_calls",
+                message: {
+                  role: "assistant",
+                  content: null,
+                  tool_calls: [
+                    { id: "c", type: "function", function: { name: "repo.read", arguments: "{not json" } },
+                  ],
+                },
+              },
+            ],
+            usage: { prompt_tokens: 1, completion_tokens: 1 },
+          },
+        };
+      if (i === 2) return completion("done");
+      return completion(JSON.stringify(RESEARCH_DOC));
+    });
+    const engine = engineWith(rt, researchOnly);
+    const run = createRun(rt, "r");
+    const result = await engine.execute(run.id, { owner: "cli:t" });
+    expect(result.run.state).toBe("COMPLETED");
+    const third = server.requests[2] as CapturedRequest;
+    const toolMsgs = (third.body.messages as Array<{ role: string; content: string }>).filter(
+      (m) => m.role === "tool",
+    );
+    expect(toolMsgs[0]?.content).toContain("[repo.write] denied: not in the agent's capability set");
+    expect(toolMsgs[1]?.content).toContain("[repo.read] error: arguments are not valid JSON");
+    expect(rt.events.list({ kind: "tool.denied" })).toHaveLength(1);
+  });
+
+  it("checkpoints the transcript every N tool calls and resumes it after quota exhaustion", async () => {
+    sb.write("project/.jarvis/project.yaml", "version: 1\nworkspace: { mode: cwd }\n");
+    sb.write("project/.jarvis/agents/research.md", "Custom research instructions from the project.");
+    rt = await testRuntime(sb, { PATH: process.env.PATH ?? "" });
+    let phase = 0;
+    server.respond((_req, i) => {
+      if (phase === 0) {
+        if (i < 5) return toolCallCompletion("repo.list", {});
+        return { status: 429, body: { error: { message: "insufficient_quota" } } };
+      }
+      // Resumed process: the model asks for one more tool, then finishes.
+      const n = i - 6;
+      if (n === 0) return toolCallCompletion("repo.read", { path: "src/onboarding.ts" });
+      if (n === 1) return completion("done");
+      return completion(JSON.stringify(RESEARCH_DOC));
+    });
+    const engine = engineWith(rt, researchOnly);
+    const run = createRun(rt, "r");
+    const parked = await engine.execute(run.id, { owner: "cli:t" });
+    expect(parked.run.state).toBe("WAITING_BUDGET");
+    const ckp = rt.checkpoints.list(run.id).filter((c) => c.kind === "intra");
+    expect(ckp.length).toBeGreaterThanOrEqual(1);
+    expect(ckp[0]?.state).toMatchObject({ toolCalls: 5 });
+    expect((server.requests[0] as CapturedRequest).body.messages as unknown[]).toBeDefined();
+    expect(
+      ((server.requests[0] as CapturedRequest).body.messages as Array<{ content: string }>)[0]?.content,
+    ).toContain("Custom research instructions from the project.");
+
+    phase = 1;
+    const resumed = await engine.execute(run.id, { owner: "cli:t" });
+    expect(resumed.run.state).toBe("COMPLETED");
+    const firstAfterResume = server.requests[6] as CapturedRequest;
+    const msgs = firstAfterResume.body.messages as Array<{ role: string }>;
+    // 2 base + 5 × (assistant + tool) restored from the checkpointed transcript
+    expect(msgs.filter((m) => m.role === "tool")).toHaveLength(5);
+    const finish = rt.events.list({ kind: "agent.finish" })[0]?.payload;
+    expect(finish).toMatchObject({ toolCalls: 6 });
+  });
+
+  it("stops the tool loop at the limit, maps outcomes and fails on undeclared ones", async () => {
+    sb.write("project/.jarvis/project.yaml", "version: 1\nworkspace: { mode: cwd }\n");
+    rt = await testRuntime(sb, { PATH: process.env.PATH ?? "" });
+    const wf = workflowOf({
+      name: "i",
+      entry: "impact",
+      steps: [
+        {
+          id: "impact",
+          kind: "agentic",
+          agent: "impact",
+          outputs: ["impact"],
+          transitions: {
+            onSuccess: "DONE",
+            onOutcome: { needs_research: { to: "research", maxIterations: 1 } },
+          },
+        },
+        {
+          id: "research",
+          kind: "agentic",
+          agent: "research",
+          outputs: ["research"],
+          transitions: { onSuccess: "impact" },
+        },
+      ],
+    });
+    const registry = new AgentRegistry(
+      BUILTIN_AGENTS.map((a) =>
+        a.id === "impact" ? { ...a, limits: { maxToolCalls: 2, maxModelCalls: 10, checkpointEvery: 10 } } : a,
+      ),
+    );
+    const engine = new LocalWorkflowEngine({
+      runtime: rt,
+      workflows: new Map([[wf.name, wf]]),
+      executors: {
+        deterministic: new DeterministicExecutor(BUILTIN_TOOLS),
+        agentic: new AgenticExecutor(new AgentRuntimeRunner(registry)),
+      },
+      leaseOptions: { heartbeatMs: 0 },
+    });
+    const impactDoc = (outcome: string) => ({
+      summary: "s",
+      affected: [{ path: "src/onboarding.ts", kind: "code", reason: "r" }],
+      dependencies: [],
+      risks: [],
+      unknowns: ["billing"],
+      sources: [],
+      reasons: [{ kind: "unknown-area", summary: "billing module not researched", sourceRefs: [] }],
+      outcome,
+    });
+    let calls = 0;
+    server.respond((req, i) => {
+      calls = i + 1;
+      const system = (req.body.messages as Array<{ content: string }>)[0]?.content ?? "";
+      if (system.includes("# Agent: impact")) {
+        const tools = req.body.tools as unknown[] | undefined;
+        if (tools) return toolCallCompletion("repo.list", {});
+        const user = lastUserContent(req);
+        if (
+          user.includes("Produce the result document") ||
+          user.includes("did not match the required schema")
+        ) {
+          const second =
+            rt?.history.list(rt.runs.list()[0]?.id as string).filter((h) => h.stepId === "impact").length ===
+            2;
+          return completion(JSON.stringify(impactDoc(second ? "go_wild" : "needs_research")));
+        }
+        return completion("finishing");
+      }
+      if (lastUserContent(req).includes("Produce the result document"))
+        return completion(JSON.stringify(RESEARCH_DOC));
+      return completion("ok");
+    });
+    const run = createRun(rt, "i");
+    const result = await engine.execute(run.id, { owner: "cli:t" });
+    // impact#1: 2 tool calls → budget notice → finishes → needs_research → research#1 → impact#2 → outcome
+    // outside the schema enum is rejected by validation and repair, then the step fails.
+    expect(result.run.state).toBe("FAILED");
+    expect(result.run.stateReason).toContain("structured output invalid");
+    expect(rt.artifacts.listLatest(run.id, "invalid-output")).toHaveLength(1);
+    expect(result.run.iterations).toEqual({ "impact->research#needs_research": 1 });
+    const impact1 = rt.history.list(run.id).find((h) => h.stepId === "impact");
+    expect(impact1).toMatchObject({ status: "success", outcome: "needs_research" });
+    const budgetNotice = server.requests.find((r) =>
+      lastUserContent(r).includes("tool budget for this step is used up"),
+    );
+    expect(budgetNotice).toBeDefined();
+    expect(calls).toBeGreaterThan(5);
+    const researchReq = server.requests.find((r) =>
+      ((r.body.messages as Array<{ content: string }>)[0]?.content ?? "").includes("# Agent: research"),
+    );
+    expect(lastUserContent(researchReq as CapturedRequest)).toContain("billing module not researched");
+  });
+
+  it("stores invalid structured output as an artifact and fails the step", async () => {
+    sb.write("project/.jarvis/project.yaml", "version: 1\nworkspace: { mode: cwd }\n");
+    rt = await testRuntime(sb, { PATH: process.env.PATH ?? "" });
+    server.respond(() => completion("not json at all"));
+    const engine = engineWith(rt, researchOnly);
+    const run = createRun(rt, "r");
+    const result = await engine.execute(run.id, { owner: "cli:t" });
+    expect(result.run.state).toBe("FAILED");
+    expect(result.run.stateReason).toContain("structured output invalid");
+    expect(rt.artifacts.listLatest(run.id, "invalid-output")).toHaveLength(1);
+  });
+});

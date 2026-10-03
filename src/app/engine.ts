@@ -1,4 +1,7 @@
-import { DeterministicExecutor } from "../orchestration/executors.ts";
+import { BUILTIN_AGENTS } from "../agents/builtin/index.ts";
+import { AgentRegistry } from "../agents/definition.ts";
+import { AgentRuntimeRunner } from "../agents/runner.ts";
+import { AgenticExecutor, DeterministicExecutor } from "../orchestration/executors.ts";
 import { LocalWorkflowEngine } from "../orchestration/runtime.ts";
 import { BUILTIN_TOOLS } from "../orchestration/tools/builtin.ts";
 import type { StepExecutor } from "../orchestration/types.ts";
@@ -10,9 +13,14 @@ export function createEngine(
   runtime: Runtime,
   executors: Partial<Record<StepExecutor["kind"], StepExecutor>> = {},
 ): LocalWorkflowEngine {
+  const agents = new AgentRegistry(BUILTIN_AGENTS, runtime.loaded.project?.root);
   return new LocalWorkflowEngine({
     runtime,
     workflows: loadWorkflows(runtime.loaded.project?.root),
-    executors: { deterministic: new DeterministicExecutor(BUILTIN_TOOLS), ...executors },
+    executors: {
+      deterministic: new DeterministicExecutor(BUILTIN_TOOLS),
+      agentic: new AgenticExecutor(new AgentRuntimeRunner(agents)),
+      ...executors,
+    },
   });
 }

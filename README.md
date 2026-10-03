@@ -70,6 +70,19 @@ Stage 4 — tool platform:
 - `WorktreeWorkspace` (ADR-0003): `jarvis/<task>/<run>` from the base commit, setup hook,
   checkpoint = commit with `Jarvis-*` trailers, resume = reset + clean; `jarvis diff|apply|gc`
 
+Stage 5 + 7 — agents and the SDD workflow:
+
+- `AgentDefinition` (ADR-0001 §6): instructions, model role, least-privilege capability set,
+  requirements, result schema with declared outcomes, limits; project override of the instructions
+  in `.jarvis/agents/<id>.md`
+- `AgentRuntimeRunner`: layered context (byte-stable system layer, task + output contract, loop
+  reasons, input artifacts, `.jarvis/knowledge/*.md`), tool-calling loop through the policy-filtered
+  tools, transcript checkpoint every N calls and restore on resume, structured finalization,
+  `invalid-output` artifact on failure
+- Built-in agents `research`, `specification`, `impact`, `plan`, `implementation`, `test`, `review`
+  with JSON result artifacts; the built-in `sdd` workflow now runs end to end:
+  research → spec → approval → impact → plan → implementation → verify → review with back edges
+
 Configuration precedence: CLI flags → `JARVIS_*` env → `.jarvis/project.yaml` → `~/.jarvis/config.yaml`
 → defaults; profiles (`--profile ci`) may only narrow. Secrets are references (`env:VAR`,
 `keychain:ID`), never literals.
