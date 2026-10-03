@@ -211,7 +211,7 @@ export class ApprovalExecutor implements StepExecutor {
       if (config.humanGate === "fail") {
         return {
           status: "failure",
-          reason: `human gate "${ctx.step.id}" reached in non-interactive mode (humanGate: fail)`,
+          reason: `policy: human_gate_in_ci — gate "${ctx.step.id}" reached in non-interactive mode (humanGate: fail)`,
         };
       }
       if (config.humanGate === "skip-if-approved" && ctx.runtime.loaded.project) {

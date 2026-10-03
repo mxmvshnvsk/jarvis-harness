@@ -135,6 +135,18 @@ Stage 9 + 10 — human collaboration (ADR-0019):
 - Human edits in the worktree become a `human edit` checkpoint (`Jarvis-Kind: human-edit`) on
   resume — never reset away; `human.gates.<type>.required: false` switches a gate off
 
+Stage 11 (part) — CI mode and run transfer (ADR-0009):
+
+- `jarvis ci <task>` — the same workflow under the `ci` profile (or `--profile <name>`):
+  non-interactive, read-only checkout; exit 10/11 at a human gate with a markdown job summary
+  (`--summary`, `$GITHUB_STEP_SUMMARY`), `approval-request.json` under the run's state dir and,
+  with `--bundle`, the run exported; `humanGate: fail` exits 12 with a `policy:` reason
+- `jarvis export <run>` / `jarvis import <bundle>` — one gzipped JSON with the run's rows,
+  artifacts and blobs, effects, approvals, threads and the workspace patch; import rebuilds the
+  worktree from the base commit with the patch applied and refuses duplicates
+- `jarvis approve --commit` writes `.jarvis/approvals/<task>/<type>.json` and commits it, so a
+  later CI run with `humanGate: skip-if-approved` passes that gate for the same content
+
 Configuration precedence: CLI flags → `JARVIS_*` env → `.jarvis/project.yaml` → `~/.jarvis/config.yaml`
 → defaults; profiles (`--profile ci`) may only narrow. Secrets are references (`env:VAR`,
 `keychain:ID`), never literals.

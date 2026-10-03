@@ -2,6 +2,7 @@ import { Command } from "commander";
 import { ConfigError } from "../core/config/errors.ts";
 import { packageInfo } from "../version.ts";
 import { runAuthRemove, runAuthSet, runAuthStatus } from "./commands/auth.ts";
+import { runCi, runExport, runImport } from "./commands/ci.ts";
 import { runConfigShow } from "./commands/config.ts";
 import { runDbBackup, runDbMigrate, runDbStatus } from "./commands/db.ts";
 import { renderDoctor, runDoctor } from "./commands/doctor.ts";
@@ -146,6 +147,7 @@ export function buildProgram(options: RunOptions = {}): Command {
     .option("--request-changes", "ask for changes; goes back along the declared edge")
     .option("--comment <text>", "comment stored with the decision")
     .option("--resume", "continue the run right after recording the decision")
+    .option("--commit", "also write .jarvis/approvals/<task>/<type>.json and commit it (ADR-0009 §4)")
     .action(
       async (
         run: string,
@@ -155,6 +157,7 @@ export function buildProgram(options: RunOptions = {}): Command {
           requestChanges?: boolean;
           comment?: string;
           resume?: boolean;
+          commit?: boolean;
         },
       ) => {
         const decision = opts.reject ? "reject" : opts.requestChanges ? "request_changes" : "approve";
@@ -163,9 +166,37 @@ export function buildProgram(options: RunOptions = {}): Command {
           decision,
           ...(opts.comment ? { comment: opts.comment } : {}),
           ...(opts.resume ? { resume: true } : {}),
+          ...(opts.commit ? { commit: true } : {}),
         });
       },
     );
+
+  program
+    .command("ci <task>")
+    .description(
+      "run a task under the `ci` profile: non-interactive, job summary, bundle on a human gate (ADR-0009)",
+    )
+    .option("--workflow <name>", "workflow definition to use", "sdd")
+    .option("--summary <file>", "append the markdown summary here (default: $GITHUB_STEP_SUMMARY)")
+    .option("--bundle <file>", "export the run as a bundle for `jarvis import`")
+    .action(async (task: string, opts: { workflow: string; summary?: string; bundle?: string }) => {
+      await runCi(ctxFor(), task, opts);
+    });
+  program
+    .command("export <run>")
+    .description(
+      "write a run bundle: rows, artifacts, effects, threads and the workspace patch (ADR-0009 §5)",
+    )
+    .option("--out <file>", "bundle path (default: <run>.jarvis.json.gz)")
+    .action(async (run: string, opts: { out?: string }) => {
+      await runExport(ctxFor(), run, opts);
+    });
+  program
+    .command("import <bundle>")
+    .description("import a run bundle; rebuilds the worktree from the base commit with the patch applied")
+    .action(async (file: string) => {
+      await runImport(ctxFor(), file);
+    });
 
   program
     .command("daemon")

@@ -47,8 +47,13 @@ export interface ExecuteOptions {
   readonly steal?: boolean;
 }
 
-export function exitCodeFor(state: RunState): number {
+/** ADR-0009 §3: a FAILED run whose reason is a policy refusal exits 12, not 1. */
+export const POLICY_REASON_PREFIX = "policy:";
+
+export function exitCodeFor(state: RunState, reason?: string): number {
   switch (state) {
+    case "FAILED":
+      return reason?.startsWith(POLICY_REASON_PREFIX) ? EXIT.policyDenied : EXIT.error;
     case "COMPLETED":
       return EXIT.ok;
     case "WAITING_HUMAN":
@@ -104,7 +109,7 @@ export class LocalWorkflowEngine {
   /** Starts a CREATED run or resumes a resumable one; returns when the run parks or ends. */
   async execute(runId: string, options: ExecuteOptions): Promise<ExecutionResult> {
     let run = this.rt.runs.require(runId);
-    if (isTerminal(run.state)) return { run, exitCode: exitCodeFor(run.state) };
+    if (isTerminal(run.state)) return { run, exitCode: exitCodeFor(run.state, run.stateReason) };
     const workflow = this.workflow(run.workflow);
 
     const lease = options.steal
@@ -175,7 +180,7 @@ export class LocalWorkflowEngine {
       lease.release();
     }
     const final = this.rt.runs.require(run.id);
-    return { run: final, exitCode: exitCodeFor(final.state) };
+    return { run: final, exitCode: exitCodeFor(final.state, final.stateReason) };
   }
 
   /* ---- step execution ---- */

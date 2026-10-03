@@ -1,4 +1,5 @@
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { dirname, join, relative } from "node:path";
 import { createEngine } from "../../app/engine.ts";
 import { preflightMcp } from "../../app/preflight.ts";
 import { createRuntime, type Runtime } from "../../app/runtime.ts";
@@ -12,8 +13,9 @@ import { daemonTick } from "../../orchestration/daemon.ts";
 import { leaseOwner } from "../../orchestration/lease.ts";
 import type { LocalWorkflowEngine } from "../../orchestration/runtime.ts";
 import { LeaseHeldError } from "../../orchestration/types.ts";
-import { WorktreeError, WorktreeWorkspace } from "../../orchestration/worktree.ts";
+import { gitIdentityEnv, WorktreeError, WorktreeWorkspace } from "../../orchestration/worktree.ts";
 import { LeaseLostError, newRunId, shortRunId } from "../../storage/runStore.ts";
+import { git } from "../../tools/local/exec.ts";
 import type { CliContext } from "../context.ts";
 import { CliExit, EXIT } from "../output.ts";
 import { loadForCli } from "./config.ts";
@@ -184,6 +186,8 @@ export interface ApproveOptions {
   readonly decision?: ApprovalDecision;
   readonly comment?: string;
   readonly resume?: boolean;
+  /** ADR-0009 §4: materialize the approval in `.jarvis/approvals/<task>/<type>.json` and commit it. */
+  readonly commit?: boolean;
 }
 
 /** `jarvis approve <run>` (ADR-0005 §4). */
@@ -222,7 +226,49 @@ export async function runApprove(ctx: CliContext, ref: string, options: ApproveO
       actor: `${actor.kind}:${actor.id}`,
       payload: { artifactId: latest.artifactId, version: latest.version, type, decision },
     });
-    const line = `${decision}: ${type}/${latest.name}@${latest.version} by ${actor.id}`;
+    let committed: string | undefined;
+    if (options.commit) {
+      const root = loaded.project?.root ?? ctx.cwd;
+      const file = join(root, ".jarvis", "approvals", run.task, `${type}.json`);
+      mkdirSync(dirname(file), { recursive: true });
+      writeFileSync(
+        file,
+        `${JSON.stringify(
+          {
+            artifactId: latest.artifactId,
+            version: latest.version,
+            contentRef: latest.contentRef,
+            actor,
+            decision,
+            createdAt: approval.createdAt,
+          },
+          null,
+          2,
+        )}\n`,
+      );
+      const rel = relative(root, file);
+      const add = await git(["add", rel], root);
+      const commit =
+        add.code === 0
+          ? await git(
+              [
+                "commit",
+                "-q",
+                "--no-verify",
+                "-m",
+                `jarvis: ${decision} ${type} for ${run.task}\n\nJarvis-Run: ${run.id}\nJarvis-Kind: approval`,
+              ],
+              root,
+              { env: gitIdentityEnv(ctx.env, { name: actor.display ?? actor.id, email: actor.id }) },
+            )
+          : add;
+      if (commit.code !== 0) {
+        ctx.out.error(
+          `approval written to ${rel} but not committed: ${(commit.stderr || commit.stdout).trim()}`,
+        );
+      } else committed = rel;
+    }
+    const line = `${decision}: ${type}/${latest.name}@${latest.version} by ${actor.id}${committed ? ` (committed ${committed})` : ""}`;
     if (options.resume) {
       if (!ctx.out.json) ctx.out.line(line);
       await executeAndReport(ctx, runtime, createEngine(runtime), run, false, { approval });
