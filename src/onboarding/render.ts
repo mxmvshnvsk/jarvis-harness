@@ -1,4 +1,5 @@
-import type { ScanReport } from "./scan.ts";
+import type { ModuleFacts, ScanReport } from "./scan.ts";
+import type { VerifiedModuleMap } from "./verify.ts";
 
 /**
  * Knowledge skeletons rendered from a scan (`jarvis onboard`): facts only, short, no prose that a
@@ -118,4 +119,57 @@ export function applyCommands(
   if (!re.test(projectYaml)) return { text: projectYaml, applied: false };
   const body = commands.map((c) => `    ${c.name}: ${JSON.stringify(c.command)}`).join("\n");
   return { text: projectYaml.replace(re, `$1\n${body}`), applied: true };
+}
+
+/** Marker of a module document written by the agent mapper (verified claims only). */
+export const MODULE_MARKER =
+  "<!-- jarvis:onboard-module — mapped by an agent; every claim was checked against the code; edit freely -->";
+
+const oneLine = (s: string) => s.replace(/\s+/g, " ").trim();
+
+/** Knowledge document for one module: front matter `paths` scopes it to the module's files. */
+export function renderModuleDoc(map: VerifiedModuleMap, facts?: ModuleFacts): string {
+  const lines: string[] = [
+    "---",
+    `tags: [module, generated]`,
+    `paths: [${JSON.stringify(`${map.module}/**`)}]`,
+    "---",
+    MODULE_MARKER,
+    `# Module ${map.module}`,
+    "",
+    oneLine(map.purpose),
+  ];
+  if (facts) {
+    lines.push(
+      "",
+      `Size: ${facts.files} files, about ${facts.lines} lines. Depends on: ${facts.dependsOn.map(code).join(", ") || "—"}. Used by: ${facts.usedBy.map(code).join(", ") || "—"}.`,
+    );
+  }
+  if (map.publicApi.length > 0) {
+    lines.push("", "## Public API", "");
+    for (const a of map.publicApi)
+      lines.push(`- ${code(a.symbol)} (${code(`${a.file}:${a.line}`)}) — ${oneLine(a.description)}`);
+  }
+  const claims = (title: string, items: VerifiedModuleMap["rules"]) => {
+    if (items.length === 0) return;
+    lines.push("", `## ${title}`, "");
+    for (const c of items) {
+      lines.push(`- ${oneLine(c.statement)}`);
+      for (const e of c.evidence) lines.push(`  - ${code(`${e.file}:${e.line}`)}: ${code(e.quote)}`);
+    }
+  };
+  claims("Responsibilities", map.responsibilities);
+  claims("Rules to keep", map.rules);
+  if (map.terms.length > 0) {
+    lines.push("", "## Vocabulary", "", "| term | synonyms | symbols |", "|---|---|---|");
+    for (const t of map.terms)
+      lines.push(
+        `| ${t.term} | ${t.synonyms.join(", ") || "—"} | ${t.symbols.map(code).join(", ") || "—"} |`,
+      );
+  }
+  if (map.unknowns.length > 0) {
+    lines.push("", "## Not established from the code", "");
+    for (const u of map.unknowns) lines.push(`- ${oneLine(u)}`);
+  }
+  return `${lines.join("\n")}\n`;
 }

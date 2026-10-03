@@ -236,10 +236,26 @@ steps:
         requirements_wrong: { to: DONE }
 `;
 
+export const ONBOARD_MODULE_WORKFLOW = `
+name: onboard-module
+version: 1
+description: Map one module of an existing repository (jarvis onboard --module)
+entry: map
+steps:
+  - id: map
+    kind: agentic
+    agent: onboard-mapper
+    phase: research
+    outputs: [module-map]
+    transitions:
+      onSuccess: DONE
+`;
+
 export const BUILTIN_WORKFLOWS: Readonly<Record<string, string>> = {
   sdd: SDD_WORKFLOW,
   smoke: SMOKE_WORKFLOW,
   research: RESEARCH_WORKFLOW,
   spec: SPEC_WORKFLOW,
   "review-diff": REVIEW_DIFF_WORKFLOW,
+  "onboard-module": ONBOARD_MODULE_WORKFLOW,
 };

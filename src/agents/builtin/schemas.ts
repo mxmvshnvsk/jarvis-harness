@@ -135,6 +135,7 @@ const Candidate = z.object({
   rationale: z.string().min(1),
   evidence: z.array(Source).default([]),
   proposal: z.string().optional().describe("the rule or text as it should be written"),
+  paths: z.array(z.string()).optional().describe("globs the text applies to (front matter `paths`)"),
 });
 
 export const ReviewResult = z.object({
@@ -155,6 +156,54 @@ export const ReviewResult = z.object({
   ),
   verdict: z.enum(["approve", "fix_required", "plan_wrong", "requirements_wrong"]),
   outcome: z.enum(["ok", "fix_required", "plan_wrong", "requirements_wrong"]).default("ok"),
+});
+
+/**
+ * `jarvis onboard --module` (agent mode): what one module is for. Every claim carries evidence — a
+ * file and a verbatim excerpt — so a deterministic pass can drop whatever the code does not support.
+ */
+const Evidence = z.object({
+  file: z.string().min(1).describe("repository-relative path"),
+  line: z.number().int().positive().optional().describe("line where the excerpt starts, if known"),
+  quote: z.string().min(3).describe("a short verbatim excerpt (one line) copied from the file"),
+});
+
+const Claim = z.object({
+  statement: z.string().min(1),
+  evidence: z.array(Evidence).min(1),
+});
+
+export const ModuleMapResult = z.object({
+  ...Base,
+  module: z.string().min(1).describe("the module path you were asked to map"),
+  purpose: z.string().min(1).describe("what the module is for, in one or two sentences"),
+  publicApi: z
+    .array(
+      z.object({
+        symbol: z.string().min(1),
+        file: z.string().min(1),
+        description: z.string().min(1),
+      }),
+    )
+    .default([])
+    .describe("what other modules are meant to call; each symbol must appear in the file"),
+  responsibilities: z.array(Claim).default([]),
+  rules: z
+    .array(Claim)
+    .default([])
+    .describe("invariants, business rules and conventions that hold in this module and are easy to break"),
+  terms: z
+    .array(
+      z.object({
+        term: z.string().min(1),
+        synonyms: z.array(z.string()).default([]),
+        symbols: z.array(z.string()).default([]),
+      }),
+    )
+    .default([])
+    .describe("domain vocabulary used here, with the code symbols that carry it"),
+  unknowns: z.array(z.string()).default([]).describe("what you could not establish from the code"),
+  outcome: z.enum(["ok"]).default("ok"),
 });
 
 /** ADR-0019 §5: what each human review comment means for the workflow. */

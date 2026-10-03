@@ -17,8 +17,11 @@ Remaining commands of ADR-0001 §15:
 
 - `jarvis onboard` (quick mode) — deterministic repository scan without a model: module/graph facts, docs, tests and
   commit style, suggested `tools.local`, `architecture.md`/`conventions.md` skeletons with a regeneration marker
-  (`src/onboarding/*`, `src/cli/commands/onboard.ts`, `tests/cli/onboard.test.ts`). The agent-based mode
-  (map → synthesize → verify → gate) is not implemented yet
+  (`src/onboarding/*`, `src/cli/commands/onboard.ts`, `tests/cli/onboard.test.ts`)
+- `jarvis onboard --module <path>` (agent mode, prototype for one module) — `onboard-mapper` agent and `onboard-module`
+  workflow; claims carry file + verbatim excerpt evidence that `src/onboarding/verify.ts` checks mechanically;
+  what survives becomes a knowledge `candidate` with `paths`, promoted by a human. Not yet: fan-out over all modules,
+  an LLM verification pass, `--refresh` by module hash, an eval of sdd runs with and without the generated knowledge
 
 ADR-0001 §20 stage 12 (git hooks) — `f11ca47`:
 

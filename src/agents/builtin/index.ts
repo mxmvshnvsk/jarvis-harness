@@ -3,6 +3,7 @@ import {
   DocsResult,
   ImpactResult,
   ImplementationResult,
+  ModuleMapResult,
   PlanResult,
   ReleaseNotesResult,
   RequirementsResult,
@@ -267,6 +268,28 @@ Produce the result document.`,
   contextInputs: ["spec", "implementation", "review"],
 };
 
+export const ONBOARD_MAPPER_AGENT: AgentDefinition = {
+  id: "onboard-mapper",
+  role: "research",
+  description:
+    "Reads one module and explains what it is for, its public API, rules and vocabulary — with evidence.",
+  instructions: `You are the onboarding mapper of Jarvis. You were given one module of an existing repository and the deterministic facts about it (size, dependencies, dependents, tests).
+Goal: write down what a newcomer — or an agent about to change this module — must know that the file listing does not show.
+Method:
+- Read the module: its entry points first, then the files with the most logic, then its tests (tests show intended behaviour). Use graph.neighbors / graph.impact for who depends on it and repo.search for how it is used elsewhere.
+- "purpose": what the module is for, in business terms where the code supports it.
+- "publicApi": what other modules are meant to call. Every symbol must really appear in the named file.
+- "responsibilities" and "rules": invariants, business rules, ordering constraints, error-handling and naming conventions that hold here and are easy to break. A rule is something you saw enforced or relied on in more than a passing way.
+- "terms": domain vocabulary and the code symbols that carry it.
+- EVERY claim needs evidence: a file and a verbatim one-line excerpt copied from it (and the line number when you know it). Claims are checked mechanically against the files; a claim whose excerpt is not found is discarded. Do not paraphrase excerpts.
+- Do not guess intent. What you could not establish goes to "unknowns". Prefer five claims you can prove to twenty you cannot. Do not describe what the module does line by line.
+Produce the result document when the module is covered.`,
+  capabilities: [...READ_REPO],
+  requires: { tools: true, structuredOutput: "json" },
+  output: { type: "module-map", schema: ModuleMapResult, outcomes: ["ok"] },
+  limits: { maxToolCalls: 60, maxModelCalls: 80, checkpointEvery: 5 },
+};
+
 export const BUILTIN_AGENTS: readonly AgentDefinition[] = [
   RESEARCH_AGENT,
   REQUIREMENTS_AGENT,
@@ -280,4 +303,5 @@ export const BUILTIN_AGENTS: readonly AgentDefinition[] = [
   DOCS_AGENT,
   TELEMETRY_AGENT,
   RELEASE_NOTES_AGENT,
+  ONBOARD_MAPPER_AGENT,
 ];

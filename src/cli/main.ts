@@ -139,10 +139,22 @@ export function buildProgram(options: RunOptions = {}): Command {
     .option("--dry-run", "show what would be written, write nothing", false)
     .option("--refresh", "regenerate files that still carry the generated marker", false)
     .option("--apply-config", "fill an empty tools.local in .jarvis/project.yaml", false)
+    .option(
+      "--module <path>",
+      "agent mode: map one module with the onboard-mapper agent; the result waits as a knowledge candidate",
+    )
     .option("--no-graph", "skip the project graph (module dependencies)")
-    .action(async (opts: { dryRun: boolean; refresh: boolean; applyConfig: boolean; graph: boolean }) => {
-      await runOnboard(ctxFor(), opts);
-    });
+    .action(
+      async (opts: {
+        dryRun: boolean;
+        refresh: boolean;
+        applyConfig: boolean;
+        graph: boolean;
+        module?: string;
+      }) => {
+        await runOnboard(ctxFor(), opts);
+      },
+    );
   program
     .command("explain <target>")
     .description(

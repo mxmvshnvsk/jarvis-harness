@@ -97,7 +97,8 @@ agents: [research, specification]
 Для существующего репозитория `jarvis onboard` собирает факты (модули и их зависимости из графа,
 документация, тесты, стиль коммитов) и пишет `architecture.md` и `conventions.md` с front matter
 `tags: [architecture, generated]` / `[conventions, generated]` и маркером регенерации. Это заготовки только с
-проверяемыми фактами; смысл модулей и правила добавляет человек. Подробности —
+проверяемыми фактами; смысл модулей и правила добавляет человек или `jarvis onboard --module <path>`: агент
+описывает один модуль с evidence, проверка сверяет цитаты с кодом, результат — кандидат со `paths` на `promote`. Подробности —
 [cli.md](cli.md#jarvis-onboard---dry-run---refresh---apply-config---no-graph).
 
 ## Пакет контекста (EngineeringContextPackage)

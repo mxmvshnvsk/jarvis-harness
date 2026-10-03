@@ -112,6 +112,7 @@ interface CandidateDoc {
   rationale: string;
   evidence?: string[];
   proposal?: string;
+  paths?: string[];
   from?: string;
   status?: string;
 }
@@ -218,8 +219,14 @@ export async function runCandidatesPromote(
       writeIfAbsent(ctx, file, `---\n${front}---\n${doc.proposal ?? doc.rationale}\n`);
     } else if (doc.kind === "knowledge") {
       file = join(root, ".jarvis", "knowledge", `${id}.md`);
-      const front = stringify({ tags: [], source: `${artifact.artifactId}@${artifact.version}` });
-      writeIfAbsent(ctx, file, `---\n${front}---\n# ${doc.title}\n\n${doc.proposal ?? doc.rationale}\n`);
+      const source = `${artifact.artifactId}@${artifact.version}`;
+      if (doc.proposal?.startsWith("---\n")) {
+        // a ready document (agent-mapped module): keep its front matter, record where it came from
+        writeIfAbsent(ctx, file, doc.proposal.replace(/^---\n/, `---\nsource: ${source}\n`));
+      } else {
+        const front = stringify({ tags: [], ...(doc.paths ? { paths: doc.paths } : {}), source });
+        writeIfAbsent(ctx, file, `---\n${front}---\n# ${doc.title}\n\n${doc.proposal ?? doc.rationale}\n`);
+      }
     } else {
       file = join(root, ".jarvis", "skills", id, "IMPROVEMENT.md");
       writeIfAbsent(ctx, file, `# ${doc.title}\n\n${doc.rationale}\n\n${doc.proposal ?? ""}\n`);

@@ -3,13 +3,14 @@ import { join } from "node:path";
 import { createRuntime } from "../../app/runtime.ts";
 import type { GraphEdge } from "../../core/capabilities/contracts.ts";
 import { repoIdOf, updateGraph } from "../../knowledge/graph/update.ts";
+import { mapModule, taskFor } from "../../onboarding/deep.ts";
 import {
   applyCommands,
   ONBOARD_MARKER,
   renderArchitecture,
   renderConventions,
 } from "../../onboarding/render.ts";
-import { scanProject } from "../../onboarding/scan.ts";
+import { type ScanReport, scanProject } from "../../onboarding/scan.ts";
 import { git } from "../../tools/local/exec.ts";
 import type { CliContext } from "../context.ts";
 import { CliExit, EXIT } from "../output.ts";
@@ -25,6 +26,8 @@ export interface OnboardOptions {
   readonly refresh?: boolean;
   readonly applyConfig?: boolean;
   readonly graph?: boolean;
+  /** Agent mode (prototype): map this one module with the onboard-mapper agent. */
+  readonly module?: string;
 }
 
 type FileAction = "created" | "refreshed" | "kept (edited by a human)" | "would create" | "would refresh";
@@ -66,6 +69,11 @@ export async function runOnboard(ctx: CliContext, options: OnboardOptions): Prom
   } else graphReason = "skipped (--no-graph)";
 
   const report = await scanProject({ root, graph, ...(graphReason ? { graphReason } : {}) });
+
+  if (options.module !== undefined) {
+    await runModuleMap(ctx, loaded, root, report, options);
+    return;
+  }
 
   const knowledgeDir = join(root, ".jarvis", "knowledge");
   const files: Array<{ path: string; action: FileAction }> = [];
@@ -136,4 +144,53 @@ export async function runOnboard(ctx: CliContext, options: OnboardOptions): Prom
       "next: describe in architecture.md what each module is for, add glossary.md and standards (see .jarvis/*/README.md)",
     );
   });
+}
+
+/** `jarvis onboard --module <path>`: the agent maps one module; the result waits as a knowledge candidate. */
+async function runModuleMap(
+  ctx: CliContext,
+  loaded: Awaited<ReturnType<typeof loadForCli>>,
+  root: string,
+  report: ScanReport,
+  options: OnboardOptions,
+): Promise<void> {
+  const module = (options.module ?? "").replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/+$/, "");
+  const facts = report.modules.find((m) => m.path === module);
+  if (!facts) {
+    const known = report.modules
+      .filter((m) => m.role === "source")
+      .slice(0, 12)
+      .map((m) => m.path);
+    ctx.out.error(
+      `"${module}" is not a module of this repository${known.length > 0 ? `; modules: ${known.join(", ")}` : ""}`,
+    );
+    throw new CliExit(EXIT.error);
+  }
+  if (options.dryRun) {
+    ctx.out.result({ module, task: taskFor(module, facts), facts, wouldRun: "onboard-module" }, () => {
+      ctx.out.line(`would run the onboard-mapper agent on ${module}:`);
+      ctx.out.line(taskFor(module, facts));
+    });
+    return;
+  }
+  const runtime = createRuntime(loaded, { env: ctx.env });
+  try {
+    const result = await mapModule(runtime, { root, module, facts, env: ctx.env });
+    ctx.out.result(result, () => {
+      ctx.out.line(`run ${result.runId || "-"}: ${result.state}`);
+      ctx.out.line(`claims confirmed against the code: ${result.claims.kept} of ${result.claims.proposed}`);
+      for (const d of result.dropped) ctx.out.line(`  dropped ${d.section} "${d.what}": ${d.why}`);
+      if (result.problem) ctx.out.line(result.problem);
+      if (result.candidateId) {
+        ctx.out.line();
+        ctx.out.line(`candidate ${result.candidateId} (knowledge, paths: ${module}/**)`);
+        ctx.out.line(
+          `review: jarvis candidates list; accept: jarvis candidates promote ${result.candidateId} --id module-${module.replace(/[^\w-]+/g, "-")}`,
+        );
+      }
+    });
+    if (result.problem && !result.candidateId) throw new CliExit(EXIT.error);
+  } finally {
+    await runtime.close();
+  }
 }
