@@ -1,3 +1,4 @@
+import { CapabilityRegistry } from "../../capabilities/registry.ts";
 import { changedFiles, checkStandards } from "../../knowledge/check.ts";
 import { loadStandards } from "../../knowledge/standards.ts";
 import type { DeterministicTool } from "../executors.ts";
@@ -25,6 +26,44 @@ export const BUILTIN_TOOLS: Record<string, DeterministicTool> = {
       stepId: ctx.step.id,
       iteration: ctx.iteration,
     });
+    return { status: "success", outputs: [`${artifact.artifactId}@${artifact.version}`] };
+  },
+
+  /** ADR-0021 §3: stack detection and the capability level, recorded before any agent runs. */
+  "project.discover": async (ctx) => {
+    const registry = ctx.runtime.capabilities ?? new CapabilityRegistry();
+    const caps = await registry.discover(ctx.runtime.loaded.config, ctx.workspace.ref.path);
+    const artifact = ctx.runtime.artifacts.put({
+      runId: ctx.run.id,
+      type: "project-capabilities",
+      name: "project-capabilities.json",
+      content: JSON.stringify(caps, null, 2),
+      mediaType: "application/json",
+      provenance: { kind: "tool", capability: "project.discover" },
+      stepId: ctx.step.id,
+      iteration: ctx.iteration,
+    });
+    ctx.runtime.events.emit({
+      kind: "stack_detected",
+      runId: ctx.run.id,
+      stepId: ctx.step.id,
+      payload: { stacks: caps.stacks, level: caps.level, adapters: caps.adapters.map((a) => a.id) },
+    });
+    if (caps.level === "UNSUPPORTED") {
+      return {
+        status: "failure",
+        reason: `policy: capability level UNSUPPORTED — ${caps.reasons.join("; ")}`,
+        outputs: [`${artifact.artifactId}@${artifact.version}`],
+      };
+    }
+    if (caps.level === "BASIC") {
+      ctx.runtime.events.emit({
+        kind: "language_adapter_degraded",
+        runId: ctx.run.id,
+        stepId: ctx.step.id,
+        payload: { reasons: caps.reasons },
+      });
+    }
     return { status: "success", outputs: [`${artifact.artifactId}@${artifact.version}`] };
   },
 

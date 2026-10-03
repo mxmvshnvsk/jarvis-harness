@@ -6,8 +6,13 @@ export const SDD_WORKFLOW = `
 name: sdd
 version: 1
 description: Specification-driven development (ADR-0001 §5, ADR-0004 §6)
-entry: research
+entry: discover
 steps:
+  - id: discover
+    kind: deterministic
+    tool: project.discover
+    outputs: [project-capabilities]
+    transitions: { onSuccess: research }
   - id: research
     kind: agentic
     agent: research

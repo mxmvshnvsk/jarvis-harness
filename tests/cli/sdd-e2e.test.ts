@@ -233,6 +233,7 @@ describe("sdd end to end", () => {
     expect(done.interactions).toEqual([]);
     expect(done.run.iterations).toEqual({ "review->implementation#fix_required": 1 });
     expect(done.steps.map((s) => s.stepId)).toEqual([
+      "discover",
       "research",
       "requirements",
       "spec",
@@ -278,6 +279,8 @@ describe("sdd end to end", () => {
       expect(status.out).toContain(t);
     }
     expect(status.out).toMatch(/spec\/spec\.json@1.*approved/);
+    expect(status.out).toContain("level BASIC");
+    expect(status.out).toContain("project-capabilities/project-capabilities.json@1");
 
     const apply = await jarvis(["apply", runId]);
     expect(apply.code).toBe(0);

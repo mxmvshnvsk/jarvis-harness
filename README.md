@@ -147,6 +147,16 @@ Stage 11 (part) — CI mode and run transfer (ADR-0009):
 - `jarvis approve --commit` writes `.jarvis/approvals/<task>/<type>.json` and commits it, so a
   later CI run with `humanGate: skip-if-approved` passes that gate for the same content
 
+Stage 13 (phase 1) — capability layer (ADR-0021 §2–3, §7):
+
+- Stack-neutral contracts in `src/core/capabilities/contracts.ts` (`LanguageAdapter`,
+  `CodeIntelligence`, `DiagnosticsProvider`, `ProjectGraphExtractor`, neutral symbol/graph types)
+- `CapabilityRegistry.discover` → the `project-capabilities` artifact written by the `discover`
+  step that now opens `sdd`: configured vs detected stacks, adapters, effective commands, where
+  each capability comes from (project / adapter / missing) and the level FULL / BASIC /
+  UNSUPPORTED with reasons; `status` shows the level; UNSUPPORTED stops the run with a policy
+  reason. No adapter ships yet (TS on ts-morph is next), so every project runs at BASIC.
+
 Configuration precedence: CLI flags → `JARVIS_*` env → `.jarvis/project.yaml` → `~/.jarvis/config.yaml`
 → defaults; profiles (`--profile ci`) may only narrow. Secrets are references (`env:VAR`,
 `keychain:ID`), never literals.

@@ -119,6 +119,12 @@ export function renderDetail(ctx: CliContext, d: RunDetail, now: Date, eventLimi
     `  state      ${r.state}${r.stateReason ? ` — ${r.stateReason}` : ""}${r.cancelRequested ? "  (cancel requested)" : ""}`,
   );
   out.line(`  step       ${r.currentStep ? `${r.currentStep} #${r.currentIteration}` : "-"}`);
+  const capsArtifact = d.artifacts.find((a) => a.type === "project-capabilities");
+  if (capsArtifact && d.capabilities) {
+    out.line(
+      `  stack      ${d.capabilities.stacks.join(", ") || "-"}    level ${d.capabilities.level}${d.capabilities.adapters.length > 0 ? `    adapters ${d.capabilities.adapters.map((a) => a.id).join(", ")}` : ""}`,
+    );
+  }
   if (r.waitingFor) {
     const w = r.waitingFor;
     const hint =

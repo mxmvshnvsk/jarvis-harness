@@ -3,6 +3,7 @@ import { BlobStore } from "../artifacts/blobs.ts";
 import { ArtifactStore } from "../artifacts/store.ts";
 import { BudgetManager } from "../budget/admission.ts";
 import { SqliteUsageStore } from "../budget/usage.ts";
+import { CapabilityRegistry } from "../capabilities/registry.ts";
 import type { LoadedConfig } from "../core/config/load.ts";
 import { CompositeSecretResolver, EnvSecretResolver } from "../core/config/secrets.ts";
 import { InteractionStore } from "../interaction/store.ts";
@@ -50,6 +51,8 @@ export interface Runtime {
   readonly registry: ToolRegistry;
   readonly tools: ToolRouter;
   readonly keychain: Keychain;
+  /** Language adapters (ADR-0021); empty until an adapter pack registers. */
+  readonly capabilities: CapabilityRegistry;
   readonly secrets: CompositeSecretResolver;
   readonly mcp: { readonly pool: McpPool; readonly provider: McpToolProvider };
   readonly env: NodeJS.ProcessEnv;
@@ -134,6 +137,7 @@ export function createRuntime(loaded: LoadedConfig, options: RuntimeOptions = {}
     pathPolicy,
     registry,
     keychain,
+    capabilities: new CapabilityRegistry(),
     secrets,
     mcp: { pool, provider: mcpProvider },
     env,

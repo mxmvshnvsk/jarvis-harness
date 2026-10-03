@@ -1,5 +1,6 @@
 import type { Approval } from "../artifacts/store.ts";
 import type { WindowUsage } from "../budget/usage.ts";
+import type { ProjectCapabilities } from "../capabilities/registry.ts";
 import type { QuotaPool } from "../core/config/schema.ts";
 import type { ArtifactVersion } from "../core/domain/artifact.ts";
 import type { Run } from "../core/domain/run.ts";
@@ -48,6 +49,8 @@ export interface RunDetail {
   readonly leaseLive: boolean;
   /** Open human interactions (ADR-0019 §2). */
   readonly interactions: readonly Interaction[];
+  /** ADR-0021 §7: the capability level the run works at. */
+  readonly capabilities?: ProjectCapabilities;
 }
 
 /** Artifact types that pass through a human gate and therefore may be awaiting approval. */
@@ -82,6 +85,19 @@ export function runsOverview(
     }),
     pools: poolStatuses(runtime),
   };
+}
+
+function capabilitiesOf(
+  runtime: Runtime,
+  latest: readonly ArtifactVersion[],
+): { capabilities?: ProjectCapabilities } {
+  const a = latest.find((x) => x.type === "project-capabilities");
+  if (!a) return {};
+  try {
+    return { capabilities: JSON.parse(runtime.artifacts.text(a)) as ProjectCapabilities };
+  } catch {
+    return {};
+  }
 }
 
 export function runDetail(runtime: Runtime, run: Run, now: Date = new Date()): RunDetail {
@@ -122,6 +138,7 @@ export function runDetail(runtime: Runtime, run: Run, now: Date = new Date()): R
     approvals,
     effects: { counts, recent: allEffects.slice(-5) },
     interactions: runtime.interactions.listForRun(run.id, { openOnly: true }),
+    ...capabilitiesOf(runtime, latest),
     events: events.slice(-15),
     tokens,
     leaseLive: run.lease !== undefined && Date.parse(run.lease.until) >= now.getTime(),

@@ -277,6 +277,7 @@ describe("clarification threads", () => {
       expect.arrayContaining(["clarification", "requirements", "spec"]),
     );
     expect(after.steps.map((s) => `${s.stepId}:${s.status}`)).toEqual([
+      "discover:success",
       "research:success",
       "requirements:suspended",
       "requirements:success",
