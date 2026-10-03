@@ -13,7 +13,7 @@ beforeEach(async () => {
   server = await startFakeOpenAi();
 });
 afterEach(async () => {
-  rt?.close();
+  await rt?.close();
   await server.close();
   sb.cleanup();
 });

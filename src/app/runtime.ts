@@ -4,11 +4,14 @@ import { ArtifactStore } from "../artifacts/store.ts";
 import { BudgetManager } from "../budget/admission.ts";
 import { SqliteUsageStore } from "../budget/usage.ts";
 import type { LoadedConfig } from "../core/config/load.ts";
-import { EnvSecretResolver } from "../core/config/secrets.ts";
+import { CompositeSecretResolver, EnvSecretResolver } from "../core/config/secrets.ts";
+import { McpPool, ToolsCache } from "../mcp/client/pool.ts";
+import { McpToolProvider } from "../mcp/provider.ts";
 import { type CassetteMode, FileCassetteStore } from "../models/cassette.ts";
 import { ModelGateway } from "../models/gateway.ts";
 import { ProbeStore } from "../models/probe.ts";
 import { FileCalibrationStore, TokenEstimator } from "../models/tokens.ts";
+import { Keychain, KeychainSecretResolver } from "../security/credentials/keychain.ts";
 import {
   compilePatterns,
   DEFAULT_DENIED_PATHS,
@@ -44,8 +47,24 @@ export interface Runtime {
   readonly pathPolicy: PathPolicy;
   readonly registry: ToolRegistry;
   readonly tools: ToolRouter;
+  readonly keychain: Keychain;
+  readonly secrets: CompositeSecretResolver;
+  readonly mcp: { readonly pool: McpPool; readonly provider: McpToolProvider };
   readonly env: NodeJS.ProcessEnv;
-  close(): void;
+  close(): Promise<void>;
+}
+
+/** Keychain namespace (ADR-0006 §4) without the async git lookup: env → config → "default". */
+export function keychainActor(loaded: LoadedConfig, env: NodeJS.ProcessEnv): string {
+  return env.JARVIS_ACTOR ?? loaded.config.actor.id ?? "default";
+}
+
+export function createKeychain(loaded: LoadedConfig, env: NodeJS.ProcessEnv): Keychain {
+  return new Keychain({
+    actorId: keychainActor(loaded, env),
+    file: join(loaded.home.root, "credentials.json"),
+    backend: env.JARVIS_KEYCHAIN_BACKEND,
+  });
 }
 
 export interface RuntimeOptions {
@@ -60,9 +79,20 @@ export function createRuntime(loaded: LoadedConfig, options: RuntimeOptions = {}
   const usage = new SqliteUsageStore(db.db);
   const budget = new BudgetManager(usage, loaded.config.quotaPools);
   const estimator = new TokenEstimator(new FileCalibrationStore(join(loaded.home.cacheDir, "models")));
+  const security = loaded.config.security;
+  const redactor = new Redactor({
+    literals: secretLiteralsFromEnv(env, security.secretEnv),
+    patterns: compilePatterns(security.secretPatterns),
+  });
+  const keychain = createKeychain(loaded, env);
+  // Values pulled from the keychain join the Redactor's literal set the moment they are read (ADR-0010 §2).
+  const secrets = new CompositeSecretResolver([
+    new EnvSecretResolver(env),
+    new KeychainSecretResolver(keychain, (value) => redactor.addLiterals([value])),
+  ]);
   const gateway = new ModelGateway({
     config: loaded.config,
-    secrets: new EnvSecretResolver(env),
+    secrets,
     usage,
     events,
     budget,
@@ -72,14 +102,17 @@ export function createRuntime(loaded: LoadedConfig, options: RuntimeOptions = {}
       : {}),
   });
   const blobs = new BlobStore(db.db, join(loaded.home.artifactsDir, "blobs"));
-  const security = loaded.config.security;
-  const redactor = new Redactor({
-    literals: secretLiteralsFromEnv(env, security.secretEnv),
-    patterns: compilePatterns(security.secretPatterns),
-  });
   const pathPolicy = new PathPolicy([...DEFAULT_DENIED_PATHS, ...security.deniedPaths]);
   const registry = new ToolRegistry();
   registry.register(new LocalToolProvider(loaded.config));
+  const pool = new McpPool({
+    servers: loaded.config.mcp.servers,
+    secrets,
+    cache: new ToolsCache(join(loaded.home.cacheDir, "mcp")),
+    env,
+  });
+  const mcpProvider = new McpToolProvider(loaded.config, pool);
+  registry.register(mcpProvider);
   const partial = {
     loaded,
     db,
@@ -97,8 +130,14 @@ export function createRuntime(loaded: LoadedConfig, options: RuntimeOptions = {}
     redactor,
     pathPolicy,
     registry,
+    keychain,
+    secrets,
+    mcp: { pool, provider: mcpProvider },
     env,
-    close: () => db.close(),
+    close: async () => {
+      await pool.close();
+      db.close();
+    },
   };
   const runtime: Runtime = { ...partial, tools: undefined as unknown as ToolRouter };
   const tools = new ToolRouter({ runtime, registry, redactor, pathPolicy });

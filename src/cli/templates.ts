@@ -52,10 +52,20 @@ mcp:
   #   transport: http
   #   url: https://mcp.corp.local/atlassian
   #   auth: { type: bearer, token: keychain:atlassian }
-  #   network: intranet        # none | intranet | internet (ADR-0016)
-  #   profile: atlassian
-  #   allow: [jira.get, jira.search, jira.comment]
+  #   network: intranet        # none | intranet | internet (ADR-0016); defaults to the profile's
+  #   profile: atlassian       # built-in: atlassian, bitbucket; or { base: atlassian, map: { … } }
+  #   allow: [jira.get, jira.search, jira.comment]   # empty = every profile capability
   #   deny: [jira.transition]
+  # elastic:                   # no profile: tools appear as mcp.elastic.<tool>
+  #   transport: http
+  #   url: https://mcp.corp.local/elastic
+  #   readOnly: true           # all tools pure; otherwise each is an unverifiable effect
+  # bitbucket:
+  #   transport: stdio
+  #   command: node
+  #   args: [/opt/mcp/bitbucket/index.js]
+  #   env: { BB_TOKEN: keychain:bitbucket }   # stored with: jarvis auth set bitbucket
+  #   profile: bitbucket
 
 tools:
   local: {}

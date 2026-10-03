@@ -6,6 +6,7 @@ import { runEffect } from "../orchestration/effects.ts";
 import type { HeldLease } from "../orchestration/lease.ts";
 import { networkAllowed } from "../security/policy/egress.ts";
 import type { PathPolicy, Redactor } from "../security/redactor.ts";
+import { effectMarker } from "../storage/effects.ts";
 import { matchesAny, type ToolRegistry } from "./registry.ts";
 import {
   type Capability,
@@ -73,7 +74,9 @@ export class ToolRouter {
         reason: `network "${capability.network}" is not allowed for dataClass "${config.dataClass}" (ADR-0016)`,
       };
     }
-    if (capability.access !== "read" && !effectiveAllowWrites(config)) {
+    // allowWrites guards the workspace (ADR-0003 §5); external effects are governed by allow/deny
+    // and profile `mcp.deny` (ADR-0009 §6, ADR-0017 §3).
+    if (capability.access !== "read" && capability.network === "none" && !effectiveAllowWrites(config)) {
       return {
         allowed: false,
         reason: `writes are disabled in this workspace mode/profile (workspace.allowWrites)`,
@@ -191,7 +194,11 @@ export class BoundTools {
           capability: name,
           args,
           seq: this.seq++,
-          execute: () => capability.handler(args, this.ctx),
+          execute: (record) =>
+            capability.handler(args, {
+              ...this.ctx,
+              effect: { key: record.key, marker: effectMarker(this.ctx.run.id, record.key) },
+            }),
           ...(capability.verify
             ? {
                 verify: (record) =>

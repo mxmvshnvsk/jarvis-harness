@@ -7,7 +7,7 @@ workflows, versioned project knowledge, context policies, resource governance, r
 > context policies + resource governance + tools + replaceable LLMs.
 
 Architecture and every decision live in [`docs/adr/`](docs/adr/). Start with ADR-0001 (target
-architecture); ADR-0002…0021 refine it.
+architecture); ADR-0002…0018 refine it.
 
 ## Status
 
@@ -82,6 +82,21 @@ Stage 5 + 7 — agents and the SDD workflow:
 - Built-in agents `research`, `specification`, `impact`, `plan`, `implementation`, `test`, `review`
   with JSON result artifacts; the built-in `sdd` workflow now runs end to end:
   research → spec → approval → impact → plan → implementation → verify → review with back edges
+
+Stage 6 — MCP and credentials (ADR-0017):
+
+- MCP client pool on the official TypeScript SDK (`stdio`, streamable `http`, legacy `sse`), lazy
+  connections, `tools/list` cached in `~/.jarvis/cache/mcp/<server>.json`
+- Profiles `atlassian` (Jira/Confluence) and `bitbucket` map server tools onto normalized
+  capabilities (`jira.get`, `jira.comment`, `bitbucket.pr.create`, …); effects carry a marker and
+  are verified through the same server after a resume (ADR-0002 §3). Servers without a profile
+  expose `mcp.<server>.<tool>` as unverifiable effects, or as pure reads with `readOnly: true`
+- `jarvis mcp list [--refresh]` — discovered / exposed / denied / unmapped / "discovered, not allowed"
+- `jarvis auth set|status|remove` — credentials in the OS keychain (macOS Keychain, libsecret; a
+  0600 file as the fallback) under the actor; values go only into transports and are redacted from
+  every tool output
+- `jarvis work` preflight: every server the workflow's agents may reach must answer `tools/list`
+  before a run is created; `jarvis doctor` reports credentials, discovery state and unknown profiles
 
 Configuration precedence: CLI flags → `JARVIS_*` env → `.jarvis/project.yaml` → `~/.jarvis/config.yaml`
 → defaults; profiles (`--profile ci`) may only narrow. Secrets are references (`env:VAR`,

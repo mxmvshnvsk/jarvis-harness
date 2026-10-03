@@ -105,7 +105,8 @@ const McpProfileSchema = z.union([
 ]);
 
 const McpServerCommonShape = {
-  network: NetworkSchema.default("internet"),
+  /** Defaults to the profile's network, else `internet` (ADR-0017 §4). */
+  network: NetworkSchema.optional(),
   profile: McpProfileSchema.optional(),
   allow: z.array(z.string().min(1)).default([]),
   deny: z.array(z.string().min(1)).default([]),

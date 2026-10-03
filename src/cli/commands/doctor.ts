@@ -1,8 +1,12 @@
 import { accessSync, constants, existsSync, readdirSync } from "node:fs";
 import { basename, delimiter, dirname, isAbsolute, join } from "node:path";
+import { createKeychain } from "../../app/runtime.ts";
 import { resolveActor } from "../../core/actor/resolve.ts";
 import { ConfigError, isSecretRef, type LoadedConfig, parseSecretRef } from "../../core/config/index.ts";
+import { EnvSecretResolver } from "../../core/config/secrets.ts";
 import { jarvisHome } from "../../core/paths.ts";
+import { McpPool, ToolsCache } from "../../mcp/client/pool.ts";
+import { McpToolProvider, type ServerReport } from "../../mcp/provider.ts";
 import { ProbeStore, probeDrift, probeIsStale } from "../../models/probe.ts";
 import { evaluateEgress, formatEgressLine } from "../../security/policy/egress.ts";
 import { LATEST_SCHEMA_VERSION, openDatabase, SchemaTooNewError } from "../../storage/index.ts";
@@ -141,6 +145,7 @@ export async function runDoctor(ctx: CliContext): Promise<DoctorReport> {
       ),
     );
 
+    const keychain = createKeychain(loaded, ctx.env);
     const actor = await resolveActor(loaded.config, ctx.env, loaded.project?.root);
     checks.push(
       actor.actor
@@ -169,16 +174,71 @@ export async function runDoctor(ctx: CliContext): Promise<DoctorReport> {
               ),
         );
       } else {
+        const present = (await keychain.get(parsed.name)) !== undefined;
         checks.push(
-          check(
-            `secret:${ref.value}`,
-            "warn",
-            "secret",
-            `${ref.path} → ${ref.value}: keychain backend is not available yet`,
-            "use env:VAR until `jarvis auth` ships (ADR-0017 §5)",
-          ),
+          present
+            ? check(
+                `secret:${ref.value}`,
+                "ok",
+                "secret",
+                `${ref.path} → ${ref.value} is set (${keychain.backend.kind})`,
+              )
+            : check(
+                `secret:${ref.value}`,
+                "warn",
+                "secret",
+                `${ref.path} → ${ref.value} is not in the keychain (${keychain.backend.kind})`,
+                `run \`jarvis auth set ${parsed.name}\` (ADR-0017 §5)`,
+              ),
         );
       }
+    }
+    if (keychain.backend.kind === "file") {
+      checks.push(
+        check(
+          "keychain",
+          Object.keys(loaded.config.mcp.servers).length > 0 || collectSecretRefs(loaded).length > 0
+            ? "warn"
+            : "ok",
+          "keychain",
+          `file backend (${join(home.root, "credentials.json")}, mode 0600) — no OS keychain found`,
+          "install libsecret (`secret-tool`) or use macOS Keychain for keychain: references",
+        ),
+      );
+    }
+
+    for (const report of mcpReports(loaded, ctx.env)) {
+      if (report.error) {
+        checks.push(check(`mcp:${report.id}`, "fail", "mcp", `${report.id}: ${report.error}`));
+        continue;
+      }
+      const parts = [`${report.transport}`, `network ${report.network}`];
+      if (report.profile) parts.push(`profile ${report.profile}`);
+      parts.push(
+        report.discovered
+          ? `discovered ${report.discovered.at.slice(0, 10)} (${report.discovered.count} tools)`
+          : "never discovered",
+      );
+      parts.push(`${report.exposed.length} exposed`);
+      const hints: string[] = [];
+      if (report.unmapped.length > 0) hints.push(`unmapped: ${report.unmapped.join(", ")}`);
+      if (report.notAllowed.length > 0)
+        hints.push(`discovered, not allowed: ${report.notAllowed.join(", ")}`);
+      const status =
+        (!report.profile && !report.discovered) || report.unmapped.length > 0 || report.notAllowed.length > 0
+          ? "warn"
+          : "ok";
+      checks.push(
+        check(
+          `mcp:${report.id}`,
+          status,
+          "mcp",
+          `${report.id}: ${parts.join(", ")}${hints.length > 0 ? ` — ${hints.join("; ")}` : ""}`,
+          status === "warn"
+            ? "run `jarvis mcp list --refresh` and adjust allow/deny (ADR-0017 §6)"
+            : undefined,
+        ),
+      );
     }
 
     checks.push(
@@ -287,6 +347,16 @@ export async function runDoctor(ctx: CliContext): Promise<DoctorReport> {
 
   checks.push(...databaseChecks(home.dbFile));
   return { checks, ok: !checks.some((c) => c.status === "fail") };
+}
+
+function mcpReports(loaded: LoadedConfig, env: NodeJS.ProcessEnv): ServerReport[] {
+  const pool = new McpPool({
+    servers: loaded.config.mcp.servers,
+    secrets: new EnvSecretResolver(env),
+    cache: new ToolsCache(join(loaded.home.cacheDir, "mcp")),
+    env,
+  });
+  return new McpToolProvider(loaded.config, pool).reports();
 }
 
 function databaseChecks(dbFile: string): Check[] {

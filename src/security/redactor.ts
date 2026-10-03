@@ -69,17 +69,26 @@ function looksLikeIdentifier(s: string): boolean {
 }
 
 export class Redactor {
-  private readonly literals: string[];
+  private literals: string[];
+  private readonly minLiteralLength: number;
   private readonly patterns: readonly RedactionPattern[];
   private readonly salt: string;
 
   constructor(options: RedactorOptions = {}) {
     const min = options.minLiteralLength ?? 8;
+    this.minLiteralLength = min;
     this.literals = [...new Set([...(options.literals ?? [])])]
       .filter((v) => v.length >= min)
       .sort((a, b) => b.length - a.length);
     this.patterns = options.patterns ?? DEFAULT_PATTERNS;
     this.salt = options.salt ?? randomBytes(8).toString("hex");
+  }
+
+  /** Secrets resolved after construction (keychain values, ADR-0010 §2) join the literal set. */
+  addLiterals(values: Iterable<string>): void {
+    this.literals = [...new Set([...this.literals, ...values])]
+      .filter((v) => v.length >= this.minLiteralLength)
+      .sort((a, b) => b.length - a.length);
   }
 
   placeholder(type: string, value: string): string {

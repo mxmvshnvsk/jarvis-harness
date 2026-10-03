@@ -14,7 +14,13 @@ import { ResolvedConfigSchema } from "./schema.ts";
 export const ENV_PREFIX = "JARVIS_";
 
 /** Variables with a meaning of their own, not configuration paths. */
-export const RESERVED_ENV = new Set(["JARVIS_HOME", "JARVIS_PROFILE", "JARVIS_ACTOR", "JARVIS_CONFIG"]);
+export const RESERVED_ENV = new Set([
+  "JARVIS_HOME",
+  "JARVIS_PROFILE",
+  "JARVIS_ACTOR",
+  "JARVIS_CONFIG",
+  "JARVIS_KEYCHAIN_BACKEND",
+]);
 
 function normalizeKey(key: string): string {
   return key.toLowerCase().replace(/[_-]/g, "");

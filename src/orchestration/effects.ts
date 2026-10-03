@@ -16,7 +16,8 @@ export interface EffectExecution<T> {
   readonly capability: string;
   readonly args: unknown;
   readonly seq: number;
-  readonly execute: () => Promise<T>;
+  /** Receives the journal record so providers can embed its key as a marker (ADR-0002 §3). */
+  readonly execute: (record: EffectRecord) => Promise<T>;
   /** Provider-side check by marker (ADR-0002 §3). `undefined` = cannot tell. */
   readonly verify?: (record: EffectRecord) => Promise<T | undefined | "not-found">;
 }
@@ -90,7 +91,7 @@ export async function runEffect<T>(
   const record = begun.record;
   lease.check();
   try {
-    const result = await execution.execute();
+    const result = await execution.execute(record);
     const done = journal.complete(record.id, result);
     events.emit({
       kind: "effect.done",

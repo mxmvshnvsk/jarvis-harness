@@ -31,6 +31,18 @@ export class ToolRegistry {
     }
   }
 
+  /** Drops every capability of a provider (used when MCP discovery refreshes). */
+  unregister(providerName: string): void {
+    for (const [name, entry] of this.capabilities) {
+      if (entry.provider === providerName) this.capabilities.delete(name);
+    }
+  }
+
+  replace(provider: ToolProvider): void {
+    this.unregister(provider.name);
+    this.register(provider);
+  }
+
   get(name: string): Capability | undefined {
     return this.capabilities.get(name)?.capability;
   }

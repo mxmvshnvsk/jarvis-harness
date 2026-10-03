@@ -1,10 +1,12 @@
 import { Command } from "commander";
 import { ConfigError } from "../core/config/errors.ts";
 import { packageInfo } from "../version.ts";
+import { runAuthRemove, runAuthSet, runAuthStatus } from "./commands/auth.ts";
 import { runConfigShow } from "./commands/config.ts";
 import { runDbBackup, runDbMigrate, runDbStatus } from "./commands/db.ts";
 import { renderDoctor, runDoctor } from "./commands/doctor.ts";
 import { renderInit, runInit } from "./commands/init.ts";
+import { runMcpList } from "./commands/mcp.ts";
 import { runModelsList, runModelsProbe } from "./commands/models.ts";
 import { runApply, runApprove, runDaemon, runDiff, runGc, runResume, runWork } from "./commands/run.ts";
 import { runCancel, runStatus } from "./commands/status.ts";
@@ -13,6 +15,7 @@ import { CliExit, createOutput, EXIT } from "./output.ts";
 
 export interface RunOptions {
   readonly streams?: { out: NodeJS.WritableStream; err: NodeJS.WritableStream };
+  readonly stdin?: NodeJS.ReadableStream;
   readonly context?: Partial<CliContext>;
 }
 
@@ -195,6 +198,35 @@ export function buildProgram(options: RunOptions = {}): Command {
     .description("send canary requests and record what the model supports")
     .action(async (modelId: string) => {
       await runModelsProbe(ctxFor(), modelId);
+    });
+
+  const mcp = program.command("mcp").description("MCP servers and their normalized capabilities (ADR-0017)");
+  mcp
+    .command("list")
+    .description("servers, discovery state, exposed and denied capabilities")
+    .option("--refresh", "connect to every server and refresh the tools cache", false)
+    .action(async (opts: { refresh: boolean }) => {
+      await runMcpList(ctxFor(), opts);
+    });
+
+  const auth = program.command("auth").description("credentials in the OS keychain (ADR-0017 §5)");
+  auth
+    .command("set <id>")
+    .description("store a credential for keychain:<id> (prompted without echo, or piped on stdin)")
+    .action(async (id: string) => {
+      await runAuthSet(ctxFor(), id, options.stdin ?? process.stdin);
+    });
+  auth
+    .command("status")
+    .description("which referenced credentials are set (values are never shown)")
+    .action(async () => {
+      await runAuthStatus(ctxFor());
+    });
+  auth
+    .command("remove <id>")
+    .description("delete a credential")
+    .action(async (id: string) => {
+      await runAuthRemove(ctxFor(), id);
     });
 
   const db = program.command("db").description("local database");

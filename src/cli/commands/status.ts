@@ -51,7 +51,7 @@ export async function runStatus(
     }
     render();
   } finally {
-    runtime.close();
+    await runtime.close();
   }
 }
 
@@ -224,6 +224,6 @@ export async function runCancel(ctx: CliContext, runRef: string): Promise<void> 
       );
     });
   } finally {
-    runtime.close();
+    await runtime.close();
   }
 }

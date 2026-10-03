@@ -14,8 +14,8 @@ beforeEach(async () => {
   sb.write("project/.jarvis/project.yaml", "version: 1\n");
   rt = await testRuntime(sb);
 });
-afterEach(() => {
-  rt.close();
+afterEach(async () => {
+  await rt.close();
   sb.cleanup();
 });
 

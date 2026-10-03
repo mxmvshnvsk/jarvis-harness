@@ -80,9 +80,9 @@ async function setup(
 beforeEach(() => {
   sb = sandbox();
 });
-afterEach(() => {
+afterEach(async () => {
   lease?.release();
-  rt?.close();
+  await rt?.close();
   sb.cleanup();
 });
 

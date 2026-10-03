@@ -1,4 +1,5 @@
 import type { DataClass, Egress, Network, ResolvedConfig } from "../../core/config/schema.ts";
+import { serverNetwork } from "../../mcp/provider.ts";
 
 /**
  * ADR-0016 §2 — the deterministic egress rule.
@@ -39,10 +40,11 @@ export function evaluateEgress(config: ResolvedConfig): EgressSummary {
       : { id, allowed, reason: `egress: ${model.egress} is not allowed for dataClass ${dataClass}` };
   });
   const servers = Object.entries(config.mcp.servers).map(([id, server]): EgressDecision => {
-    const allowed = networkAllowed(dataClass, server.network);
+    const network = serverNetwork(server);
+    const allowed = networkAllowed(dataClass, network);
     return allowed
       ? { id, allowed }
-      : { id, allowed, reason: `network: ${server.network} is not allowed for dataClass ${dataClass}` };
+      : { id, allowed, reason: `network: ${network} is not allowed for dataClass ${dataClass}` };
   });
   const exp = config.telemetry.export;
   const exportAllowed = !exp.enabled || networkAllowed(dataClass, exp.network);

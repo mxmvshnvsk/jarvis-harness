@@ -28,7 +28,8 @@ Method:
 - Separate facts you verified in files from assumptions. Anything you could not verify goes to "unknowns" — never invent.
 - Keep findings specific: a finding names a topic, what the code does, and the sources.
 Stop when further reading would not change the findings. Then produce the result document.`,
-  capabilities: READ_REPO,
+  // Jira/Confluence reads arrive through MCP profiles when the project configures them (ADR-0017 §4).
+  capabilities: [...READ_REPO, "jira.get", "jira.search", "confluence.get", "confluence.search"],
   requires: { tools: true, structuredOutput: "json" },
   output: { type: "research", schema: ResearchResult, outcomes: ["ok"] },
   limits: DEFAULT_LIMITS,

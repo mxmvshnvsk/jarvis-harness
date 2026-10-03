@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { createEngine } from "../../app/engine.ts";
+import { preflightMcp } from "../../app/preflight.ts";
 import { createRuntime, type Runtime } from "../../app/runtime.ts";
 import { runDetail } from "../../app/status.ts";
 import { resolveActor } from "../../core/actor/resolve.ts";
@@ -77,8 +78,20 @@ export async function runWork(
   try {
     const engine = createEngine(runtime);
     const workflowName = options.workflow ?? "sdd";
-    engine.workflow(workflowName);
+    const workflow = engine.workflow(workflowName);
     const actor = await actorFor(ctx, runtime);
+    const preflight = await preflightMcp(runtime, workflow);
+    if (!preflight.ok) {
+      for (const s of preflight.servers.filter((x) => !x.ok)) {
+        ctx.out.error(
+          `mcp server "${s.id}" is required by workflow ${workflowName} but unavailable: ${s.error}`,
+        );
+      }
+      ctx.out.error(
+        "fix the servers above (`jarvis mcp list`, `jarvis auth status`) and retry (ADR-0017 §6)",
+      );
+      throw new CliExit(EXIT.error);
+    }
     const root = loaded.project?.root ?? ctx.cwd;
     const runId = newRunId();
     const useWorktree = loaded.config.workspace.mode === "worktree" && loaded.project?.isGitRepo === true;
@@ -139,7 +152,7 @@ export async function runWork(
     }
     await executeAndReport(ctx, runtime, engine, run, false);
   } finally {
-    runtime.close();
+    await runtime.close();
   }
 }
 
@@ -161,7 +174,7 @@ export async function runResume(ctx: CliContext, ref: string, options: { steal?:
     }
     await executeAndReport(ctx, runtime, engine, run, options.steal === true);
   } finally {
-    runtime.close();
+    await runtime.close();
   }
 }
 
@@ -215,7 +228,7 @@ export async function runApprove(ctx: CliContext, ref: string, options: ApproveO
     }
     ctx.out.result(approval, () => ctx.out.line(line));
   } finally {
-    runtime.close();
+    await runtime.close();
   }
 }
 
@@ -241,7 +254,7 @@ export async function runDaemon(
       await new Promise((resolve) => setTimeout(resolve, interval * 1000));
     }
   } finally {
-    runtime.close();
+    await runtime.close();
   }
 }
 
@@ -266,7 +279,7 @@ export async function runDiff(ctx: CliContext, ref: string): Promise<void> {
       );
     });
   } finally {
-    runtime.close();
+    await runtime.close();
   }
 }
 
@@ -308,7 +321,7 @@ export async function runApply(ctx: CliContext, ref: string, options: { message?
       throw error;
     }
   } finally {
-    runtime.close();
+    await runtime.close();
   }
 }
 
@@ -344,6 +357,6 @@ export async function runGc(
       ctx.out.line(`removed ${removed.length} worktree(s) older than ${days} day(s); kept ${kept.length}`);
     });
   } finally {
-    runtime.close();
+    await runtime.close();
   }
 }

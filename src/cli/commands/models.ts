@@ -124,7 +124,7 @@ export async function runModelsList(ctx: CliContext): Promise<void> {
       }
     });
   } finally {
-    runtime.close();
+    await runtime.close();
   }
 }
 
@@ -172,6 +172,6 @@ export async function runModelsProbe(ctx: CliContext, modelId: string): Promise<
       ctx.out.line(`saved: ${path}`);
     });
   } finally {
-    runtime.close();
+    await runtime.close();
   }
 }

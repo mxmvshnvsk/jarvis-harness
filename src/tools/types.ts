@@ -18,6 +18,8 @@ export interface ToolContext {
   readonly redactor: Redactor;
   readonly pathPolicy: PathPolicy;
   readonly env: NodeJS.ProcessEnv;
+  /** Present while an effect runs: its journal key and the marker to embed (ADR-0002 §3). */
+  readonly effect?: { readonly key: string; readonly marker: string };
 }
 
 export interface ToolOutput {
