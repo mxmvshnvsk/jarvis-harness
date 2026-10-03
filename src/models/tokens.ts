@@ -20,6 +20,9 @@ const FAMILY_CHARS_PER_TOKEN: Record<string, number> = {
 
 export const SAFETY_MARGIN = 1.05;
 const ALPHA = 0.2;
+/** Plausible bounds for characters per token across tokenizers and languages. */
+const MIN_CHARS_PER_TOKEN = 1.5;
+const MAX_CHARS_PER_TOKEN = 8;
 /** Per-message framing overhead (role tokens, separators). */
 const MESSAGE_OVERHEAD = 4;
 
@@ -115,7 +118,8 @@ export class TokenEstimator {
   ): Calibration | undefined {
     if (actualPromptTokens <= 0 || chars <= 0) return undefined;
     const effectiveTokens = Math.max(1, actualPromptTokens - messageCount * MESSAGE_OVERHEAD);
-    const observed = chars / effectiveTokens;
+    // A provider that reports nonsense usage (zero, or a flat 1 per call) must not poison the estimate.
+    const observed = Math.min(MAX_CHARS_PER_TOKEN, Math.max(MIN_CHARS_PER_TOKEN, chars / effectiveTokens));
     const previous = this.store.get(modelId);
     const next: Calibration = previous
       ? {

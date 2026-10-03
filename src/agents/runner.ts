@@ -1,3 +1,4 @@
+import { ContextManager, effectiveWindow, resolveThresholds, summarizerMessages } from "../context/index.ts";
 import type { ArtifactVersion } from "../core/domain/artifact.ts";
 import { ModelError } from "../models/errors.ts";
 import { resolveModel } from "../models/router.ts";
@@ -15,10 +16,18 @@ import { packageForStep } from "./knowledge.ts";
  * loop through the policy-filtered BoundTools, intra-step checkpoints of the transcript
  * (ADR-0002 §4), and a final structured result stored as the step's artifact (ADR-0005).
  */
-interface TranscriptState {
+export interface TranscriptState {
   readonly transcriptRef: string;
   readonly toolCalls: number;
   readonly modelCalls: number;
+  /** Context management (ADR-0013): counters survive a resume; the rest serves `jarvis context|compact`. */
+  readonly peakPressure?: number;
+  readonly trims?: number;
+  readonly compactions?: number;
+  readonly resets?: number;
+  readonly baseTokens?: number;
+  readonly effective?: number;
+  readonly modelId?: string;
 }
 
 interface AgentResultDoc {
@@ -100,15 +109,17 @@ export class AgentRuntimeRunner implements AgentRunner {
       .map((artifact) => ({ artifact, text: rt.artifacts.text(artifact) }));
     const pkg = await packageForStep(ctx, def.id);
     const charBudget = Math.floor(route.model.contextWindow * 0.45 * 3.5);
-    const base = buildBaseMessages({
-      def,
-      ctx,
-      tools: toolDescriptors,
-      inputs,
-      pkg,
-      knowledgeConfig: config.knowledge,
-      budget: { chars: charBudget },
-    });
+    const buildBase = (chars: number) =>
+      buildBaseMessages({
+        def,
+        ctx,
+        tools: toolDescriptors,
+        inputs,
+        pkg,
+        knowledgeConfig: config.knowledge,
+        budget: { chars },
+      });
+    let base = buildBase(charBudget);
 
     const restored = ctx.restored as Partial<TranscriptState> | undefined;
     let transcript: Message[] = restored?.transcriptRef
@@ -131,9 +142,70 @@ export class AgentRuntimeRunner implements AgentRunner {
       knowledge: pkg.provenance,
     });
 
+    // Context pressure (ADR-0013): trim / compact / reset before a call would run into the window.
+    const estimate = (messages: readonly Message[]) =>
+      rt.gateway.estimator.estimateMessages(route.modelId, route.model.tokenizer, messages, toolDefs);
+    const roleMaxOutput = config.roles[def.role]?.maxOutput;
+    const effective = effectiveWindow({
+      contextWindow: route.model.contextWindow,
+      maxOutput: route.model.maxOutput,
+      ...(config.context.maxContext ? { maxContext: config.context.maxContext } : {}),
+      ...(roleMaxOutput ? { roleMaxOutput } : {}),
+    });
+    const summarizerRoute = (() => {
+      try {
+        return resolveModel(config, "compaction", { tools: false });
+      } catch {
+        return route; // no `compaction` role configured: the agent's own model summarises
+      }
+    })();
+    const manager = new ContextManager(
+      {
+        effective,
+        thresholds: resolveThresholds(config.context, route.modelId, ctx.step.phase),
+        compactTarget: config.context.compactTarget,
+        estimate,
+        store: (text) => rt.blobs.put(text, "text/plain").contentRef,
+        summarize: async (rendered, previous) => {
+          modelCalls += 1;
+          const response = await ctx.gateway.call({
+            modelId: summarizerRoute.modelId,
+            role: summarizerRoute === route ? def.role : "compaction",
+            agentId: def.id,
+            messages: summarizerMessages(rendered, previous),
+            temperature: 0,
+            maxOutput: Math.min(2000, summarizerRoute.model.maxOutput),
+          });
+          return response.text;
+        },
+        // Aggressive pressure also tightens L3/L4: the same inputs under a smaller budget.
+        tighten: () => buildBase(Math.floor(charBudget * 0.6)),
+        emit,
+      },
+      {
+        peakPressure: restored?.peakPressure ?? 0,
+        trims: restored?.trims ?? 0,
+        compactions: restored?.compactions ?? 0,
+        resets: restored?.resets ?? 0,
+      },
+    );
+    const manage = async () => {
+      const r = await manager.manage(base, transcript);
+      base = r.base;
+      transcript = r.transcript;
+    };
+
     const checkpoint = () => {
       const transcriptRef = rt.blobs.put(JSON.stringify(transcript), "application/json").contentRef;
-      ctx.saveCheckpoint({ transcriptRef, toolCalls, modelCalls } satisfies TranscriptState);
+      ctx.saveCheckpoint({
+        transcriptRef,
+        toolCalls,
+        modelCalls,
+        ...manager.stats,
+        baseTokens: estimate(base),
+        effective,
+        modelId: route.modelId,
+      } satisfies TranscriptState);
     };
 
     let budgetExhaustedNotice = false;
@@ -151,6 +223,7 @@ export class AgentRuntimeRunner implements AgentRunner {
         ];
         budgetExhaustedNotice = true;
       }
+      await manage();
       const response = await ctx.gateway.call({
         modelId: route.modelId,
         role: def.role,
@@ -188,6 +261,7 @@ export class AgentRuntimeRunner implements AgentRunner {
     }
 
     // Finalization: the structured result document (ADR-0007 §4).
+    await manage();
     const finalMessages: Message[] = [
       ...base,
       ...transcript,
@@ -230,6 +304,7 @@ export class AgentRuntimeRunner implements AgentRunner {
       emit("agent.finish", {
         status: "success",
         outcome,
+        context: { ...manager.stats, effective },
         toolCalls,
         modelCalls: modelCalls + 1 + result.repairs,
         repairs: result.repairs,

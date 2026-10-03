@@ -4,6 +4,7 @@ import { packageInfo } from "../version.ts";
 import { runAuthRemove, runAuthSet, runAuthStatus } from "./commands/auth.ts";
 import { runCi, runExport, runImport } from "./commands/ci.ts";
 import { runConfigShow } from "./commands/config.ts";
+import { runContext, runReshape } from "./commands/context.ts";
 import { runDbBackup, runDbMigrate, runDbStatus } from "./commands/db.ts";
 import { renderDoctor, runDoctor } from "./commands/doctor.ts";
 import { runEvalsBaseline, runEvalsDiff, runEvalsRun, runEvalsRunToCase } from "./commands/evals.ts";
@@ -328,6 +329,27 @@ export function buildProgram(options: RunOptions = {}): Command {
       await runAuthRemove(ctxFor(), id);
     });
 
+  program
+    .command("context [run]")
+    .description("the agent's context of a run now: window, base, history, pressure level (ADR-0013)")
+    .action(async (ref: string | undefined) => {
+      await runContext(ctxFor(), ref);
+    });
+  program
+    .command("compact <run>")
+    .description("trim old tool results and compact older history into a handoff; the next resume uses it")
+    .option("--aggressive", "keep less history", false)
+    .option("--dry-run", "show the plan without changing anything or calling a model", false)
+    .action(async (ref: string, opts: { aggressive: boolean; dryRun: boolean }) => {
+      await runReshape(ctxFor(), ref, opts, false);
+    });
+  program
+    .command("reset-context <run>")
+    .description("replace the agent's history with a structured handoff (a fresh window); originals are kept")
+    .option("--dry-run", "show the plan without changing anything or calling a model", false)
+    .action(async (ref: string, opts: { dryRun: boolean }) => {
+      await runReshape(ctxFor(), ref, opts, true);
+    });
   program
     .command("threads")
     .description("open human threads: clarifications, reviews, approvals (ADR-0019)")

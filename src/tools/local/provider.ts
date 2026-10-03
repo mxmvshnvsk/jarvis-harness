@@ -109,7 +109,7 @@ export class LocalToolProvider implements ToolProvider {
       {
         name: "knowledge.read",
         description:
-          "Read a standard, skill or knowledge document in full by its ref (standard:ID@v, skill:id@v, knowledge:name) — the ones listed as available on request.",
+          "Read in full by ref: a standard, skill or knowledge document listed as available on request (standard:ID@v, skill:id@v, knowledge:name), an artifact of this run (artifactId@version), or the original of trimmed/compacted context (blob:<ref>).",
         network: "none",
         access: "read",
         effect: false,
@@ -120,6 +120,19 @@ export class LocalToolProvider implements ToolProvider {
         },
         handler: async (args, ctx) => {
           const ref = str(args, "ref");
+          // Originals of trimmed/compacted context and earlier artifacts (ADR-0001 §7: sources survive summaries).
+          if (ref.startsWith("blob:")) {
+            const contentRef = ref.slice("blob:".length);
+            return ctx.runtime.blobs.has(contentRef)
+              ? { ok: true, text: ctx.runtime.blobs.getText(contentRef) }
+              : { ok: false, error: `unknown blob "${contentRef}"` };
+          }
+          const artifactRef = /^([A-Za-z0-9_.:/-]+)@(\d+)$/.exec(ref);
+          if (artifactRef && !/^(standard|skill|knowledge):/.test(ref)) {
+            const artifact = ctx.runtime.artifacts.get(artifactRef[1] as string, Number(artifactRef[2]));
+            if (artifact && artifact.runId === ctx.run.id)
+              return { ok: true, text: ctx.runtime.artifacts.text(artifact) };
+          }
           const text = readByRef(
             { projectRoot: ctx.workspacePath, userRoot: ctx.runtime.loaded.home.root },
             ref,
