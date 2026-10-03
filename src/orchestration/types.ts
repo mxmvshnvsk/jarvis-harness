@@ -1,5 +1,5 @@
 import type { Runtime } from "../app/runtime.ts";
-import type { Run, RunState } from "../core/domain/run.ts";
+import type { Run, RunState, WaitingFor } from "../core/domain/run.ts";
 import type { StepDefinition, StepKind, WorkflowDefinition } from "../core/domain/workflow.ts";
 import type { ModelCaller } from "../models/gateway.ts";
 import type { BoundTools } from "../tools/router.ts";
@@ -47,11 +47,13 @@ export class SuspendRun extends Error {
   readonly reason: string;
   readonly resumeAfter?: Date;
   readonly checkpointState: Record<string, unknown>;
+  /** ADR-0019 §2: what the parked run waits for. */
+  readonly waitingFor?: WaitingFor;
 
   constructor(
     state: SuspendRun["state"],
     reason: string,
-    options: { resumeAfter?: Date; checkpointState?: Record<string, unknown> } = {},
+    options: { resumeAfter?: Date; checkpointState?: Record<string, unknown>; waitingFor?: WaitingFor } = {},
   ) {
     super(`${state}: ${reason}`);
     this.name = "SuspendRun";
@@ -59,6 +61,7 @@ export class SuspendRun extends Error {
     this.reason = reason;
     if (options.resumeAfter) this.resumeAfter = options.resumeAfter;
     this.checkpointState = options.checkpointState ?? {};
+    if (options.waitingFor) this.waitingFor = options.waitingFor;
   }
 }
 

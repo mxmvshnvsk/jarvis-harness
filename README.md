@@ -117,6 +117,24 @@ Stage 8 — context engine: standards, skills and knowledge (ADR-0020, ADR-0021 
 - `jarvis standards list|check`, `jarvis skills list`; `stack:` in project config with detection
   from the workspace; architecture fitness test keeps the core stack-neutral
 
+Stage 9 + 10 — human collaboration (ADR-0019):
+
+- One `interactions` entity for every human touchpoint (approval, clarification, review,
+  conflict) with messages; `runs.waitingFor` says what a parked run waits for; `jarvis threads`
+- `requirements` agent between research and spec: contradictions, missing cases, unverifiable
+  requirements; a blocking gap → `needs_clarification` → the run parks on a clarification thread
+- Threads: `jarvis answer <thread|run> "…"` (asynchronous; the clarifier asks the next question or
+  proposes a rule), `--accept` / `--rule` / `--reject`, `jarvis attach <run>` for the live terminal
+  mini-chat (`a` / `e <rule>` / `r` / `q`); `human.clarification.maxTurns`; the resolution is a
+  `clarification` artifact every later agent sees as binding — the transcript stays in the thread
+- Final gate `approve-impl` on the implementation; Review Mode v1: `// REVIEW: …` markers →
+  `jarvis review submit` (ids written back as `REVIEW(R-n):`, `review-package` artifact) →
+  `review-analysis` agent classifies CODE / SPEC_CORRECTION / REQUIREMENT_CORRECTION / QUESTION /
+  KNOWLEDGE_CANDIDATE / SUGGESTION and routes the graph (fix loop, back to spec or requirements,
+  clarification thread, candidates); markers are removed on `jarvis apply`
+- Human edits in the worktree become a `human edit` checkpoint (`Jarvis-Kind: human-edit`) on
+  resume — never reset away; `human.gates.<type>.required: false` switches a gate off
+
 Configuration precedence: CLI flags → `JARVIS_*` env → `.jarvis/project.yaml` → `~/.jarvis/config.yaml`
 → defaults; profiles (`--profile ci`) may only narrow. Secrets are references (`env:VAR`,
 `keychain:ID`), never literals.

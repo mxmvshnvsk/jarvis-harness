@@ -33,6 +33,44 @@ export const ResearchResult = z.object({
   outcome: z.enum(["ok"]).default("ok"),
 });
 
+/** ADR-0019 §3: are the requirements consistent, complete and verifiable? */
+export const RequirementsResult = z.object({
+  ...Base,
+  requirements: z
+    .array(
+      z.object({
+        id: z.string().min(1),
+        text: z.string().min(1),
+        verifiable: z.boolean(),
+        sources: z.array(Source).default([]),
+      }),
+    )
+    .default([]),
+  businessRules: z.array(z.string()).default([]),
+  invariants: z.array(z.string()).default([]),
+  ambiguities: z.array(z.string()).default([]),
+  contradictions: z.array(z.string()).default([]),
+  missingCases: z
+    .array(z.string())
+    .default([])
+    .describe("states, transitions, retries, duplicates, races, partial completion"),
+  assumptions: z
+    .array(z.string())
+    .default([])
+    .describe("what you had to assume; each becomes explicit in the spec"),
+  terminology: z.array(z.object({ term: z.string(), meaning: z.string() })).default([]),
+  openQuestions: z.array(z.string()).default([]),
+  verdict: z.enum(["READY", "READY_WITH_ASSUMPTIONS", "NEEDS_CLARIFICATION"]),
+  clarification: z
+    .object({
+      question: z.string().min(1).describe("the one blocking question for the human"),
+      context: z.string().optional().describe("why it blocks, with the interpretations you considered"),
+    })
+    .optional()
+    .describe("required when verdict is NEEDS_CLARIFICATION"),
+  outcome: z.enum(["ok", "needs_clarification"]).default("ok"),
+});
+
 export const SpecResult = z.object({
   ...Base,
   title: z.string().min(1),
@@ -115,8 +153,41 @@ export const ReviewResult = z.object({
       suggestion: z.string().optional(),
     }),
   ),
-  verdict: z.enum(["approve", "fix_required", "plan_wrong"]),
-  outcome: z.enum(["ok", "fix_required", "plan_wrong"]).default("ok"),
+  verdict: z.enum(["approve", "fix_required", "plan_wrong", "requirements_wrong"]),
+  outcome: z.enum(["ok", "fix_required", "plan_wrong", "requirements_wrong"]).default("ok"),
+});
+
+/** ADR-0019 §5: what each human review comment means for the workflow. */
+export const ReviewAnalysisResult = z.object({
+  ...Base,
+  comments: z.array(
+    z.object({
+      id: z.string().min(1).describe("R-n from the review package"),
+      class: z.enum([
+        "CODE",
+        "SPEC_CORRECTION",
+        "REQUIREMENT_CORRECTION",
+        "QUESTION",
+        "KNOWLEDGE_CANDIDATE",
+        "SUGGESTION",
+      ]),
+      action: z
+        .string()
+        .min(1)
+        .describe("what has to change, or the question to ask, or the knowledge to record"),
+      file: z.string().optional(),
+      line: z.number().int().positive().optional(),
+    }),
+  ),
+  verdict: z.enum(["fix_code", "spec_wrong", "requirements_wrong", "nothing_to_do"]),
+  candidates: z
+    .array(Candidate)
+    .default([])
+    .describe("KNOWLEDGE_CANDIDATE comments become candidates (ADR-0020 §6)"),
+  clarification: z.object({ question: z.string().min(1), context: z.string().optional() }).optional(),
+  outcome: z
+    .enum(["ok", "fix_required", "spec_wrong", "requirements_wrong", "needs_clarification"])
+    .default("ok"),
 });
 
 export type ResearchResultT = z.infer<typeof ResearchResult>;

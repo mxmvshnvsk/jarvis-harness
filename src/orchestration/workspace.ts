@@ -10,6 +10,11 @@ export interface Workspace {
   checkpoint(message: string, trailers?: Record<string, string>): Promise<string | undefined>;
   /** Restores the file state of a checkpoint. */
   restore(commit: string | undefined): Promise<void>;
+  /**
+   * ADR-0019 §6: commits uncommitted human changes as a human checkpoint and returns it; undefined
+   * when the workspace is clean or the mode has no commits.
+   */
+  humanCheckpoint?(actorId: string): Promise<{ commit: string; files: string[] } | undefined>;
 }
 
 export class CwdWorkspace implements Workspace {

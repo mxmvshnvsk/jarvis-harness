@@ -138,6 +138,21 @@ export class WorktreeWorkspace implements Workspace {
     return this.head();
   }
 
+  async humanCheckpoint(actorId: string): Promise<{ commit: string; files: string[] } | undefined> {
+    const status = await git(["status", "--porcelain"], this.ref.path);
+    if (status.code !== 0 || status.stdout.trim().length === 0) return undefined;
+    const files = status.stdout
+      .split("\n")
+      .filter(Boolean)
+      .map((l) => l.slice(3).trim())
+      .sort();
+    const commit = await this.checkpoint("human edit", {
+      "Jarvis-Actor": actorId,
+      "Jarvis-Kind": "human-edit",
+    });
+    return { commit, files };
+  }
+
   async restore(commit: string | undefined): Promise<void> {
     const target = commit ?? this.ref.baseCommit;
     if (!target) return;

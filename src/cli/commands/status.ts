@@ -119,6 +119,23 @@ export function renderDetail(ctx: CliContext, d: RunDetail, now: Date, eventLimi
     `  state      ${r.state}${r.stateReason ? ` — ${r.stateReason}` : ""}${r.cancelRequested ? "  (cancel requested)" : ""}`,
   );
   out.line(`  step       ${r.currentStep ? `${r.currentStep} #${r.currentIteration}` : "-"}`);
+  if (r.waitingFor) {
+    const w = r.waitingFor;
+    const hint =
+      w.kind === "clarification"
+        ? `jarvis attach ${shortRunId(r.id)} | jarvis answer ${w.interactionId ?? ""} "…"`
+        : w.kind === "approval"
+          ? `jarvis approve ${shortRunId(r.id)} | jarvis review submit ${shortRunId(r.id)}`
+          : "";
+    out.line(
+      `  waiting    ${w.kind}${w.detail ? ` (${w.detail})` : ""}${w.interactionId ? `  thread ${w.interactionId}` : ""}${hint ? `  → ${hint}` : ""}`,
+    );
+  }
+  for (const i of d.interactions) {
+    out.line(
+      `  thread     ${i.id}  ${i.kind}  ${i.state}  ${i.stepId} #${i.iteration}${i.contentRef ? `  ${i.contentRef}` : ""}`,
+    );
+  }
   out.line(
     `  owner      ${r.owner.kind}:${r.owner.id}    created ${ago(r.createdAt, now)}    updated ${ago(r.updatedAt, now)}`,
   );

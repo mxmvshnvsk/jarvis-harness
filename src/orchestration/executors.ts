@@ -68,8 +68,66 @@ export class AgenticExecutor implements StepExecutor {
   async execute(ctx: StepContext): Promise<StepOutcome> {
     if (!this.runner)
       return { status: "failure", reason: `no agent runner registered for agent "${ctx.step.agent}"` };
-    return this.runner.run(ctx);
+    const outcome = await this.runner.run(ctx);
+    if (outcome.status === "success" && outcome.outcome === CLARIFICATION_OUTCOME) {
+      // ADR-0019 §4: the agent cannot continue without a human answer — open a thread and park.
+      // The step runs again, with the resolution in its context, once the thread is resolved.
+      const rt = ctx.runtime;
+      const ref = outcome.outputs?.[0];
+      const question = ref ? questionOf(rt, ref) : undefined;
+      const thread = rt.interactions.open({
+        runId: ctx.run.id,
+        kind: "clarification",
+        stepId: ctx.step.id,
+        iteration: ctx.iteration,
+        ...(ref ? { contentRef: ref } : {}),
+        origin: `agent:${ctx.step.agent}`,
+        openedBy: `agent:${ctx.step.agent}`,
+        meta: { agent: ctx.step.agent },
+        message: {
+          role: "jarvis",
+          actor: `agent:${ctx.step.agent}`,
+          text: question ?? outcome.reason ?? "clarification needed",
+        },
+      });
+      rt.events.emit({
+        kind: "interaction.opened",
+        runId: ctx.run.id,
+        stepId: ctx.step.id,
+        iteration: ctx.iteration,
+        payload: { kind: "clarification", interactionId: thread.id, agent: ctx.step.agent },
+      });
+      throw new SuspendRun("WAITING_HUMAN", `clarification needed by ${ctx.step.agent}: ${thread.id}`, {
+        checkpointState: { clarification: thread.id },
+        waitingFor: { kind: "clarification", interactionId: thread.id },
+      });
+    }
+    return outcome;
   }
+}
+
+export const CLARIFICATION_OUTCOME = "needs_clarification";
+
+/** The blocking question of a result document (`clarification.question`, else the open questions). */
+function questionOf(rt: StepContext["runtime"], ref: string): string | undefined {
+  const [id, version] = ref.split("@");
+  const artifact = rt.artifacts.get(id as string, Number(version));
+  if (!artifact) return undefined;
+  try {
+    const doc = JSON.parse(rt.artifacts.text(artifact)) as {
+      clarification?: { question?: string; context?: string };
+      openQuestions?: string[];
+    };
+    if (doc.clarification?.question) {
+      return doc.clarification.context
+        ? `${doc.clarification.question}\n\nContext: ${doc.clarification.context}`
+        : doc.clarification.question;
+    }
+    if (doc.openQuestions && doc.openQuestions.length > 0) return doc.openQuestions.join("\n");
+  } catch {
+    // not JSON
+  }
+  return undefined;
 }
 
 /* ------------------------------------------------------------------------------------------------
@@ -110,9 +168,27 @@ export class ApprovalExecutor implements StepExecutor {
         reason: `approval step "${ctx.step.id}": no artifact of type "${type}" to approve`,
       };
     const gate = ctx.runtime.artifacts.isApproved(latest.artifactId);
-    if (gate.approved) return { status: "success", outputs: [`${latest.artifactId}@${latest.version}`] };
+    if (gate.approved) {
+      closeApprovalThread(ctx, latest.artifactId);
+      return { status: "success", outputs: [`${latest.artifactId}@${latest.version}`] };
+    }
 
     const config = ctx.runtime.loaded.config;
+    if (config.human.gates[type]?.required === false) {
+      // ADR-0019 §9: the project switched this gate off.
+      ctx.runtime.events.emit({
+        kind: "approval.skipped",
+        runId: ctx.run.id,
+        stepId: ctx.step.id,
+        payload: {
+          artifactId: latest.artifactId,
+          version: latest.version,
+          type,
+          reason: "gate not required",
+        },
+      });
+      return { status: "success", outputs: [`${latest.artifactId}@${latest.version}`] };
+    }
     const latestApproval = ctx.runtime.artifacts.approvalsFor(latest.artifactId, latest.version)[0];
     if (latestApproval?.decision === "reject") {
       return {
@@ -121,10 +197,12 @@ export class ApprovalExecutor implements StepExecutor {
       };
     }
     if (latestApproval?.decision === "request_changes") {
-      // ADR-0005 §4: request_changes is an outcome for a declared back edge.
+      // ADR-0005 §4: request_changes is an outcome for a declared back edge; ADR-0019 §5 lets the
+      // reviewer choose a more specific one (review_submitted, spec_wrong, …).
+      closeApprovalThread(ctx, latest.artifactId);
       return {
         status: "success",
-        outcome: "request_changes",
+        outcome: latestApproval.outcome ?? "request_changes",
         outputs: [`${latest.artifactId}@${latest.version}`],
       };
     }
@@ -150,9 +228,30 @@ export class ApprovalExecutor implements StepExecutor {
       }
     }
 
+    const contentRef = `${latest.artifactId}@${latest.version}`;
+    const thread =
+      ctx.runtime.interactions.openFor(ctx.run.id, "approval") ??
+      ctx.runtime.interactions.open({
+        runId: ctx.run.id,
+        kind: "approval",
+        stepId: ctx.step.id,
+        iteration: ctx.iteration,
+        contentRef,
+        openedBy: "runtime",
+        meta: { artifactType: type },
+      });
     throw new SuspendRun("WAITING_HUMAN", `approve ${type} (${latest.name}@${latest.version})`, {
       checkpointState: { awaitingApproval: { artifactId: latest.artifactId, version: latest.version, type } },
+      waitingFor: { kind: "approval", interactionId: thread.id, detail: type },
     });
+  }
+}
+
+function closeApprovalThread(ctx: StepContext, artifactId: string): void {
+  const open = ctx.runtime.interactions.openFor(ctx.run.id, "approval");
+  if (open?.contentRef?.startsWith(`${artifactId}@`)) {
+    const approval = ctx.runtime.artifacts.approvalsFor(artifactId)[0];
+    ctx.runtime.interactions.close(open.id, "resolved", approval?.actor.id ?? "human", open.contentRef);
   }
 }
 

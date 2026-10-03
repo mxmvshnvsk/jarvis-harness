@@ -7,6 +7,7 @@ import { resolveActor } from "../../core/actor/resolve.ts";
 import type { Actor } from "../../core/domain/actor.ts";
 import type { ApprovalDecision } from "../../core/domain/artifact.ts";
 import type { Run, WorkspaceRef } from "../../core/domain/run.ts";
+import { removeMarkers } from "../../interaction/review/collector.ts";
 import { daemonTick } from "../../orchestration/daemon.ts";
 import { leaseOwner } from "../../orchestration/lease.ts";
 import type { LocalWorkflowEngine } from "../../orchestration/runtime.ts";
@@ -299,6 +300,17 @@ export async function runApply(ctx: CliContext, ref: string, options: { message?
       email: actor.id,
     });
     try {
+      if (loaded.config.human.review.removeMarkersAfterApproval) {
+        // ADR-0019 §5: markers leave the code once the work is approved; threads stay in the store.
+        const stripped = await removeMarkers(run.workspace.path);
+        if (stripped.length > 0) {
+          await wt.checkpoint("jarvis: remove review markers", {
+            "Jarvis-Run": run.id,
+            "Jarvis-Kind": "review-cleanup",
+          });
+          runtime.events.emit({ kind: "review.markersRemoved", runId: run.id, payload: { files: stripped } });
+        }
+      }
       const message =
         options.message ?? `${run.task}: apply jarvis run ${shortRunId(run.id)}\n\nJarvis-Run: ${run.id}`;
       const result = await wt.apply(message);

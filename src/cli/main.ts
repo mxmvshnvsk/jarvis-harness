@@ -5,6 +5,7 @@ import { runAuthRemove, runAuthSet, runAuthStatus } from "./commands/auth.ts";
 import { runConfigShow } from "./commands/config.ts";
 import { runDbBackup, runDbMigrate, runDbStatus } from "./commands/db.ts";
 import { renderDoctor, runDoctor } from "./commands/doctor.ts";
+import { runAnswer, runAttach, runReviewSubmit, runThreads } from "./commands/human.ts";
 import { renderInit, runInit } from "./commands/init.ts";
 import {
   runCandidatesList,
@@ -235,6 +236,49 @@ export function buildProgram(options: RunOptions = {}): Command {
     .description("delete a credential")
     .action(async (id: string) => {
       await runAuthRemove(ctxFor(), id);
+    });
+
+  program
+    .command("threads")
+    .description("open human threads: clarifications, reviews, approvals (ADR-0019)")
+    .option("--all", "include resolved and rejected threads", false)
+    .action(async (opts: { all: boolean }) => {
+      await runThreads(ctxFor(), opts);
+    });
+  program
+    .command("answer <threadOrRun> [text]")
+    .description("answer a clarification thread asynchronously; --accept takes the proposed rule")
+    .option("--accept", "accept the proposed resolution (or --rule)", false)
+    .option("--reject", "reject the thread; the run keeps waiting", false)
+    .option("--rule <text>", "accept with this rule instead of the proposal")
+    .option("--resume", "continue the run after a resolution", false)
+    .action(
+      async (
+        ref: string,
+        text: string | undefined,
+        opts: { accept: boolean; reject: boolean; rule?: string; resume: boolean },
+      ) => {
+        await runAnswer(ctxFor(), ref, text, opts);
+      },
+    );
+  program
+    .command("attach <run>")
+    .description("live mode: the open thread as a terminal mini-chat; resumes the run after a resolution")
+    .option("--no-resume", "detach after the resolution instead of resuming")
+    .action(async (ref: string, opts: { resume: boolean }) => {
+      await runAttach(ctxFor(), ref, options.stdin ?? process.stdin, { noResume: !opts.resume });
+    });
+  const review = program
+    .command("review")
+    .description("Review Mode: REVIEW markers in the code become a review package (ADR-0019 §5)");
+  review
+    .command("submit [run]")
+    .description(
+      "collect `// REVIEW:` markers from the run's workspace and route the gate to review analysis",
+    )
+    .option("--resume", "continue the run right away", false)
+    .action(async (ref: string | undefined, opts: { resume: boolean }) => {
+      await runReviewSubmit(ctxFor(), ref, opts);
     });
 
   const standards = program.command("standards").description("project standards (ADR-0020)");

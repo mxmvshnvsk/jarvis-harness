@@ -227,6 +227,28 @@ export const KnowledgeConfigSchema = z.strictObject({
 });
 export type KnowledgeConfig = z.infer<typeof KnowledgeConfigSchema>;
 
+/** ADR-0019 §9 — how and when humans take part. Narrow-only along the precedence chain. */
+export const HumanConfigSchema = z.strictObject({
+  mode: z.enum(["autonomous", "balanced", "strict"]).default("balanced"),
+  /** Keyed by the artifact type an approval step gates: `required: false` passes the gate silently. */
+  gates: z.record(z.string(), z.strictObject({ required: z.boolean().default(true) })).prefault({}),
+  review: z
+    .strictObject({
+      sourceMarkers: z.boolean().default(true),
+      removeMarkersAfterApproval: z.boolean().default(true),
+      knowledgePromotion: z.enum(["confirm", "never"]).default("confirm"),
+    })
+    .prefault({}),
+  clarification: z
+    .strictObject({
+      multiTurn: z.boolean().default(true),
+      maxTurns: z.int().positive().default(8),
+    })
+    .prefault({}),
+  manualEdits: z.strictObject({ enabled: z.boolean().default(true) }).prefault({}),
+});
+export type HumanConfig = z.infer<typeof HumanConfigSchema>;
+
 export const SecurityConfigSchema = z.strictObject({
   secretPatterns: z.array(z.strictObject({ name: z.string().min(1), regex: z.string().min(1) })).default([]),
   secretEnv: z.array(z.string().min(1)).default([]),
@@ -297,6 +319,7 @@ export const ProjectConfigSchema = z.strictObject({
   security: SecurityConfigSchema.optional(),
   humanGate: HumanGateModeSchema.optional(),
   knowledge: KnowledgeConfigSchema.optional(),
+  human: HumanConfigSchema.optional(),
   /** Stack tags (ADR-0021 §3): typescript, react, csharp, … Empty = detected from the workspace. */
   stack: z.array(z.string().min(1)).optional(),
 });
@@ -321,6 +344,7 @@ export const ResolvedConfigSchema = z.strictObject({
   security: SecurityConfigSchema.prefault({}),
   telemetry: TelemetryConfigSchema.prefault({}),
   knowledge: KnowledgeConfigSchema.prefault({}),
+  human: HumanConfigSchema.prefault({}),
   stack: z.array(z.string().min(1)).default([]),
   /** Capability patterns denied by the active profile (ADR-0009 §1); applied by the Tool Router. */
   deniedCapabilities: z.array(z.string().min(1)).default([]),

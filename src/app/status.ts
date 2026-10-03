@@ -3,6 +3,7 @@ import type { WindowUsage } from "../budget/usage.ts";
 import type { QuotaPool } from "../core/config/schema.ts";
 import type { ArtifactVersion } from "../core/domain/artifact.ts";
 import type { Run } from "../core/domain/run.ts";
+import type { Interaction } from "../interaction/store.ts";
 import type { Checkpoint, StepRecord } from "../storage/checkpoints.ts";
 import type { EffectRecord } from "../storage/effects.ts";
 import type { StoredEvent } from "../telemetry/events.ts";
@@ -45,10 +46,12 @@ export interface RunDetail {
   readonly events: readonly StoredEvent[];
   readonly tokens: RunTokens;
   readonly leaseLive: boolean;
+  /** Open human interactions (ADR-0019 §2). */
+  readonly interactions: readonly Interaction[];
 }
 
 /** Artifact types that pass through a human gate and therefore may be awaiting approval. */
-export const GATED_ARTIFACT_TYPES = ["spec", "plan", "review"] as const;
+export const GATED_ARTIFACT_TYPES = ["spec", "plan", "review", "implementation"] as const;
 
 export function poolStatuses(runtime: Runtime): PoolStatus[] {
   return Object.entries(runtime.loaded.config.quotaPools).map(([pool, def]) => {
@@ -118,6 +121,7 @@ export function runDetail(runtime: Runtime, run: Run, now: Date = new Date()): R
     pendingApprovals,
     approvals,
     effects: { counts, recent: allEffects.slice(-5) },
+    interactions: runtime.interactions.listForRun(run.id, { openOnly: true }),
     events: events.slice(-15),
     tokens,
     leaseLive: run.lease !== undefined && Date.parse(run.lease.until) >= now.getTime(),

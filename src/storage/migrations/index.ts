@@ -145,6 +145,45 @@ CREATE TABLE usage_window (
 CREATE INDEX usage_window_pool_ts ON usage_window(pool, ts);
 `,
   },
+  {
+    version: 2,
+    name: "interactions",
+    sql: `
+-- ADR-0019 §2: one entity for every human interaction; approvals keep their content binding.
+CREATE TABLE interactions (
+  id             TEXT PRIMARY KEY,
+  run_id         TEXT NOT NULL REFERENCES runs(id),
+  kind           TEXT NOT NULL,
+  step_id        TEXT NOT NULL,
+  iteration      INTEGER NOT NULL,
+  content_ref    TEXT,
+  state          TEXT NOT NULL,
+  origin         TEXT,
+  opened_by      TEXT NOT NULL,
+  opened_at      TEXT NOT NULL,
+  resolved_by    TEXT,
+  resolved_at    TEXT,
+  resolution_ref TEXT,
+  meta_json      TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX interactions_run ON interactions(run_id, state);
+
+CREATE TABLE interaction_messages (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  interaction_id TEXT NOT NULL REFERENCES interactions(id),
+  seq            INTEGER NOT NULL,
+  role           TEXT NOT NULL,
+  actor          TEXT NOT NULL,
+  text           TEXT NOT NULL,
+  proposal_json  TEXT,
+  created_at     TEXT NOT NULL
+);
+CREATE INDEX interaction_messages_thread ON interaction_messages(interaction_id, seq);
+
+ALTER TABLE runs ADD COLUMN waiting_for_json TEXT;
+ALTER TABLE approvals ADD COLUMN outcome TEXT;
+`,
+  },
 ];
 
 export const LATEST_SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]?.version ?? 0;

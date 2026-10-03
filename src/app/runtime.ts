@@ -5,6 +5,7 @@ import { BudgetManager } from "../budget/admission.ts";
 import { SqliteUsageStore } from "../budget/usage.ts";
 import type { LoadedConfig } from "../core/config/load.ts";
 import { CompositeSecretResolver, EnvSecretResolver } from "../core/config/secrets.ts";
+import { InteractionStore } from "../interaction/store.ts";
 import { McpPool, ToolsCache } from "../mcp/client/pool.ts";
 import { McpToolProvider } from "../mcp/provider.ts";
 import { type CassetteMode, FileCassetteStore } from "../models/cassette.ts";
@@ -43,6 +44,7 @@ export interface Runtime {
   readonly checkpoints: CheckpointStore;
   readonly history: StepHistoryStore;
   readonly effects: EffectJournal;
+  readonly interactions: InteractionStore;
   readonly redactor: Redactor;
   readonly pathPolicy: PathPolicy;
   readonly registry: ToolRegistry;
@@ -127,6 +129,7 @@ export function createRuntime(loaded: LoadedConfig, options: RuntimeOptions = {}
     checkpoints: new CheckpointStore(db.db),
     history: new StepHistoryStore(db.db),
     effects: new EffectJournal(db.db, blobs),
+    interactions: new InteractionStore(db.db),
     redactor,
     pathPolicy,
     registry,

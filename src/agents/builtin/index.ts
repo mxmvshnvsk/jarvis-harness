@@ -3,7 +3,9 @@ import {
   ImpactResult,
   ImplementationResult,
   PlanResult,
+  RequirementsResult,
   ResearchResult,
+  ReviewAnalysisResult,
   ReviewResult,
   SpecResult,
   TestResult,
@@ -40,6 +42,25 @@ Stop when further reading would not change the findings. Then produce the result
   capabilities: [...READ_REPO, "jira.get", "jira.search", "confluence.get", "confluence.search"],
   requires: { tools: true, structuredOutput: "json" },
   output: { type: "research", schema: ResearchResult, outcomes: ["ok"] },
+  limits: DEFAULT_LIMITS,
+};
+
+export const REQUIREMENTS_AGENT: AgentDefinition = {
+  id: "requirements",
+  role: "research",
+  description:
+    "Checks that the requirements are consistent, complete and verifiable before anything is specified.",
+  instructions: `You are the requirements analysis agent of Jarvis (ADR-0019 §3).
+Research answered "what is known"; you answer "are the requirements consistent, complete and verifiable?".
+Method:
+- Extract every requirement, business rule and invariant from the task, the research artifact and the repository. Number requirements (R1, R2, …) and say whether each can be verified by a test or an inspection.
+- Hunt for: ambiguity, contradiction, undefined terms, unverifiable statements, broken invariants, missing states or transitions, time/permission/data gaps, retry, duplicate, race and partial-completion cases.
+- A gap you can close with a reasonable assumption goes to "assumptions" (verdict READY_WITH_ASSUMPTIONS). A gap that changes the behaviour and only the business can answer is blocking: set verdict NEEDS_CLARIFICATION, outcome needs_clarification and ask exactly one question in "clarification" with the interpretations you considered. Never close a blocking gap silently.
+- Clarifications already decided with a human (listed in your context) are binding: apply them, do not ask again.
+Produce the result document when every requirement is classified.`,
+  capabilities: [...READ_REPO, "jira.get", "jira.search", "confluence.get", "confluence.search"],
+  requires: { tools: true, structuredOutput: "json" },
+  output: { type: "requirements", schema: RequirementsResult, outcomes: ["ok", "needs_clarification"] },
   limits: DEFAULT_LIMITS,
 };
 
@@ -145,7 +166,7 @@ Method:
 - Look for correctness, missing cases, convention violations, and scope creep. Each finding has a severity, a location and a concrete suggestion.
 - Check every standard in your context whose verification is semantic or hybrid; list the ones you checked in "standardsChecked" and report violations of required standards as findings with severity major or blocker.
 - When the same kind of issue appears repeatedly or a convention is implied by the code but written nowhere, propose it in "candidates" with evidence instead of inventing a rule on the spot.
-- Verdict: "approve" when no blocker or major findings remain; "fix_required" when the code needs changes (outcome fix_required); "plan_wrong" when the approach itself does not fit the specification (outcome plan_wrong).
+- Verdict: "approve" when no blocker or major findings remain; "fix_required" when the code needs changes (outcome fix_required); "plan_wrong" when the approach itself does not fit the specification (outcome plan_wrong); "requirements_wrong" when you found a business gap or contradiction the requirements never covered (outcome requirements_wrong) — do not mask it with code.
 Produce the result document.`,
   capabilities: [...READ_REPO, "project.*"],
   requires: { tools: true, structuredOutput: "json" },
@@ -154,12 +175,42 @@ Produce the result document.`,
   contextInputs: ["spec", "plan", "implementation", "tests"],
 };
 
+export const REVIEW_ANALYSIS_AGENT: AgentDefinition = {
+  id: "review-analysis",
+  role: "review",
+  description:
+    "Classifies human review comments: code fix, spec or requirement correction, question, knowledge.",
+  instructions: `You are the review analysis agent of Jarvis (ADR-0019 §5).
+A developer annotated the code with REVIEW comments; the review package lists them with their locations and snippets.
+A comment is not automatically a code fix. For each comment decide what it means:
+- CODE — the implementation must change; say exactly what.
+- SPEC_CORRECTION — the specification was wrong or incomplete; name the requirement/section.
+- REQUIREMENT_CORRECTION — a business rule is missing or contradicted; the workflow goes back to requirements analysis.
+- QUESTION — the comment asks something only a human can answer; put the single most blocking question into "clarification".
+- KNOWLEDGE_CANDIDATE — a convention or fact worth recording; propose it in "candidates".
+- SUGGESTION — optional improvement, no action required now.
+Verdict: "requirements_wrong" if any REQUIREMENT_CORRECTION; else "spec_wrong" if any SPEC_CORRECTION; else "fix_code" if any CODE; else "nothing_to_do".
+Outcome follows the verdict (requirements_wrong / spec_wrong / fix_required / ok); if a QUESTION blocks everything else, outcome needs_clarification.
+Read the code around each comment before classifying; quote the comment id in every reason.`,
+  capabilities: [...READ_REPO, "knowledge.read"],
+  requires: { tools: true, structuredOutput: "json" },
+  output: {
+    type: "review-analysis",
+    schema: ReviewAnalysisResult,
+    outcomes: ["ok", "fix_required", "spec_wrong", "requirements_wrong", "needs_clarification"],
+  },
+  limits: DEFAULT_LIMITS,
+  contextInputs: ["review-package", "spec", "requirements"],
+};
+
 export const BUILTIN_AGENTS: readonly AgentDefinition[] = [
   RESEARCH_AGENT,
+  REQUIREMENTS_AGENT,
   SPEC_AGENT,
   IMPACT_AGENT,
   PLAN_AGENT,
   IMPLEMENTATION_AGENT,
   TEST_AGENT,
   REVIEW_AGENT,
+  REVIEW_ANALYSIS_AGENT,
 ];

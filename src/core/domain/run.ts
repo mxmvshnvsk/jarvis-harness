@@ -91,6 +91,16 @@ export const LeaseSchema = z.strictObject({
 });
 export type Lease = z.infer<typeof LeaseSchema>;
 
+export const InteractionKindSchema = z.enum(["approval", "clarification", "review", "conflict"]);
+export type InteractionKind = z.infer<typeof InteractionKindSchema>;
+
+export const WaitingForSchema = z.strictObject({
+  kind: z.enum(["approval", "clarification", "review", "conflict", "budget", "effect", "loop"]),
+  interactionId: z.string().min(1).optional(),
+  detail: z.string().optional(),
+});
+export type WaitingFor = z.infer<typeof WaitingForSchema>;
+
 export const RunSchema = z.strictObject({
   id: z.string().min(1),
   task: z.string().min(1),
@@ -107,6 +117,8 @@ export const RunSchema = z.strictObject({
   lease: LeaseSchema.optional(),
   cancelRequested: z.boolean().default(false),
   stateReason: z.string().optional(),
+  /** What a WAITING_HUMAN run waits for (ADR-0019 §2); cleared on resume. */
+  waitingFor: WaitingForSchema.optional(),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
 });

@@ -9,6 +9,7 @@ import {
   type Run,
   RunSchema,
   type RunState,
+  type WaitingFor,
   type WorkspaceRef,
 } from "../core/domain/run.ts";
 
@@ -63,6 +64,7 @@ interface RunRow {
   workflow: string;
   state: RunState;
   state_reason: string | null;
+  waiting_for_json: string | null;
   owner_json: string;
   workspace_json: string;
   current_step: string | null;
@@ -79,7 +81,7 @@ interface RunRow {
 }
 
 const COLUMNS =
-  "id, task, workflow, state, state_reason, owner_json, workspace_json, current_step, current_iteration, iterations_json, data_class, profile, lock_owner, lock_epoch, lock_until, cancel_requested, created_at, updated_at";
+  "id, task, workflow, state, state_reason, waiting_for_json, owner_json, workspace_json, current_step, current_iteration, iterations_json, data_class, profile, lock_owner, lock_epoch, lock_until, cancel_requested, created_at, updated_at";
 
 function rowToRun(row: RunRow): Run {
   return RunSchema.parse({
@@ -99,6 +101,7 @@ function rowToRun(row: RunRow): Run {
       : {}),
     cancelRequested: row.cancel_requested === 1,
     ...(row.state_reason ? { stateReason: row.state_reason } : {}),
+    ...(row.waiting_for_json ? { waitingFor: JSON.parse(row.waiting_for_json) } : {}),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   });
@@ -189,15 +192,30 @@ export class SqliteRunStore {
   }
 
   /** State transition guarded by the state machine and, optionally, by the expected current state. */
-  transition(id: string, to: RunState, options: { reason?: string; expectedState?: RunState } = {}): Run {
+  transition(
+    id: string,
+    to: RunState,
+    options: { reason?: string; expectedState?: RunState; waitingFor?: WaitingFor } = {},
+  ): Run {
     const run = this.require(id);
     if (options.expectedState && run.state !== options.expectedState)
       throw new StaleStateError(id, options.expectedState, run.state);
     assertTransition(run.state, to);
     const now = this.clock().toISOString();
+    // waiting_for describes a WAITING_HUMAN state only; every other transition clears it.
+    const waiting = to === "WAITING_HUMAN" && options.waitingFor ? JSON.stringify(options.waitingFor) : null;
     this.db
-      .prepare("UPDATE runs SET state = ?, state_reason = ?, updated_at = ? WHERE id = ? AND state = ?")
-      .run(to, options.reason ?? null, now, id, run.state);
+      .prepare(
+        "UPDATE runs SET state = ?, state_reason = ?, waiting_for_json = ?, updated_at = ? WHERE id = ? AND state = ?",
+      )
+      .run(to, options.reason ?? null, waiting, now, id, run.state);
+    return this.require(id);
+  }
+
+  setWaitingFor(id: string, waitingFor: WaitingFor | undefined): Run {
+    this.db
+      .prepare("UPDATE runs SET waiting_for_json = ?, updated_at = ? WHERE id = ?")
+      .run(waitingFor ? JSON.stringify(waitingFor) : null, this.clock().toISOString(), id);
     return this.require(id);
   }
 

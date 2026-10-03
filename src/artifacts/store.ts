@@ -39,6 +39,8 @@ export interface Approval {
   readonly actor: Actor;
   readonly decision: ApprovalDecision;
   readonly comment?: string;
+  /** For request_changes: the workflow outcome to follow (ADR-0019 §5), default `request_changes`. */
+  readonly outcome?: string;
   readonly createdAt: string;
 }
 
@@ -254,8 +256,8 @@ export class ArtifactStore {
     };
     this.db
       .prepare(
-        `INSERT INTO approvals (id, run_id, step_id, artifact_id, version, content_ref, actor_json, decision, comment, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO approvals (id, run_id, step_id, artifact_id, version, content_ref, actor_json, decision, comment, outcome, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         approval.id,
@@ -267,6 +269,7 @@ export class ArtifactStore {
         JSON.stringify(approval.actor),
         approval.decision,
         approval.comment ?? null,
+        approval.outcome ?? null,
         approval.createdAt,
       );
     return approval;
@@ -275,7 +278,7 @@ export class ArtifactStore {
   approvalsFor(artifactId: string, version?: number): Approval[] {
     const rows = this.db
       .prepare(
-        `SELECT id, run_id, step_id, artifact_id, version, content_ref, actor_json, decision, comment, created_at
+        `SELECT id, run_id, step_id, artifact_id, version, content_ref, actor_json, decision, comment, outcome, created_at
          FROM approvals WHERE artifact_id = ? ${version !== undefined ? "AND version = ?" : ""} ORDER BY created_at DESC`,
       )
       .all(...(version !== undefined ? [artifactId, version] : [artifactId])) as unknown as Array<{
@@ -288,6 +291,7 @@ export class ArtifactStore {
       actor_json: string;
       decision: ApprovalDecision;
       comment: string | null;
+      outcome: string | null;
       created_at: string;
     }>;
     return rows.map((r) => ({
@@ -300,6 +304,7 @@ export class ArtifactStore {
       actor: JSON.parse(r.actor_json) as Actor,
       decision: r.decision,
       ...(r.comment ? { comment: r.comment } : {}),
+      ...(r.outcome ? { outcome: r.outcome } : {}),
       createdAt: r.created_at,
     }));
   }

@@ -119,9 +119,24 @@ export class LocalWorkflowEngine {
     const workspace = await this.workspaces.open(run.workspace);
     try {
       if (run.state !== "CREATED") {
-        // ADR-0003 §3: the file state of a resumed run is exactly its last checkpoint.
-        const last = this.rt.checkpoints.latest(run.id);
-        await workspace.restore(last?.headCommit);
+        // ADR-0019 §6: the developer owns the workspace — uncommitted human edits become a
+        // human checkpoint first; Jarvis never resets over them.
+        const humanEdit = await workspace.humanCheckpoint?.(run.owner.id);
+        if (humanEdit) {
+          this.rt.checkpoints.save({
+            runId: run.id,
+            stepId: run.currentStep ?? "?",
+            iteration: run.currentIteration,
+            kind: "step",
+            headCommit: humanEdit.commit,
+            state: { humanEdit: humanEdit.files },
+          });
+          this.emit(run, "workspace.humanEdit", { commit: humanEdit.commit, files: humanEdit.files });
+        } else {
+          // ADR-0003 §3: the file state of a resumed run is exactly its last checkpoint.
+          const last = this.rt.checkpoints.latest(run.id);
+          await workspace.restore(last?.headCommit);
+        }
       }
       run = this.enter(run, workflow);
       for (;;) {
@@ -307,6 +322,7 @@ export class LocalWorkflowEngine {
         });
         const parked = this.rt.runs.transition(run.id, "WAITING_HUMAN", {
           reason: `back edge ${transition.edgeId} exhausted after ${max} iteration(s) (ADR-0004 §3)`,
+          waitingFor: { kind: "loop", detail: transition.edgeId },
         });
         this.emit(parked, "workflow.loopExhausted", {
           edge: transition.edgeId,
@@ -405,10 +421,14 @@ export class LocalWorkflowEngine {
         ...(suspend.resumeAfter ? { resumeAfter: suspend.resumeAfter.toISOString() } : {}),
       },
     });
-    const parked = this.rt.runs.transition(run.id, suspend.state, { reason: suspend.reason });
+    const parked = this.rt.runs.transition(run.id, suspend.state, {
+      reason: suspend.reason,
+      ...(suspend.waitingFor ? { waitingFor: suspend.waitingFor } : {}),
+    });
     this.emit(parked, "run.state", {
       state: parked.state,
       reason: parked.stateReason,
+      waitingFor: suspend.waitingFor,
       resumeAfter: suspend.resumeAfter?.toISOString(),
     });
     return parked;
@@ -427,6 +447,7 @@ export class LocalWorkflowEngine {
     if (error instanceof UnresolvedEffectError) {
       return new SuspendRun("WAITING_HUMAN", error.message, {
         checkpointState: { unresolvedEffect: error.record.key },
+        waitingFor: { kind: "effect", detail: error.record.capability },
       });
     }
     if (error instanceof BudgetExceededError) {
@@ -434,6 +455,7 @@ export class LocalWorkflowEngine {
         checkpointState: {
           budget: { scope: error.scope, dimension: error.dimension, used: error.used, cap: error.cap },
         },
+        waitingFor: { kind: "budget", detail: `${error.scope} ${error.dimension}` },
       });
     }
     return undefined;

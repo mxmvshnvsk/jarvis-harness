@@ -40,6 +40,12 @@ export function resumeDecision(
     const awaiting = checkpoint?.state.awaitingApproval as { artifactId?: string } | undefined;
     if (awaiting?.artifactId && runtime.artifacts.isApproved(awaiting.artifactId).approved)
       return { resume: true };
+    // ADR-0019 §4: a clarification resolved through `jarvis answer` clears waitingFor.
+    const clarification = checkpoint?.state.clarification as string | undefined;
+    if (clarification && run.waitingFor === undefined) {
+      const thread = runtime.interactions.get(clarification);
+      if (thread?.state === "resolved") return { resume: true };
+    }
     return { resume: false, reason: "waiting for a human decision" };
   }
   return { resume: false, reason: `${run.state} is not auto-resumed` };

@@ -120,6 +120,12 @@ const docs: Record<string, (reviewRound: number) => unknown> = {
     unknowns: [],
     outcome: "ok",
   }),
+  requirements: () => ({
+    ...base,
+    requirements: [{ id: "R1", text: "restart allowed", verifiable: true, sources: [] }],
+    verdict: "READY",
+    outcome: "ok",
+  }),
   specification: () => ({
     ...base,
     title: "Allow onboarding restart",
@@ -206,16 +212,29 @@ describe("sdd end to end", () => {
     expect(parked.pendingApprovals.map((a) => a.type)).toEqual(["spec"]);
     const runId = parked.run.id;
 
+    const reviewed = await jarvis(["--json", "approve", runId, "--resume"]);
+    expect(reviewed.code).toBe(10); // the final human gate on the implementation (ADR-0019 §1)
+    const parked2 = JSON.parse(reviewed.out) as {
+      run: { state: string; waitingFor?: { kind: string; detail?: string; interactionId?: string } };
+      interactions: Array<{ kind: string; state: string }>;
+    };
+    expect(parked2.run.waitingFor).toMatchObject({ kind: "approval", detail: "implementation" });
+    expect(parked2.interactions.map((i) => [i.kind, i.state])).toEqual([["approval", "open"]]);
+
     const approved = await jarvis(["--json", "approve", runId, "--resume"]);
     expect(approved.code).toBe(0);
     const done = JSON.parse(approved.out) as {
-      run: { state: string; iterations: Record<string, number> };
+      run: { state: string; iterations: Record<string, number>; waitingFor?: unknown };
       steps: Array<{ stepId: string; status: string; outcome?: string }>;
+      interactions: unknown[];
     };
     expect(done.run.state).toBe("COMPLETED");
+    expect(done.run.waitingFor).toBeUndefined();
+    expect(done.interactions).toEqual([]);
     expect(done.run.iterations).toEqual({ "review->implementation#fix_required": 1 });
     expect(done.steps.map((s) => s.stepId)).toEqual([
       "research",
+      "requirements",
       "spec",
       "approve-spec",
       "approve-spec",
@@ -231,6 +250,8 @@ describe("sdd end to end", () => {
       "tests",
       "standards",
       "review",
+      "approve-impl",
+      "approve-impl",
     ]);
     expect(done.steps.find((s) => s.stepId === "review")?.outcome).toBe("fix_required");
 
@@ -246,6 +267,7 @@ describe("sdd end to end", () => {
     const status = await jarvis(["status", runId]);
     for (const t of [
       "research/research.json@1",
+      "requirements/requirements.json@1",
       "spec/spec.json@1",
       "impact/impact.json@1",
       "plan/plan.json@1",
@@ -316,6 +338,7 @@ Library code must not write to the console; use the logger.
     const first = await jarvis(["--json", "work", "ABC-43"]);
     expect(first.code).toBe(10);
     const runId = (JSON.parse(first.out) as { run: { id: string } }).run.id;
+    expect((await jarvis(["--json", "approve", runId, "--resume"])).code).toBe(10);
     const done = await jarvis(["--json", "approve", runId, "--resume"]);
     expect(done.code).toBe(0);
     const result = JSON.parse(done.out) as {

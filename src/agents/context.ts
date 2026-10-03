@@ -85,7 +85,13 @@ export function buildBaseMessages(input: BuildInput): Message[] {
     `Workflow: ${run.workflow}; step: ${ctx.step.id} (iteration ${ctx.iteration}); workspace: ${ctx.workspace.ref.mode}.`,
     outputContract(def),
   ].join("\n");
-  const l2 = loopReasons ? `# Why this step runs again\n${loopReasons}` : "";
+  const clarifications = describeClarifications(ctx);
+  const l2 = [
+    loopReasons ? `# Why this step runs again\n${loopReasons}` : "",
+    clarifications ? `# Clarifications decided with a human (binding)\n${clarifications}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 
   const knowledgeBudget = Math.floor(input.budget.chars * 0.3);
   const inputBudget = input.budget.chars - knowledgeBudget;
@@ -113,6 +119,30 @@ export function buildBaseMessages(input: BuildInput): Message[] {
   ];
 }
 
+/** Resolved clarification threads of the run (ADR-0019 §4): rules agents must follow. */
+function describeClarifications(ctx: StepContext): string | undefined {
+  const docs = ctx.runtime.artifacts.listLatest(ctx.run.id, "clarification");
+  if (docs.length === 0) return undefined;
+  const lines: string[] = [];
+  for (const a of docs) {
+    try {
+      const doc = JSON.parse(ctx.runtime.artifacts.text(a)) as {
+        question?: string;
+        rule?: string;
+        requirementCorrections?: string[];
+        assumptions?: string[];
+      };
+      lines.push(`- Q: ${clip(doc.question ?? "", 400).replace(/\n+/g, " ")}`);
+      lines.push(`  Rule: ${doc.rule ?? ""}`);
+      for (const c of doc.requirementCorrections ?? []) lines.push(`  Requirement correction: ${c}`);
+      for (const c of doc.assumptions ?? []) lines.push(`  Assumption: ${c}`);
+    } catch {
+      // not JSON
+    }
+  }
+  return lines.join("\n");
+}
+
 function describeLoopReasons(ctx: StepContext): string | undefined {
   // The most recent artifact of the step that sent us back carries `reasons` (ADR-0004 §2, §4).
   const loops = Object.entries(ctx.run.iterations).filter(
@@ -127,9 +157,11 @@ function describeLoopReasons(ctx: StepContext): string | undefined {
     // A composite step carries no artifact of its own: look at its children too (ADR-0020 §2).
     const children = ctx.workflow.steps.find((s) => s.id === from)?.children ?? [];
     const latestArtifacts = ctx.runtime.artifacts.listLatest(ctx.run.id);
-    const candidates = [from, ...children]
-      .map((id) => latestArtifacts.find((a) => a.stepId === id && a.type !== "tool-output"))
-      .filter((a) => a !== undefined);
+    const stepIds = new Set([from, ...children]);
+    const candidates = latestArtifacts.filter(
+      (a) =>
+        a.stepId !== undefined && stepIds.has(a.stepId) && a.type !== "tool-output" && a.type !== "candidate",
+    );
     for (const latest of candidates) {
       try {
         const doc = JSON.parse(ctx.runtime.artifacts.text(latest)) as {

@@ -120,7 +120,7 @@ function candidatesOf(
   runtime: Runtime,
 ): Array<{ artifact: ArtifactVersion; doc: CandidateDoc; decision?: string }> {
   const out: Array<{ artifact: ArtifactVersion; doc: CandidateDoc; decision?: string }> = [];
-  for (const run of runtime.runs.list({})) {
+  for (const run of runtime.runs.list({ includeTerminal: true })) {
     for (const artifact of runtime.artifacts.listLatest(run.id, "candidate")) {
       try {
         const doc = JSON.parse(runtime.artifacts.text(artifact)) as CandidateDoc;

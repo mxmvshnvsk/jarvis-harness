@@ -13,12 +13,19 @@ steps:
     agent: research
     phase: research
     outputs: [research]
+    transitions: { onSuccess: requirements }
+  - id: requirements
+    kind: agentic
+    agent: requirements
+    phase: requirements
+    inputs: [research]
+    outputs: [requirements]
     transitions: { onSuccess: spec }
   - id: spec
     kind: agentic
     agent: specification
     phase: spec
-    inputs: [research]
+    inputs: [research, requirements]
     outputs: [spec]
     transitions: { onSuccess: approve-spec }
   - id: approve-spec
@@ -79,10 +86,33 @@ steps:
     inputs: [spec, plan, implementation, tests]
     outputs: [review]
     transitions:
-      onSuccess: DONE
+      onSuccess: approve-impl
       onOutcome:
         fix_required: { to: implementation, maxIterations: 3 }
         plan_wrong: { to: plan, maxIterations: 1 }
+        requirements_wrong: { to: requirements, maxIterations: 1 }
+  # ADR-0019 §1, §5: the final human gate; jarvis review submit turns REVIEW markers into a
+  # review package and routes the gate to review-analysis step.
+  - id: approve-impl
+    kind: approval
+    artifactType: implementation
+    transitions:
+      onSuccess: DONE
+      onOutcome:
+        request_changes: { to: implementation, maxIterations: 3 }
+        review_submitted: { to: review-analysis, maxIterations: 5 }
+  - id: review-analysis
+    kind: agentic
+    agent: review-analysis
+    phase: review
+    inputs: [review-package, spec, requirements, implementation]
+    outputs: [review-analysis]
+    transitions:
+      onSuccess: approve-impl
+      onOutcome:
+        fix_required: { to: implementation, maxIterations: 3 }
+        spec_wrong: { to: spec, maxIterations: 1 }
+        requirements_wrong: { to: requirements, maxIterations: 1 }
 `;
 
 export const SMOKE_WORKFLOW = `
