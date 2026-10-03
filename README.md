@@ -154,6 +154,18 @@ Stage 12 — specialised agents (ADR-0001 §6):
   `release-notes` closes the workflow after the final gate with publishable markdown
 - The review agent sees docs and telemetry artifacts as inputs
 
+Stage 13 (phase 2) — TypeScript adapter and the incremental Project Graph (ADR-0008, ADR-0021 §6, §8):
+
+- `TypeScriptAdapter` (in-process, ts-morph): detection, `graph` and snapshot-backed
+  `codeIntelligence` → TypeScript projects run at level FULL
+- `TypeScriptExtractor`: facts per file (modules, exported symbols, imports, test relations),
+  sorted and content-addressed in `~/.jarvis/cache/graph/<repo>/blobs/<blobSha>.v<n>.json` —
+  shared by every branch and worktree; snapshots per tree in SQLite (migration 0003), last 5 kept
+- `jarvis knowledge update [--full]` (facts from cache, edges per tree, reuse when the tree is
+  unchanged) and `jarvis knowledge status [--verify]` (recompute without cache and compare —
+  the determinism check); `graph.impact` / `graph.neighbors` tools for agents, the impact agent
+  uses them as evidence and says when there is no snapshot
+
 Stage 13 (phase 1) — capability layer (ADR-0021 §2–3, §7):
 
 - Stack-neutral contracts in `src/core/capabilities/contracts.ts` (`LanguageAdapter`,

@@ -16,6 +16,7 @@ import {
   runStandardsCheck,
   runStandardsList,
 } from "./commands/knowledge.ts";
+import { runKnowledgeStatus, runKnowledgeUpdate } from "./commands/knowledgeGraph.ts";
 import { runMcpList } from "./commands/mcp.ts";
 import { runModelsList, runModelsProbe } from "./commands/models.ts";
 import { runApply, runApprove, runDaemon, runDiff, runGc, runResume, runWork } from "./commands/run.ts";
@@ -310,6 +311,22 @@ export function buildProgram(options: RunOptions = {}): Command {
     .option("--resume", "continue the run right away", false)
     .action(async (ref: string | undefined, opts: { resume: boolean }) => {
       await runReviewSubmit(ctxFor(), ref, opts);
+    });
+
+  const knowledge = program.command("knowledge").description("project graph (ADR-0008)");
+  knowledge
+    .command("update")
+    .description("incremental graph update: facts from the blob cache, edges per tree")
+    .option("--full", "ignore the cache and rebuild", false)
+    .action(async (opts: { full: boolean }) => {
+      await runKnowledgeUpdate(ctxFor(), opts);
+    });
+  knowledge
+    .command("status")
+    .description("latest snapshot; --verify recomputes without the cache and compares")
+    .option("--verify", "determinism check", false)
+    .action(async (opts: { verify: boolean }) => {
+      await runKnowledgeStatus(ctxFor(), opts);
     });
 
   const standards = program.command("standards").description("project standards (ADR-0020)");

@@ -26,6 +26,8 @@ const READ_REPO = [
   "git.diff",
   "git.status",
   "knowledge.read",
+  "graph.impact",
+  "graph.neighbors",
 ];
 const WRITE_REPO = ["repo.write", "repo.edit"];
 
@@ -93,6 +95,7 @@ export const IMPACT_AGENT: AgentDefinition = {
 Goal: determine exactly what the specification touches — code, tests, docs, telemetry, config — and what depends on it.
 Method:
 - Start from the research findings and the specification. Search for every symbol, route, event and module named there; follow imports and callers.
+- Use graph.impact on the files you intend to change: its dependents and covering tests are deterministic evidence (ADR-0008); when it reports no snapshot, fall back to repo.search and say so in "unknowns".
 - For each affected path say why it is affected and what kind of change it needs.
 - If the specification refers to areas the research did not cover and you cannot establish them yourself within your budget, set outcome "needs_research" with reasons naming the missing areas.
 Produce the result document when the affected set is complete.`,

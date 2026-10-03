@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { TypeScriptAdapter } from "../adapters/typescript/adapter.ts";
 import { BlobStore } from "../artifacts/blobs.ts";
 import { ArtifactStore } from "../artifacts/store.ts";
 import { BudgetManager } from "../budget/admission.ts";
@@ -7,6 +8,9 @@ import { CapabilityRegistry } from "../capabilities/registry.ts";
 import type { LoadedConfig } from "../core/config/load.ts";
 import { CompositeSecretResolver, EnvSecretResolver } from "../core/config/secrets.ts";
 import { InteractionStore } from "../interaction/store.ts";
+import { GraphStore } from "../knowledge/graph/store.ts";
+import { GraphToolProvider } from "../knowledge/graph/tools.ts";
+import { repoIdOf } from "../knowledge/graph/update.ts";
 import { McpPool, ToolsCache } from "../mcp/client/pool.ts";
 import { McpToolProvider } from "../mcp/provider.ts";
 import { type CassetteMode, FileCassetteStore } from "../models/cassette.ts";
@@ -53,6 +57,7 @@ export interface Runtime {
   readonly keychain: Keychain;
   /** Language adapters (ADR-0021); empty until an adapter pack registers. */
   readonly capabilities: CapabilityRegistry;
+  readonly graph: GraphStore;
   readonly secrets: CompositeSecretResolver;
   readonly mcp: { readonly pool: McpPool; readonly provider: McpToolProvider };
   readonly env: NodeJS.ProcessEnv;
@@ -110,6 +115,16 @@ export function createRuntime(loaded: LoadedConfig, options: RuntimeOptions = {}
   const pathPolicy = new PathPolicy([...DEFAULT_DENIED_PATHS, ...security.deniedPaths]);
   const registry = new ToolRegistry();
   registry.register(new LocalToolProvider(loaded.config));
+  const graph = new GraphStore(db.db);
+  registry.register(new GraphToolProvider(graph));
+  // Adapter packs (ADR-0021 §8): TypeScript ships in-process; others arrive as packs.
+  const capabilities = new CapabilityRegistry();
+  capabilities.register(
+    new TypeScriptAdapter((workspace) => {
+      const latest = graph.latest(repoIdOf(workspace));
+      return latest ? graph.load(latest.id) : undefined;
+    }),
+  );
   const pool = new McpPool({
     servers: loaded.config.mcp.servers,
     secrets,
@@ -137,7 +152,8 @@ export function createRuntime(loaded: LoadedConfig, options: RuntimeOptions = {}
     pathPolicy,
     registry,
     keychain,
-    capabilities: new CapabilityRegistry(),
+    capabilities,
+    graph,
     secrets,
     mcp: { pool, provider: mcpProvider },
     env,

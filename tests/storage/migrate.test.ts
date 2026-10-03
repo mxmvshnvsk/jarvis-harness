@@ -25,7 +25,7 @@ describe("openDatabase", () => {
     const opened = openDatabase(path, { packageVersion: "0.0.1-test" });
     try {
       expect(opened.schemaVersion).toBe(LATEST_SCHEMA_VERSION);
-      expect(opened.applied.map((m) => m.version)).toEqual([1, 2]);
+      expect(opened.applied.map((m) => m.version)).toEqual([1, 2, 3]);
       expect(opened.backupPath).toBeUndefined();
       const tables = opened.db
         .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
@@ -41,6 +41,9 @@ describe("openDatabase", () => {
           "approvals",
           "interactions",
           "interaction_messages",
+          "graph_snapshots",
+          "graph_nodes",
+          "graph_edges",
           "effects",
           "events",
           "usage_window",

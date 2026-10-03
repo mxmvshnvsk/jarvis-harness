@@ -184,6 +184,43 @@ ALTER TABLE runs ADD COLUMN waiting_for_json TEXT;
 ALTER TABLE approvals ADD COLUMN outcome TEXT;
 `,
   },
+  {
+    version: 3,
+    name: "project_graph",
+    sql: `
+-- ADR-0008 §1: tree-level snapshots of the project graph; file facts live in the blob cache.
+CREATE TABLE graph_snapshots (
+  id            TEXT PRIMARY KEY,
+  repo_id       TEXT NOT NULL,
+  tree_sha      TEXT NOT NULL,
+  branch        TEXT,
+  extractors    TEXT NOT NULL,
+  files         INTEGER NOT NULL,
+  cache_hits    INTEGER NOT NULL,
+  content_hash  TEXT NOT NULL,
+  created_at    TEXT NOT NULL
+);
+CREATE INDEX graph_snapshots_repo ON graph_snapshots(repo_id, created_at);
+
+CREATE TABLE graph_nodes (
+  snapshot_id   TEXT NOT NULL REFERENCES graph_snapshots(id),
+  id            TEXT NOT NULL,
+  kind          TEXT NOT NULL,
+  file          TEXT,
+  metadata_json TEXT,
+  PRIMARY KEY (snapshot_id, id)
+);
+
+CREATE TABLE graph_edges (
+  snapshot_id   TEXT NOT NULL REFERENCES graph_snapshots(id),
+  from_id       TEXT NOT NULL,
+  to_id         TEXT NOT NULL,
+  relation      TEXT NOT NULL
+);
+CREATE INDEX graph_edges_from ON graph_edges(snapshot_id, from_id);
+CREATE INDEX graph_edges_to ON graph_edges(snapshot_id, to_id);
+`,
+  },
 ];
 
 export const LATEST_SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]?.version ?? 0;
