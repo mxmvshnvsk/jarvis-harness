@@ -168,6 +168,29 @@ export const ToolsConfigSchema = z.strictObject({
   commandTimeoutMs: z.int().positive().default(600_000),
 });
 
+/** ADR-0001 §16 — git hooks. `jarvis prepush` reads this; `jarvis hooks install` wires the script. */
+export const HooksConfigSchema = z.strictObject({
+  prePush: z
+    .strictObject({
+      /** `block` fails the push on a required violation, a failing check or a blocking finding. */
+      mode: z.enum(["block", "advisory"]).default("block"),
+      /** Run the deterministic standards check on the pushed range. */
+      standards: z.boolean().default(true),
+      /** Names from `tools.local` (typecheck, lint, test …) run in order before the review. */
+      checks: z.array(z.string().min(1)).default([]),
+      /**
+       * Semantic review by the review agent: `auto` — only when the graph says something impacted was
+       * left untouched, or a semantic/hybrid standard applies; `always`; `never`.
+       */
+      semanticReview: z.enum(["auto", "never", "always"]).default("auto"),
+      /** Findings of this severity or worse block (in `block` mode). */
+      blockOn: z.enum(["blocker", "major"]).default("blocker"),
+      /** Skip the hook for these branch globs (e.g. `wip/**`). */
+      skipBranches: z.array(z.string().min(1)).default([]),
+    })
+    .prefault({}),
+});
+
 export const WorkspaceConfigSchema = z.strictObject({
   mode: WorkspaceModeSchema.default("worktree"),
   setup: z.string().min(1).optional(),
@@ -329,6 +352,7 @@ export const ProjectConfigSchema = z.strictObject({
   humanGate: HumanGateModeSchema.optional(),
   knowledge: KnowledgeConfigSchema.optional(),
   human: HumanConfigSchema.optional(),
+  hooks: HooksConfigSchema.optional(),
   /** Stack tags (ADR-0021 §3): typescript, react, csharp, … Empty = detected from the workspace. */
   stack: z.array(z.string().min(1)).optional(),
   /** ADR-0021 §9 polyglot: path glob → stacks, e.g. "backend/**": [csharp, aspnet]. */
@@ -356,6 +380,7 @@ export const ResolvedConfigSchema = z.strictObject({
   telemetry: TelemetryConfigSchema.prefault({}),
   knowledge: KnowledgeConfigSchema.prefault({}),
   human: HumanConfigSchema.prefault({}),
+  hooks: HooksConfigSchema.prefault({}),
   stack: z.array(z.string().min(1)).default([]),
   stackScopes: z.record(z.string().min(1), z.array(z.string().min(1))).prefault({}),
   /** Capability patterns denied by the active profile (ADR-0009 §1); applied by the Tool Router. */

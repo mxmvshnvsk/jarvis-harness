@@ -8,6 +8,7 @@ import { runContext, runReshape } from "./commands/context.ts";
 import { runDbBackup, runDbMigrate, runDbStatus } from "./commands/db.ts";
 import { renderDoctor, runDoctor } from "./commands/doctor.ts";
 import { runEvalsBaseline, runEvalsDiff, runEvalsRun, runEvalsRunToCase } from "./commands/evals.ts";
+import { runHooksInstall, runHooksStatus, runHooksUninstall, runPrePush } from "./commands/hooks.ts";
 import { runAnswer, runAttach, runReviewStatus, runReviewSubmit, runThreads } from "./commands/human.ts";
 import { renderInit, runInit } from "./commands/init.ts";
 import {
@@ -350,6 +351,49 @@ export function buildProgram(options: RunOptions = {}): Command {
     .action(async (ref: string, opts: { dryRun: boolean }) => {
       await runReshape(ctxFor(), ref, opts, true);
     });
+  const hooks = program.command("hooks").description("git hooks (ADR-0001 §16)");
+  hooks
+    .command("install")
+    .description("install the pre-push hook: standards, project checks, graph impact, review when warranted")
+    .option("--force", "back up and replace a pre-push hook jarvis did not write", false)
+    .action(async (opts: { force: boolean }) => {
+      await runHooksInstall(ctxFor(), opts);
+    });
+  hooks
+    .command("uninstall")
+    .description("remove the pre-push hook (restores the one it replaced)")
+    .action(async () => {
+      await runHooksUninstall(ctxFor());
+    });
+  hooks
+    .command("status")
+    .description("is the hook installed, and the hooks.prePush policy in force")
+    .action(async () => {
+      await runHooksStatus(ctxFor());
+    });
+  program
+    .command("prepush [remote] [url]")
+    .description("checks before a push: standards, project checks, graph impact, review when warranted")
+    .option("--hook", "read the pushed refs from stdin, as git passes them to the hook", false)
+    .option("--base <ref>", "compare against this ref (default: upstream or trunk)")
+    .option("--head <ref>", "the tip to check", "HEAD")
+    .option("--semantic", "always run the semantic review")
+    .option("--no-semantic", "never run the semantic review")
+    .action(
+      async (
+        remote: string | undefined,
+        _url: string | undefined,
+        opts: { hook: boolean; base?: string; head: string; semantic?: boolean },
+      ) => {
+        await runPrePush(ctxFor(), {
+          hook: opts.hook,
+          ...(opts.base ? { base: opts.base } : {}),
+          head: opts.head,
+          ...(opts.semantic === undefined ? {} : { semantic: opts.semantic }),
+          ...(remote ? { remote } : {}),
+        });
+      },
+    );
   program
     .command("threads")
     .description("open human threads: clarifications, reviews, approvals (ADR-0019)")

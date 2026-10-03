@@ -158,7 +158,27 @@ steps:
     transitions: { onSuccess: DONE }
 `;
 
+export const REVIEW_DIFF_WORKFLOW = `
+name: review-diff
+version: 1
+description: Semantic review of a git range without a specification (jarvis prepush, ADR-0001 §16)
+entry: review
+steps:
+  - id: review
+    kind: agentic
+    agent: review
+    phase: review
+    outputs: [review]
+    transitions:
+      onSuccess: DONE
+      onOutcome:
+        fix_required: { to: DONE }
+        plan_wrong: { to: DONE }
+        requirements_wrong: { to: DONE }
+`;
+
 export const BUILTIN_WORKFLOWS: Readonly<Record<string, string>> = {
   sdd: SDD_WORKFLOW,
   smoke: SMOKE_WORKFLOW,
+  "review-diff": REVIEW_DIFF_WORKFLOW,
 };
