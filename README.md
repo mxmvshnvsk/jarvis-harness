@@ -7,7 +7,7 @@ workflows, versioned project knowledge, context policies, resource governance, r
 > context policies + resource governance + tools + replaceable LLMs.
 
 Architecture and every decision live in [`docs/adr/`](docs/adr/). Start with ADR-0001 (target
-architecture); ADR-0002…0018 refine it.
+architecture); ADR-0002…0021 refine it.
 
 ## Status
 
