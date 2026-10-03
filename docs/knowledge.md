@@ -92,6 +92,14 @@ agents: [research, specification]
 `canRestartOnboarding`, `application`, `applications/` — детерминированно, с учётом словоформ (основа
 термина), и каждое расширение попадает в трассу результата.
 
+### Первичное наполнение: `jarvis onboard`
+
+Для существующего репозитория `jarvis onboard` собирает факты (модули и их зависимости из графа,
+документация, тесты, стиль коммитов) и пишет `architecture.md` и `conventions.md` с front matter
+`tags: [architecture, generated]` / `[conventions, generated]` и маркером регенерации. Это заготовки только с
+проверяемыми фактами; смысл модулей и правила добавляет человек. Подробности —
+[cli.md](cli.md#jarvis-onboard---dry-run---refresh---apply-config---no-graph).
+
 ## Пакет контекста (EngineeringContextPackage)
 
 На каждый вызов агента резолвер (`src/knowledge/resolver.ts`) собирает пакет по области задачи — стеки

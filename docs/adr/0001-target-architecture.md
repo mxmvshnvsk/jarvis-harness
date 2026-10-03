@@ -808,7 +808,7 @@ clients независимо друг от друга, сохраняя глав
 | §11 | 60k/20 мин | Пулы квот, per-run/per-step cap'ы | ADR-0018 |
 | §12 | SQLite | `node:sqlite`, миграции только вперёд, версионированные артефакты, привязка утверждений к хешу | ADR-0014, ADR-0005 |
 | §14 | Метрики, evals | Evals: record/replay/live, baseline/diff, run-to-case | ADR-0012 |
-| §15 | CLI на 13 команд | Реализованы 60+ команд и подкоманд, включая `hooks`, `prepush`, `context`, `compact`, `reset-context`, `research`, `spec`, `explain`; не сделан `stats` | ADR-0009, ADR-0018 |
+| §15 | CLI на 13 команд | Реализованы 60+ команд и подкоманд, включая `hooks`, `prepush`, `context`, `compact`, `reset-context`, `research`, `spec`, `explain`, `onboard`; не сделан `stats` | ADR-0009, ADR-0018 |
 | §16 | `context/`, `integrations/` | Контекст в `agents/`, CI в `cli/`; добавлены `app/`, `interaction/`, `capabilities/`, `adapters/` | — |
 | §19 | 8 сценариев отказа | + аренда, неразрешённый эффект, CI без человека, UNSUPPORTED, ручные правки | ADR-0002, ADR-0009, ADR-0019, ADR-0021 |
 | §20, §21 | План и критерии | Добавлены статус и коммиты по каждому пункту | — |

@@ -15,6 +15,11 @@ Remaining commands of ADR-0001 §15:
 - `jarvis explain <file[:line]|commit|run>` — blame → commit → `Jarvis-Run` trailer → run → steps, artifacts with
   sources and approvals, clarifications, tool-call counts; `jarvis apply --message` now keeps the trailer
 
+- `jarvis onboard` (quick mode) — deterministic repository scan without a model: module/graph facts, docs, tests and
+  commit style, suggested `tools.local`, `architecture.md`/`conventions.md` skeletons with a regeneration marker
+  (`src/onboarding/*`, `src/cli/commands/onboard.ts`, `tests/cli/onboard.test.ts`). The agent-based mode
+  (map → synthesize → verify → gate) is not implemented yet
+
 ADR-0001 §20 stage 12 (git hooks) — `f11ca47`:
 
 - `jarvis hooks install|uninstall|status` — a thin `pre-push` shim honouring `core.hooksPath` and linked

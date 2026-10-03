@@ -28,6 +28,7 @@ import {
 } from "./commands/knowledgeGraph.ts";
 import { runMcpList, runMcpServe } from "./commands/mcp.ts";
 import { runModelsList, runModelsProbe } from "./commands/models.ts";
+import { runOnboard } from "./commands/onboard.ts";
 import { runApply, runApprove, runDaemon, runDiff, runGc, runResume, runWork } from "./commands/run.ts";
 import { runCancel, runStatus } from "./commands/status.ts";
 import { type CliContext, defaultContext } from "./context.ts";
@@ -132,6 +133,16 @@ export function buildProgram(options: RunOptions = {}): Command {
       await runWork(ctxFor(), task, { workflow: "spec", ...(opts.base ? { base: opts.base } : {}) });
     });
 
+  program
+    .command("onboard")
+    .description("scan the repository (no model): propose tools.local, write knowledge skeletons")
+    .option("--dry-run", "show what would be written, write nothing", false)
+    .option("--refresh", "regenerate files that still carry the generated marker", false)
+    .option("--apply-config", "fill an empty tools.local in .jarvis/project.yaml", false)
+    .option("--no-graph", "skip the project graph (module dependencies)")
+    .action(async (opts: { dryRun: boolean; refresh: boolean; applyConfig: boolean; graph: boolean }) => {
+      await runOnboard(ctxFor(), opts);
+    });
   program
     .command("explain <target>")
     .description(

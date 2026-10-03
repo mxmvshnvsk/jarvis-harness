@@ -104,6 +104,7 @@ The full walkthrough — project policy, knowledge, clarifications, review — i
 ### Useful next steps
 
 ```sh
+jarvis onboard               # scan an existing repo: suggest tools.local, write architecture.md/conventions.md skeletons
 jarvis spec ABC-42              # only research → requirements → spec, up to its approval
 jarvis hooks install            # standards, checks and impact analysis before every git push
 jarvis explain src/foo.ts:42    # why this line exists: task → spec → sources → tool calls
