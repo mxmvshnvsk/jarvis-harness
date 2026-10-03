@@ -1,4 +1,6 @@
 import { join } from "node:path";
+import { BlobStore } from "../artifacts/blobs.ts";
+import { ArtifactStore } from "../artifacts/store.ts";
 import { BudgetManager } from "../budget/admission.ts";
 import { SqliteUsageStore } from "../budget/usage.ts";
 import type { LoadedConfig } from "../core/config/load.ts";
@@ -7,7 +9,10 @@ import { type CassetteMode, FileCassetteStore } from "../models/cassette.ts";
 import { ModelGateway } from "../models/gateway.ts";
 import { ProbeStore } from "../models/probe.ts";
 import { FileCalibrationStore, TokenEstimator } from "../models/tokens.ts";
+import { CheckpointStore, StepHistoryStore } from "../storage/checkpoints.ts";
 import { type OpenedDatabase, openDatabase } from "../storage/db.ts";
+import { EffectJournal } from "../storage/effects.ts";
+import { SqliteRunStore } from "../storage/runStore.ts";
 import { SqliteEventStore } from "../telemetry/events.ts";
 
 /** Everything that needs the database and the configuration, wired once per process. */
@@ -19,6 +24,12 @@ export interface Runtime {
   readonly budget: BudgetManager;
   readonly gateway: ModelGateway;
   readonly probes: ProbeStore;
+  readonly runs: SqliteRunStore;
+  readonly blobs: BlobStore;
+  readonly artifacts: ArtifactStore;
+  readonly checkpoints: CheckpointStore;
+  readonly history: StepHistoryStore;
+  readonly effects: EffectJournal;
   close(): void;
 }
 
@@ -45,6 +56,7 @@ export function createRuntime(loaded: LoadedConfig, options: RuntimeOptions = {}
       ? { cassette: { mode: options.cassette.mode, store: new FileCassetteStore(options.cassette.dir) } }
       : {}),
   });
+  const blobs = new BlobStore(db.db, join(loaded.home.artifactsDir, "blobs"));
   return {
     loaded,
     db,
@@ -53,6 +65,12 @@ export function createRuntime(loaded: LoadedConfig, options: RuntimeOptions = {}
     budget,
     gateway,
     probes: new ProbeStore(loaded.home.cacheDir),
+    runs: new SqliteRunStore(db.db),
+    blobs,
+    artifacts: new ArtifactStore(db.db, blobs),
+    checkpoints: new CheckpointStore(db.db),
+    history: new StepHistoryStore(db.db),
+    effects: new EffectJournal(db.db, blobs),
     close: () => db.close(),
   };
 }

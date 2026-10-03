@@ -31,6 +31,17 @@ Stage 1 — model runtime:
 - `jarvis models list` — models, egress, pools, window usage, probe state
 - `jarvis models probe <id>` — canary requests; drift between config and reality shows up in `doctor`
 
+Stage 2 — durable core:
+
+- `RunStore` with the state machine (ADR-0001 §4 + `CANCELLED`), lease with epoch fencing, heartbeat
+  and `--steal` semantics (ADR-0002 §5–6)
+- `ArtifactStore` over a content-addressed `BlobStore`: immutable versions, provenance on every one,
+  human edits as new versions with a unified diff, approvals bound to the exact content hash (ADR-0005)
+- `CheckpointStore`, `StepHistoryStore` and the `EffectJournal` with the intended → done / verify
+  protocol and lease fencing (`runEffect`, ADR-0002 §2–4)
+- `jarvis status [run] [--all] [--watch N]` — active runs and pool budgets, or one run in detail:
+  steps, checkpoint, artifacts and approvals, effects, events, tokens; `jarvis cancel <run>`
+
 Configuration precedence: CLI flags → `JARVIS_*` env → `.jarvis/project.yaml` → `~/.jarvis/config.yaml`
 → defaults; profiles (`--profile ci`) may only narrow. Secrets are references (`env:VAR`,
 `keychain:ID`), never literals.

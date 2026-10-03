@@ -33,6 +33,7 @@ export const ProvenanceSchema = z.discriminatedUnion("kind", [
   }),
 ]);
 export type Provenance = z.infer<typeof ProvenanceSchema>;
+export type ProvenanceInput = z.input<typeof ProvenanceSchema>;
 
 /** ADR-0005 §1 — one immutable version of a logical artifact. */
 export const ArtifactVersionSchema = z.strictObject({

@@ -6,6 +6,7 @@ import { runDbBackup, runDbMigrate, runDbStatus } from "./commands/db.ts";
 import { renderDoctor, runDoctor } from "./commands/doctor.ts";
 import { renderInit, runInit } from "./commands/init.ts";
 import { runModelsList, runModelsProbe } from "./commands/models.ts";
+import { runCancel, runStatus } from "./commands/status.ts";
 import { type CliContext, defaultContext } from "./context.ts";
 import { CliExit, createOutput, EXIT } from "./output.ts";
 
@@ -76,6 +77,23 @@ export function buildProgram(options: RunOptions = {}): Command {
     .option("--sources", "show where every value comes from (ADR-0014 §2)")
     .action(async (opts: { sources?: boolean }) => {
       await runConfigShow(ctxFor(), opts);
+    });
+
+  program
+    .command("status [run]")
+    .description("active runs and budget, or one run in detail (ADR-0018 §1)")
+    .option("--all", "include completed and cancelled runs")
+    .option("--watch <seconds>", "refresh every N seconds", (v: string) => Number(v))
+    .option("--events <n>", "number of recent events to show", (v: string) => Number(v))
+    .action(async (run: string | undefined, opts: { all?: boolean; watch?: number; events?: number }) => {
+      await runStatus(ctxFor(), run, opts);
+    });
+
+  program
+    .command("cancel <run>")
+    .description("cancel a run: immediately when idle, at the next safe point when executing (ADR-0002 §6)")
+    .action(async (run: string) => {
+      await runCancel(ctxFor(), run);
     });
 
   const models = program
