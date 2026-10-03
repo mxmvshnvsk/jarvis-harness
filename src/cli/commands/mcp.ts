@@ -1,6 +1,8 @@
 import { createRuntime } from "../../app/runtime.ts";
 import type { ServerReport } from "../../mcp/provider.ts";
+import { serveStdio } from "../../mcp/server.ts";
 import { networkAllowed } from "../../security/policy/egress.ts";
+import { packageInfo } from "../../version.ts";
 import type { CliContext } from "../context.ts";
 import { CliExit, EXIT, padEnd } from "../output.ts";
 import { loadForCli } from "./config.ts";
@@ -63,6 +65,22 @@ export async function runMcpList(ctx: CliContext, options: { refresh?: boolean }
       }
     });
     if (rows.some((r) => r.live && !r.live.ok)) throw new CliExit(EXIT.error);
+  } finally {
+    await runtime.close();
+  }
+}
+
+/** `jarvis mcp serve` — Jarvis as a read-only MCP server on stdio (ADR-0017 §7). */
+export async function runMcpServe(ctx: CliContext): Promise<void> {
+  const loaded = await loadForCli(ctx);
+  const runtime = createRuntime(loaded, { env: ctx.env });
+  try {
+    await serveStdio(runtime, loaded.project?.root, packageInfo().version);
+    // The transport owns the process from here: stay alive until stdin closes.
+    await new Promise<void>((resolve) => {
+      process.stdin.on("end", () => resolve());
+      process.stdin.on("close", () => resolve());
+    });
   } finally {
     await runtime.close();
   }

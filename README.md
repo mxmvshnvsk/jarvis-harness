@@ -154,6 +154,17 @@ Stage 12 — specialised agents (ADR-0001 §6):
   `release-notes` closes the workflow after the final gate with publishable markdown
 - The review agent sees docs and telemetry artifacts as inputs
 
+Stage 14 — IDE integration and evals (ADR-0017 §7, ADR-0012):
+
+- `jarvis mcp serve` — Jarvis as a read-only MCP server on stdio for IDEs and other agents:
+  `knowledge.search` (knowledge, standards, skills), `spec.get`, `run.status`, `context.inspect`
+  (the exact EngineeringContextPackage an agent would get)
+- `jarvis evals run --suite <s> [--mode record|replay|live] [--variant k=v]` — workflow-tier
+  cases (`evals/<suite>/<case>/case.yaml` + fixture repository + cassette): gates auto-approved,
+  scored deterministically (tests, file recall, acceptance coverage, required sources, loops,
+  tokens) with the headline *successes per 10k output tokens*; results in `evals/results/`,
+  `jarvis evals baseline <s>` and `jarvis evals diff <s> [--tolerance]` (non-zero on regression)
+
 Stage 13 (phase 2) — TypeScript adapter and the incremental Project Graph (ADR-0008, ADR-0021 §6, §8):
 
 - `TypeScriptAdapter` (in-process, ts-morph): detection, `graph` and snapshot-backed

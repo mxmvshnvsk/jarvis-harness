@@ -6,6 +6,7 @@ import { runCi, runExport, runImport } from "./commands/ci.ts";
 import { runConfigShow } from "./commands/config.ts";
 import { runDbBackup, runDbMigrate, runDbStatus } from "./commands/db.ts";
 import { renderDoctor, runDoctor } from "./commands/doctor.ts";
+import { runEvalsBaseline, runEvalsDiff, runEvalsRun } from "./commands/evals.ts";
 import { runAnswer, runAttach, runReviewSubmit, runThreads } from "./commands/human.ts";
 import { renderInit, runInit } from "./commands/init.ts";
 import {
@@ -17,7 +18,7 @@ import {
   runStandardsList,
 } from "./commands/knowledge.ts";
 import { runKnowledgeStatus, runKnowledgeUpdate } from "./commands/knowledgeGraph.ts";
-import { runMcpList } from "./commands/mcp.ts";
+import { runMcpList, runMcpServe } from "./commands/mcp.ts";
 import { runModelsList, runModelsProbe } from "./commands/models.ts";
 import { runApply, runApprove, runDaemon, runDiff, runGc, runResume, runWork } from "./commands/run.ts";
 import { runCancel, runStatus } from "./commands/status.ts";
@@ -248,6 +249,43 @@ export function buildProgram(options: RunOptions = {}): Command {
     .option("--refresh", "connect to every server and refresh the tools cache", false)
     .action(async (opts: { refresh: boolean }) => {
       await runMcpList(ctxFor(), opts);
+    });
+
+  mcp
+    .command("serve")
+    .description(
+      "serve Jarvis as a read-only MCP server on stdio: knowledge.search, spec.get, run.status, context.inspect",
+    )
+    .action(async () => {
+      await runMcpServe(ctxFor());
+    });
+
+  const evals = program
+    .command("evals")
+    .description("workflow evals on fixture repositories with cassettes (ADR-0012)");
+  evals
+    .command("run")
+    .requiredOption("--suite <name|dir>", "suite under evals/ or a directory")
+    .option("--mode <mode>", "live | record | replay", "replay")
+    .option("--variant <key=value...>", "configuration overrides applied to every case")
+    .option("--out <file>", "result file (default: evals/results/<date>-<suite>.json)")
+    .action(async (opts: { suite: string; mode: string; variant?: string[]; out?: string }) => {
+      await runEvalsRun(ctxFor(), opts);
+    });
+  evals
+    .command("baseline <suite>")
+    .description("pin the latest result of the suite as its baseline")
+    .option("--from <file>", "use this result file instead of the latest")
+    .action(async (suite: string, opts: { from?: string }) => {
+      await runEvalsBaseline(ctxFor(), suite, opts);
+    });
+  evals
+    .command("diff <suite>")
+    .description("compare the latest result with the baseline; non-zero on regression beyond tolerance")
+    .option("--tolerance <ratio>", "allowed relative drop", Number.parseFloat, 0.05)
+    .option("--from <file>", "compare this result file instead of the latest")
+    .action(async (suite: string, opts: { tolerance: number; from?: string }) => {
+      await runEvalsDiff(ctxFor(), suite, opts);
     });
 
   const auth = program.command("auth").description("credentials in the OS keychain (ADR-0017 §5)");
