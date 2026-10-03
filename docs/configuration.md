@@ -59,17 +59,18 @@ roles:                         # могут быть и в проекте; пр�
   research:       { models: [deepseek-flash] }
   implementation: { models: [qwen-coder, deepseek-flash] }   # порядок = предпочтение
   review:         { models: [deepseek-flash], maxOutput: 4096 }
-  compaction:     { models: [deepseek-flash] }
+  compaction:     { models: [deepseek-flash] }   # зарезервировано: компакции контекста ещё нет (ADR-0013)
 
 mcp: { servers: {} }           # можно и здесь (личные серверы), обычно — в проекте
 context: {}                    # пороги сжатия контекста, см. ниже
-telemetry:
+telemetry:                     # ЗАРЕЗЕРВИРОВАНО: политика egress проверяется (doctor), экспортёра пока нет
   export: { enabled: false, url: https://otel.corp.local, network: intranet, payloads: false, maxPayloadBytes: 4096 }
 ```
 
 Роли, которые используют встроенные агенты: `research` (research, requirements, specification, impact,
 plan, release-notes), `implementation` (implementation, test, docs, telemetry), `review` (review,
-review-analysis), `compaction` (сжатие контекста). Роутер выбирает первую модель роли, которая
+review-analysis); `compaction` зарезервирована под компакцию контекста (ADR-0013), runtime её пока не
+использует. Роутер выбирает первую модель роли, которая
 удовлетворяет требованиям агента (tools, structured output) и правилу egress для `dataClass` проекта.
 
 ## `.jarvis/project.yaml`
@@ -127,7 +128,7 @@ knowledge:                     # ADR-0020 §3, §5; ADR-0015
     embeddings: embed          # id модели с /embeddings; выключено по умолчанию (ADR-0015 §6)
   sources: []                  # зарезервировано
 
-context:                       # ADR-0013 — сжатие контекста по доле окна
+context:                       # ADR-0013 — ЗАРЕЗЕРВИРОВАНО: схема принимается, runtime пока не применяет
   thresholds:
     default: { watch: 0.6, compact: 0.75, aggressive: 0.85, reset: 0.95 }
     byModel: { deepseek-flash: { compact: 0.7 } }

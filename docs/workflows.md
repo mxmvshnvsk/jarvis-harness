@@ -109,7 +109,7 @@ flowchart LR
 | L2 | текущее состояние: шаг, итерация, loop reasons, принятые уточнения | |
 | L3 | входные артефакты | укладывается в бюджет вместе с L4 |
 | L4 | EngineeringContextPackage: навыки > стандарты > знание | справедливое деление бюджета; остальное «по запросу» через `knowledge.read` |
-| L5 | история вызовов инструментов | сжимается по порогам `context.thresholds` |
+| L5 | история вызовов инструментов | растёт в пределах `limits`; автоматическая компакция по порогам (ADR-0013) ещё не реализована |
 
 Ссылки пакета (какие навыки/стандарты/документы агент видел) попадают в provenance артефакта результата.
 
@@ -161,5 +161,5 @@ steps:
 `effect.done|failed|verified|replayed|unresolved`, `approval.recorded|skipped|committed`,
 `interaction.opened|turn|resolved|rejected`, `review.submitted|classified|resolved`,
 `standards.checked`, `retrieval.knowledge`, `graph.update`, `security.redaction`,
-`mcp.discovered|unavailable`, `daemon.tick`. `jarvis status <run> --events n` показывает последние;
-`telemetry.export` отправляет их во внешний приёмник (ADR-0018).
+`mcp.discovered|unavailable`, `daemon.tick`. `jarvis status <run> --events n` показывает последние.
+Внешнего экспорта событий пока нет: схема `telemetry.export` и проверка egress есть, экспортёра — нет.

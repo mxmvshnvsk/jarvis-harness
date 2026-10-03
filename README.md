@@ -73,19 +73,22 @@ The full pilot walkthrough is in [docs/QUICKSTART.md](docs/QUICKSTART.md).
 | [docs/integrations.md](docs/integrations.md) | models, MCP profiles, `jarvis mcp serve` for IDEs, keychain |
 | [docs/ci.md](docs/ci.md) · [docs/evals.md](docs/evals.md) | CI mode and run bundles · workflow evals |
 | [docs/security.md](docs/security.md) · [docs/extending.md](docs/extending.md) | egress, redaction, policy, effects · adapters, tools, agents |
-| [docs/adr/](docs/adr/) | the decisions (ADR-0002 … ADR-0021) |
+| [docs/adr/](docs/adr/) | the decisions: [ADR-0001 target architecture](docs/adr/0001-target-architecture.md), ADR-0002 … ADR-0021 |
 | [docs/process/stages.md](docs/process/stages.md) | how it was built, stage by stage |
 
 ## Status
 
-Every stage of the ADR-0001 §20 roadmap is implemented and tested: bootstrap, model runtime, durable
-core, workflow engine, tool platform with redaction, agents and the `sdd` workflow, MCP and credentials,
-standards/skills/knowledge with retrieval, human collaboration (gates, threads, Review Mode), CI mode
-and run transfer, specialised agents, the capability layer with a TypeScript adapter and the
-incremental project graph, IDE integration (`jarvis mcp serve`) and evals.
+The roadmap of [ADR-0001 §20](docs/adr/0001-target-architecture.md) is implemented and tested except two
+stages that are partial: bootstrap, model runtime, durable core, workflow engine, tool platform with
+redaction, agents and the `sdd` workflow, MCP and credentials, standards/skills/knowledge with retrieval,
+human collaboration (gates, threads, Review Mode), CI mode and run transfer, specialised agents, the
+capability layer with a TypeScript adapter and the incremental project graph, IDE integration
+(`jarvis mcp serve`), the daemon and evals.
 
-What's next is a real-repository pilot, a native Anthropic provider adapter, external adapter packs
-(C#/.NET first) and the embeddings gate of ADR-0015 §6.
+Not done yet (ADR-0001, appendix B): context compaction and manual context controls (ADR-0013 — the
+configuration schema exists, the runtime does not use it), git hooks / pre-push, telemetry export, a
+native Anthropic provider adapter, adapters for other languages (C#/.NET first), the embeddings gate of
+ADR-0015 §6 — and the real-repository pilot.
 
 ## Requirements
 
