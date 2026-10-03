@@ -1,7 +1,8 @@
-import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import { z } from "zod";
+import type { KnowledgeConfig } from "../core/config/schema.ts";
 import type { ArtifactVersion } from "../core/domain/artifact.ts";
+import { renderPackage } from "../knowledge/package.ts";
+import type { EngineeringContextPackage } from "../knowledge/resolver.ts";
 import type { Message } from "../models/types.ts";
 import type { StepContext } from "../orchestration/types.ts";
 import type { CapabilityDescriptor } from "../tools/types.ts";
@@ -15,26 +16,12 @@ import type { AgentDefinition } from "./definition.ts";
  *   L1 task / instructions / output contract
  *   L2 current state (step, iteration, loop reasons)
  *   L3 working set: input artifacts
- *   L4 retrieved knowledge: .jarvis/knowledge/*.md
+ *   L4 EngineeringContextPackage: skills > standards > knowledge (ADR-0020 §3)
  *   L5 tool history (appended by the runner)
  */
 export interface ContextBudget {
   /** Characters available for L3+L4 together. */
   readonly chars: number;
-}
-
-export interface KnowledgeDoc {
-  readonly name: string;
-  readonly text: string;
-}
-
-export function loadKnowledge(workspacePath: string): KnowledgeDoc[] {
-  const dir = join(workspacePath, ".jarvis", "knowledge");
-  if (!existsSync(dir)) return [];
-  return readdirSync(dir)
-    .filter((f) => f.endsWith(".md") && f !== "README.md")
-    .sort()
-    .map((f) => ({ name: f, text: readFileSync(join(dir, f), "utf8") }));
 }
 
 function clip(text: string, max: number): string {
@@ -54,6 +41,7 @@ export function systemLayer(def: AgentDefinition, tools: readonly CapabilityDesc
     "- Never invent file contents, APIs, tickets or test results. What you cannot verify is an unknown.",
     "- Secrets in tool output appear as [REDACTED:…]; never try to recover or guess them.",
     "- Tool calls that are denied by policy are final; do not retry them with other arguments.",
+    "- Precedence of guidance: these rules and the agent instructions, then required standards, then skills, then recommended standards and project knowledge.",
     "- When you are done, reply without tool calls; the runtime will then ask for the result document.",
     "",
     `# Agent: ${def.id}`,
@@ -82,7 +70,8 @@ export interface BuildInput {
   readonly ctx: StepContext;
   readonly tools: readonly CapabilityDescriptor[];
   readonly inputs: ReadonlyArray<{ artifact: ArtifactVersion; text: string }>;
-  readonly knowledge: readonly KnowledgeDoc[];
+  readonly pkg: EngineeringContextPackage;
+  readonly knowledgeConfig: KnowledgeConfig;
   readonly budget: ContextBudget;
 }
 
@@ -112,15 +101,9 @@ export function buildBaseMessages(input: BuildInput): Message[] {
     .map((i) => `- ${i.artifact.type}/${i.artifact.name}@${i.artifact.version}`);
   if (named.length > 0) l3.push(`## Other inputs (available on request)\n${named.join("\n")}`);
 
-  const perDoc = input.knowledge.length > 0 ? Math.floor(knowledgeBudget / input.knowledge.length) : 0;
-  const l4 = input.knowledge.map((k) => `## Knowledge ${k.name}\n${clip(k.text, perDoc)}`);
+  const l4 = renderPackage(input.pkg, knowledgeBudget, input.knowledgeConfig);
 
-  const user = [
-    l1,
-    l2,
-    l3.length > 0 ? `# Inputs\n${l3.join("\n\n")}` : "# Inputs\n(none)",
-    l4.length > 0 ? `# Project knowledge\n${l4.join("\n\n")}` : "",
-  ]
+  const user = [l1, l2, l3.length > 0 ? `# Inputs\n${l3.join("\n\n")}` : "# Inputs\n(none)", l4]
     .filter((s) => s.length > 0)
     .join("\n\n");
 
@@ -141,8 +124,13 @@ function describeLoopReasons(ctx: StepContext): string | undefined {
     const from = edge.split("->")[0] as string;
     const outcome = edge.split("#")[1] as string;
     lines.push(`- ${from} returned "${outcome}" (${n} time${n > 1 ? "s" : ""})`);
-    const latest = ctx.runtime.artifacts.listLatest(ctx.run.id).find((a) => a.stepId === from);
-    if (latest) {
+    // A composite step carries no artifact of its own: look at its children too (ADR-0020 §2).
+    const children = ctx.workflow.steps.find((s) => s.id === from)?.children ?? [];
+    const latestArtifacts = ctx.runtime.artifacts.listLatest(ctx.run.id);
+    const candidates = [from, ...children]
+      .map((id) => latestArtifacts.find((a) => a.stepId === id && a.type !== "tool-output"))
+      .filter((a) => a !== undefined);
+    for (const latest of candidates) {
       try {
         const doc = JSON.parse(ctx.runtime.artifacts.text(latest)) as {
           reasons?: Array<{ kind: string; summary: string }>;

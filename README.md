@@ -98,6 +98,25 @@ Stage 6 — MCP and credentials (ADR-0017):
 - `jarvis work` preflight: every server the workflow's agents may reach must answer `tools/list`
   before a run is created; `jarvis doctor` reports credentials, discovery state and unknown profiles
 
+Stage 8 — context engine: standards, skills and knowledge (ADR-0020, ADR-0021 §3):
+
+- Typed `Standard`s in `.jarvis/standards/<id>.md` (front matter: scope, severity, verification
+  with a mandatory `check` for deterministic/hybrid) and `Skill`s in `.jarvis/skills/<id>/`
+  (`skill.yaml` + `instructions.md`); built-in generic skills, project overrides by id, user-level
+  additions that can never be `required`
+- Deterministic resolver → `EngineeringContextPackage` per agent call: most specific skills
+  (capped by `knowledge.maxSkills`), standards by scope plus the skills' `requiredStandards`,
+  knowledge by front-matter scope; rendered as layer L4 with a fair-share budget and
+  "available on request" refs served by the `knowledge.read` tool; the package's refs land in the
+  result artifact's provenance
+- `standards.check` step inside the `sdd` `verify` composite: pattern and tool checks over the
+  files changed since the base commit → `standards_violation` sends the implementation back with
+  the violations as loop reasons
+- Review agent reports `standardsChecked` and proposes `candidates`; stored as `candidate`
+  artifacts, promoted or rejected by a human: `jarvis candidates list|promote|reject`
+- `jarvis standards list|check`, `jarvis skills list`; `stack:` in project config with detection
+  from the workspace; architecture fitness test keeps the core stack-neutral
+
 Configuration precedence: CLI flags → `JARVIS_*` env → `.jarvis/project.yaml` → `~/.jarvis/config.yaml`
 → defaults; profiles (`--profile ci`) may only narrow. Secrets are references (`env:VAR`,
 `keychain:ID`), never literals.

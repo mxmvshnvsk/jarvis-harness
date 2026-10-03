@@ -224,10 +224,12 @@ describe("sdd end to end", () => {
       "implementation",
       "verify",
       "tests",
+      "standards",
       "review",
       "implementation",
       "verify",
       "tests",
+      "standards",
       "review",
     ]);
     expect(done.steps.find((s) => s.stepId === "review")?.outcome).toBe("fix_required");
@@ -259,5 +261,92 @@ describe("sdd end to end", () => {
     expect(apply.code).toBe(0);
     expect(readFileSync(join(sb.project, "src", "onboarding.ts"), "utf8")).toContain("return true;");
     expect(existsSync(join(sb.project, ".jarvis"))).toBe(true);
+  });
+
+  it("sends the implementation back when a required standard is violated (ADR-0020 §2)", async () => {
+    mkdirSync(join(sb.project, ".jarvis", "standards"), { recursive: true });
+    writeFileSync(
+      join(sb.project, ".jarvis", "standards", "no-console.md"),
+      `---
+id: no-console
+title: No console output in library code
+scope: { paths: ["src/**"] }
+severity: required
+verification:
+  kind: deterministic
+  check: { pattern: { glob: "src/**/*.ts", mustNot: 'console\\.log' } }
+---
+Library code must not write to the console; use the logger.
+`,
+    );
+    mkdirSync(join(sb.project, ".jarvis", "skills", "onboarding-change"), { recursive: true });
+    writeFileSync(
+      join(sb.project, ".jarvis", "skills", "onboarding-change", "skill.yaml"),
+      "id: onboarding-change\nappliesTo: { paths: ['src/onboarding*'] }\nrequiredStandards: [no-console]\n",
+    );
+    writeFileSync(
+      join(sb.project, ".jarvis", "skills", "onboarding-change", "instructions.md"),
+      "Keep the onboarding flag logic in one place.",
+    );
+    git(["add", "-A"]);
+    git(["commit", "-q", "-m", "standards"]);
+
+    let implRounds = 0;
+    server.respond((req) => {
+      const agent = agentOf(req);
+      if (wantsResult(req)) return completion(JSON.stringify(docs[agent]?.(2)));
+      if (agent === "implementation" && toolCount(req) === 0) {
+        implRounds += 1;
+        return toolCallCompletion("repo.edit", {
+          path: "src/onboarding.ts",
+          oldText: "return false;",
+          newText: implRounds === 1 ? 'console.log("restart");\n  return true;' : "return true;",
+        });
+      }
+      if (agent === "implementation" && toolCount(req) === 1 && implRounds === 2)
+        return toolCallCompletion("repo.edit", {
+          path: "src/onboarding.ts",
+          oldText: 'console.log("restart");\n  ',
+          newText: "",
+        });
+      if (agent === "test" && toolCount(req) === 0) return toolCallCompletion("project.check", {});
+      return completion("done");
+    });
+
+    const first = await jarvis(["--json", "work", "ABC-43"]);
+    expect(first.code).toBe(10);
+    const runId = (JSON.parse(first.out) as { run: { id: string } }).run.id;
+    const done = await jarvis(["--json", "approve", runId, "--resume"]);
+    expect(done.code).toBe(0);
+    const result = JSON.parse(done.out) as {
+      run: { state: string; iterations: Record<string, number> };
+      steps: Array<{ stepId: string; outcome?: string }>;
+    };
+    expect(result.run.state).toBe("COMPLETED");
+    expect(result.run.iterations).toEqual({ "verify->implementation#standards_violation": 1 });
+    expect(result.steps.filter((s) => s.stepId === "standards").map((s) => s.outcome)).toEqual([
+      "standards_violation",
+      undefined,
+    ]);
+
+    // The implementation agent saw the skill, the required standard and — on the second round — the violation.
+    const implRequests = server.requests.filter((r) => agentOf(r) === "implementation");
+    const firstPrompt = lastUser(implRequests[0] as CapturedRequest);
+    expect(firstPrompt).toContain("## Skill onboarding-change@1");
+    expect(firstPrompt).toContain(
+      "## Standard no-console@1 — No console output in library code [required; checked by pattern src/**/*.ts]",
+    );
+    const retryPrompt = implRequests
+      .map(lastUser)
+      .find((t) => t.includes("# Why this step runs again")) as string;
+    expect(retryPrompt).toContain('verify returned "standards_violation"');
+    expect(retryPrompt).toContain("no-console@1 src/onboarding.ts:2: forbidden pattern");
+
+    const status = await jarvis(["--json", "status", runId]);
+    const detail = JSON.parse(status.out) as { artifacts: Array<{ type: string; sourceRefs?: string[] }> };
+    const impl = detail.artifacts.find((a) => a.type === "implementation");
+    expect(impl?.sourceRefs).toEqual(
+      expect.arrayContaining(["skill:onboarding-change@1", "standard:no-console@1"]),
+    );
   });
 });

@@ -210,6 +210,23 @@ export const ContextConfigSchema = z.strictObject({
   maxContext: z.int().positive().optional(),
 });
 
+/** ADR-0020 §3, §5 — how standards, skills and knowledge are selected and budgeted. */
+export const KnowledgeConfigSchema = z.strictObject({
+  /** Semantic retrieval sources (ADR-0015); unused until the retrieval stage. */
+  sources: z.array(z.string().min(1)).default([]),
+  /** Skills per agent call; the rest are listed as available on request. */
+  maxSkills: z.int().positive().default(2),
+  /** Share of the context budget for L4 split among skills / standards / knowledge. */
+  split: z
+    .strictObject({
+      skills: ratio.default(0.4),
+      standards: ratio.default(0.35),
+      knowledge: ratio.default(0.25),
+    })
+    .prefault({}),
+});
+export type KnowledgeConfig = z.infer<typeof KnowledgeConfigSchema>;
+
 export const SecurityConfigSchema = z.strictObject({
   secretPatterns: z.array(z.strictObject({ name: z.string().min(1), regex: z.string().min(1) })).default([]),
   secretEnv: z.array(z.string().min(1)).default([]),
@@ -279,7 +296,9 @@ export const ProjectConfigSchema = z.strictObject({
   context: ContextConfigSchema.optional(),
   security: SecurityConfigSchema.optional(),
   humanGate: HumanGateModeSchema.optional(),
-  knowledge: z.strictObject({ sources: z.array(z.string().min(1)).default([]) }).optional(),
+  knowledge: KnowledgeConfigSchema.optional(),
+  /** Stack tags (ADR-0021 §3): typescript, react, csharp, … Empty = detected from the workspace. */
+  stack: z.array(z.string().min(1)).optional(),
 });
 export type ProjectConfig = z.infer<typeof ProjectConfigSchema>;
 
@@ -301,7 +320,8 @@ export const ResolvedConfigSchema = z.strictObject({
   context: ContextConfigSchema.prefault({}),
   security: SecurityConfigSchema.prefault({}),
   telemetry: TelemetryConfigSchema.prefault({}),
-  knowledge: z.strictObject({ sources: z.array(z.string().min(1)).default([]) }).prefault({}),
+  knowledge: KnowledgeConfigSchema.prefault({}),
+  stack: z.array(z.string().min(1)).default([]),
   /** Capability patterns denied by the active profile (ADR-0009 §1); applied by the Tool Router. */
   deniedCapabilities: z.array(z.string().min(1)).default([]),
   /** Name of the applied profile, if any. */

@@ -91,8 +91,21 @@ export const TestResult = z.object({
   outcome: z.enum(["ok", "defects_found"]).default("ok"),
 });
 
+const Candidate = z.object({
+  kind: z.enum(["knowledge", "standard", "skill-improvement"]),
+  title: z.string().min(1),
+  rationale: z.string().min(1),
+  evidence: z.array(Source).default([]),
+  proposal: z.string().optional().describe("the rule or text as it should be written"),
+});
+
 export const ReviewResult = z.object({
   ...Base,
+  standardsChecked: z.array(z.string()).default([]).describe("standard refs you verified semantically"),
+  candidates: z
+    .array(Candidate)
+    .default([])
+    .describe("repeated findings worth becoming a standard or knowledge (ADR-0020 §6)"),
   findings: z.array(
     z.object({
       severity: z.enum(["blocker", "major", "minor", "nit"]),

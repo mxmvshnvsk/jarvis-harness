@@ -6,6 +6,14 @@ import { runConfigShow } from "./commands/config.ts";
 import { runDbBackup, runDbMigrate, runDbStatus } from "./commands/db.ts";
 import { renderDoctor, runDoctor } from "./commands/doctor.ts";
 import { renderInit, runInit } from "./commands/init.ts";
+import {
+  runCandidatesList,
+  runCandidatesPromote,
+  runCandidatesReject,
+  runSkillsList,
+  runStandardsCheck,
+  runStandardsList,
+} from "./commands/knowledge.ts";
 import { runMcpList } from "./commands/mcp.ts";
 import { runModelsList, runModelsProbe } from "./commands/models.ts";
 import { runApply, runApprove, runDaemon, runDiff, runGc, runResume, runWork } from "./commands/run.ts";
@@ -227,6 +235,53 @@ export function buildProgram(options: RunOptions = {}): Command {
     .description("delete a credential")
     .action(async (id: string) => {
       await runAuthRemove(ctxFor(), id);
+    });
+
+  const standards = program.command("standards").description("project standards (ADR-0020)");
+  standards
+    .command("list")
+    .description("standards with scope, severity and verification kind")
+    .action(async () => {
+      await runStandardsList(ctxFor());
+    });
+  standards
+    .command("check")
+    .description("run the deterministic checks against the files changed since --base")
+    .option("--base <ref>", "git ref to diff against", "HEAD")
+    .action(async (opts: { base: string }) => {
+      await runStandardsCheck(ctxFor(), opts);
+    });
+
+  const skills = program.command("skills").description("skills (ADR-0020)");
+  skills
+    .command("list")
+    .description("built-in, project and user skills; which ones a generic change would select")
+    .option("--agent <id>", "resolve for this agent", "implementation")
+    .action(async (opts: { agent: string }) => {
+      await runSkillsList(ctxFor(), opts);
+    });
+
+  const candidates = program
+    .command("candidates")
+    .description("knowledge candidates from reviews (ADR-0020 §6)");
+  candidates
+    .command("list")
+    .option("--all", "include decided candidates", false)
+    .action(async (opts: { all: boolean }) => {
+      await runCandidatesList(ctxFor(), opts);
+    });
+  candidates
+    .command("promote <artifactId>")
+    .description("write the candidate as a standard / knowledge file and record the decision")
+    .option("--id <id>", "file id (default: derived from the title)")
+    .action(async (artifactId: string, opts: { id?: string }) => {
+      await runCandidatesPromote(ctxFor(), artifactId, opts);
+    });
+  candidates
+    .command("reject <artifactId>")
+    .option("--comment <text>")
+    .action(async (artifactId: string, opts: { comment?: string }) => {
+      await runCandidatesReject(ctxFor(), artifactId, opts);
     });
 
   const db = program.command("db").description("local database");

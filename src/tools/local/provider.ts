@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import type { ResolvedConfig } from "../../core/config/schema.ts";
+import { readByRef } from "../../knowledge/resolver.ts";
 import { gitIdentityEnv } from "../../orchestration/worktree.ts";
 import { effectMarker } from "../../storage/effects.ts";
 import type { Capability, ToolContext, ToolOutput, ToolProvider } from "../types.ts";
@@ -102,6 +103,27 @@ export class LocalToolProvider implements ToolProvider {
           } catch (error) {
             return fail(error);
           }
+        },
+      },
+      {
+        name: "knowledge.read",
+        description:
+          "Read a standard, skill or knowledge document in full by its ref (standard:ID@v, skill:id@v, knowledge:name) — the ones listed as available on request.",
+        network: "none",
+        access: "read",
+        effect: false,
+        parameters: {
+          type: "object",
+          properties: { ref: { type: "string", description: "e.g. standard:STD-CS-01@2" } },
+          required: ["ref"],
+        },
+        handler: async (args, ctx) => {
+          const ref = str(args, "ref");
+          const text = readByRef(
+            { projectRoot: ctx.workspacePath, userRoot: ctx.runtime.loaded.home.root },
+            ref,
+          );
+          return text === undefined ? { ok: false, error: `unknown ref "${ref}"` } : { ok: true, text };
         },
       },
       {

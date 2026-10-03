@@ -7,6 +7,8 @@ import {
   GITIGNORE_ENTRIES,
   KNOWLEDGE_README,
   PROJECT_CONFIG_TEMPLATE,
+  SKILLS_README,
+  STANDARDS_README,
   USER_CONFIG_TEMPLATE,
 } from "../templates.ts";
 
@@ -72,6 +74,10 @@ export async function runInit(ctx: CliContext, options: InitOptions = {}): Promi
     ensureFile(project.configFile, PROJECT_CONFIG_TEMPLATE, report);
     ensureDir(project.knowledgeDir, report);
     ensureFile(join(project.knowledgeDir, "README.md"), KNOWLEDGE_README, report);
+    ensureDir(join(project.jarvisDir, "standards"), report);
+    ensureFile(join(project.jarvisDir, "standards", "README.md"), STANDARDS_README, report);
+    ensureDir(join(project.jarvisDir, "skills"), report);
+    ensureFile(join(project.jarvisDir, "skills", "README.md"), SKILLS_README, report);
     ensureDir(project.specsDir, report);
     ensureDir(project.approvalsDir, report);
     for (const dir of [project.specsDir, project.approvalsDir]) {

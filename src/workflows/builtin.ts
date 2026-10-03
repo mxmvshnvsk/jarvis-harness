@@ -57,11 +57,16 @@ steps:
     transitions: { onSuccess: verify }
   - id: verify
     kind: composite
-    children: [tests]
+    children: [tests, standards]
     transitions:
       onSuccess: review
       onOutcome:
         defects_found: { to: implementation, maxIterations: 2 }
+        standards_violation: { to: implementation, maxIterations: 2 }
+  - id: standards
+    kind: deterministic
+    tool: standards.check
+    outputs: [standards-check]
   - id: tests
     kind: agentic
     agent: test

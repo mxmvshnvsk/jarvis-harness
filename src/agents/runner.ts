@@ -6,8 +6,9 @@ import type { Message, ToolDefinition } from "../models/types.ts";
 import type { AgentRunner } from "../orchestration/executors.ts";
 import type { StepContext, StepOutcome } from "../orchestration/types.ts";
 import type { ToolResult } from "../tools/types.ts";
-import { buildBaseMessages, loadKnowledge } from "./context.ts";
+import { buildBaseMessages } from "./context.ts";
 import type { AgentRegistry } from "./definition.ts";
+import { packageForStep } from "./knowledge.ts";
 
 /**
  * AgentRuntime (ADR-0001 §6): runs one agent for one step — context assembly, the tool-calling
@@ -24,6 +25,40 @@ interface AgentResultDoc {
   outcome?: string;
   reasons?: Array<{ kind: string; summary: string }>;
   sources?: string[];
+  candidates?: Array<{
+    kind: string;
+    title: string;
+    rationale: string;
+    evidence?: string[];
+    proposal?: string;
+  }>;
+}
+
+/** Knowledge candidates proposed by an agent become `candidate` artifacts (ADR-0020 §6). */
+function storeCandidates(
+  rt: StepContext["runtime"],
+  ctx: StepContext,
+  agentId: string,
+  doc: AgentResultDoc,
+  from: ArtifactVersion,
+): void {
+  for (const [i, c] of (doc.candidates ?? []).entries()) {
+    rt.artifacts.put({
+      runId: ctx.run.id,
+      type: "candidate",
+      name: `${ctx.step.id}-${ctx.iteration}-${i + 1}.json`,
+      content: JSON.stringify(
+        { ...c, from: `${from.artifactId}@${from.version}`, status: "proposed" },
+        null,
+        2,
+      ),
+      mediaType: "application/json",
+      provenance: { kind: "agent", agentId },
+      sourceRefs: c.evidence ?? [],
+      stepId: ctx.step.id,
+      iteration: ctx.iteration,
+    });
+  }
 }
 
 export class AgentRuntimeRunner implements AgentRunner {
@@ -63,14 +98,15 @@ export class AgentRuntimeRunner implements AgentRunner {
       })
       .filter((a): a is ArtifactVersion => a !== undefined)
       .map((artifact) => ({ artifact, text: rt.artifacts.text(artifact) }));
-    const knowledge = loadKnowledge(ctx.workspace.ref.path);
+    const pkg = packageForStep(ctx, def.id);
     const charBudget = Math.floor(route.model.contextWindow * 0.45 * 3.5);
     const base = buildBaseMessages({
       def,
       ctx,
       tools: toolDescriptors,
       inputs,
-      knowledge,
+      pkg,
+      knowledgeConfig: config.knowledge,
       budget: { chars: charBudget },
     });
 
@@ -88,7 +124,12 @@ export class AgentRuntimeRunner implements AgentRunner {
         iteration: ctx.iteration,
         payload: { agent: def.id, ...payload },
       });
-    emit("agent.start", { modelId: route.modelId, tools: toolDefs.length, restoredToolCalls: toolCalls });
+    emit("agent.start", {
+      modelId: route.modelId,
+      tools: toolDefs.length,
+      restoredToolCalls: toolCalls,
+      knowledge: pkg.provenance,
+    });
 
     const checkpoint = () => {
       const transcriptRef = rt.blobs.put(JSON.stringify(transcript), "application/json").contentRef;
@@ -179,10 +220,12 @@ export class AgentRuntimeRunner implements AgentRunner {
         content: JSON.stringify(result.value, null, 2),
         mediaType: "application/json",
         provenance: { kind: "agent", agentId: def.id },
-        sourceRefs: doc.sources ?? [],
+        // What the agent was told (ADR-0020 §4) joins what it read (ADR-0005).
+        sourceRefs: [...(doc.sources ?? []), ...pkg.provenance],
         stepId: ctx.step.id,
         iteration: ctx.iteration,
       });
+      storeCandidates(rt, ctx, def.id, doc, artifact);
       const reason = (doc.reasons ?? []).map((r) => `${r.kind}: ${r.summary}`).join("; ");
       emit("agent.finish", {
         status: "success",

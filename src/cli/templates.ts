@@ -96,6 +96,51 @@ Versioned project knowledge read by Jarvis (ADR-0001 §8). Keep it short and fac
 - domain.md — business rules and vocabulary
 - conventions.md — code conventions and review expectations
 - glossary.md — business term → code symbols (ADR-0015 §3)
+
+Optional front matter narrows a document to a scope (ADR-0020 §3):
+
+    ---
+    tags: [orders]
+    paths: ["src/orders/**"]
+    stacks: [typescript]
+    ---
+`;
+
+export const STANDARDS_README = `# Standards
+
+One file per rule, \`<id>.md\` with YAML front matter (ADR-0020 §1–2). \`required\` standards with a
+deterministic check send the implementation back when violated; semantic ones are checked in review.
+
+    ---
+    id: no-console
+    version: 1
+    title: No console output in library code
+    scope: { paths: ["src/**"] }
+    severity: required            # required | recommended
+    verification:
+      kind: deterministic         # deterministic | semantic | hybrid
+      check: { pattern: { glob: "src/**/*.ts", mustNot: 'console\\.log' } }
+      # or: check: { tool: project.lint }
+    tags: [logging]
+    ---
+    Library code writes through the logger, never to the console.
+
+\`jarvis standards list\` and \`jarvis standards check\` show what applies and what is violated.
+`;
+
+export const SKILLS_README = `# Skills
+
+One directory per skill: \`<id>/skill.yaml\` + \`<id>/instructions.md\` (ADR-0020 §1). The resolver
+picks the most specific skills for the task's stack, paths and kind; project skills override the
+built-in \`sdd-implementation\`, \`unit-testing\` and \`refactor\` by id.
+
+    id: react-component-change
+    version: 1
+    appliesTo: { stacks: [react], paths: ["src/**/components/**"], kinds: [feature, change] }
+    requiredStandards: [STD-REACT-*]
+    verification: [project.tests, project.lint]
+
+\`jarvis skills list\` shows the selection for this project.
 `;
 
 export const GITIGNORE_ENTRIES = ["# jarvis runtime state (ADR-0001 §3)", ".jarvis/runs/", ".jarvis/cache/"];

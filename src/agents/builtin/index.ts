@@ -13,7 +13,15 @@ import {
  * Built-in agents (ADR-0001 §6). Capability sets follow least privilege (§9, §13): research
  * never gets `repo.write`; implementation never gets effects on external systems.
  */
-const READ_REPO = ["repo.read", "repo.list", "repo.search", "git.log", "git.diff", "git.status"];
+const READ_REPO = [
+  "repo.read",
+  "repo.list",
+  "repo.search",
+  "git.log",
+  "git.diff",
+  "git.status",
+  "knowledge.read",
+];
 const WRITE_REPO = ["repo.write", "repo.edit"];
 
 export const RESEARCH_AGENT: AgentDefinition = {
@@ -135,6 +143,8 @@ Goal: decide whether the change satisfies the specification and the project's co
 Method:
 - Read the diff of the workspace against its base (git.diff). Check every requirement's acceptance criteria against the code and the test results.
 - Look for correctness, missing cases, convention violations, and scope creep. Each finding has a severity, a location and a concrete suggestion.
+- Check every standard in your context whose verification is semantic or hybrid; list the ones you checked in "standardsChecked" and report violations of required standards as findings with severity major or blocker.
+- When the same kind of issue appears repeatedly or a convention is implied by the code but written nowhere, propose it in "candidates" with evidence instead of inventing a rule on the spot.
 - Verdict: "approve" when no blocker or major findings remain; "fix_required" when the code needs changes (outcome fix_required); "plan_wrong" when the approach itself does not fit the specification (outcome plan_wrong).
 Produce the result document.`,
   capabilities: [...READ_REPO, "project.*"],

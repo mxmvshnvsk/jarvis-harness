@@ -177,7 +177,10 @@ describe("AgentRuntimeRunner", () => {
 
     const artifact = rt.artifacts.find(run.id, "research", "research.json");
     expect(artifact?.provenance).toMatchObject({ kind: "agent", agentId: "research" });
-    expect(artifact?.sourceRefs).toEqual(["src/onboarding.ts"]);
+    expect(artifact?.sourceRefs).toEqual([
+      "src/onboarding.ts",
+      expect.stringMatching(/^knowledge:domain\.md#/),
+    ]);
     expect(JSON.parse(rt.artifacts.text(artifact as NonNullable<typeof artifact>))).toMatchObject({
       summary: RESEARCH_DOC.summary,
     });
