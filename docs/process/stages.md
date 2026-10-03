@@ -8,6 +8,13 @@
 `2e8e6ed` (14), `10fa9f5` (retrieval), `3dbee63` (review lifecycle), `bfa3ce3` (polyglot + run-to-case),
 `5aa5810` (Windows DPAPI, watch, gc).
 
+Remaining commands of ADR-0001 §15:
+
+- `jarvis research <task>` and `jarvis spec <task>` — built-in workflows `research` (discover → research) and `spec`
+  (research → requirements → specification → approval)
+- `jarvis explain <file[:line]|commit|run>` — blame → commit → `Jarvis-Run` trailer → run → steps, artifacts with
+  sources and approvals, clarifications, tool-call counts; `jarvis apply --message` now keeps the trailer
+
 ADR-0001 §20 stage 12 (git hooks) — `f11ca47`:
 
 - `jarvis hooks install|uninstall|status` — a thin `pre-push` shim honouring `core.hooksPath` and linked

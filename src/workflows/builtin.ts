@@ -158,6 +158,65 @@ steps:
     transitions: { onSuccess: DONE }
 `;
 
+export const RESEARCH_WORKFLOW = `
+name: research
+version: 1
+description: Research only — what the task touches and what is unknown (jarvis research)
+entry: discover
+steps:
+  - id: discover
+    kind: deterministic
+    tool: project.discover
+    outputs: [project-capabilities]
+    transitions: { onSuccess: research }
+  - id: research
+    kind: agentic
+    agent: research
+    phase: research
+    outputs: [research]
+    transitions: { onSuccess: DONE }
+`;
+
+export const SPEC_WORKFLOW = `
+name: spec
+version: 1
+description: Research, requirements analysis and a specification up to its approval (jarvis spec)
+entry: discover
+steps:
+  - id: discover
+    kind: deterministic
+    tool: project.discover
+    outputs: [project-capabilities]
+    transitions: { onSuccess: research }
+  - id: research
+    kind: agentic
+    agent: research
+    phase: research
+    outputs: [research]
+    transitions: { onSuccess: requirements }
+  - id: requirements
+    kind: agentic
+    agent: requirements
+    phase: requirements
+    inputs: [research]
+    outputs: [requirements]
+    transitions: { onSuccess: spec }
+  - id: spec
+    kind: agentic
+    agent: specification
+    phase: spec
+    inputs: [research, requirements]
+    outputs: [spec]
+    transitions: { onSuccess: approve-spec }
+  - id: approve-spec
+    kind: approval
+    artifactType: spec
+    transitions:
+      onSuccess: DONE
+      onOutcome:
+        request_changes: { to: spec, maxIterations: 3 }
+`;
+
 export const REVIEW_DIFF_WORKFLOW = `
 name: review-diff
 version: 1
@@ -180,5 +239,7 @@ steps:
 export const BUILTIN_WORKFLOWS: Readonly<Record<string, string>> = {
   sdd: SDD_WORKFLOW,
   smoke: SMOKE_WORKFLOW,
+  research: RESEARCH_WORKFLOW,
+  spec: SPEC_WORKFLOW,
   "review-diff": REVIEW_DIFF_WORKFLOW,
 };

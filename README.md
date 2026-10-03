@@ -83,7 +83,7 @@ The roadmap of [ADR-0001 §20](docs/adr/0001-target-architecture.md) is implemen
 redaction, agents and the `sdd` workflow, MCP and credentials, standards/skills/knowledge with retrieval,
 human collaboration (gates, threads, Review Mode), CI mode and run transfer, specialised agents, the
 capability layer with a TypeScript adapter and the incremental project graph, IDE integration
-(`jarvis mcp serve`), the daemon and evals, the context engine with pressure thresholds, compaction and manual controls (`jarvis context|compact|reset-context`), and the pre-push hook (`jarvis hooks install`, `jarvis prepush`).
+(`jarvis mcp serve`), the daemon and evals, the context engine with pressure thresholds, compaction and manual controls (`jarvis context|compact|reset-context`), the pre-push hook (`jarvis hooks install`, `jarvis prepush`), partial runs (`jarvis research|spec`) and `jarvis explain` for the provenance of a line.
 
 Not done yet (ADR-0001, appendix B): telemetry export and `jarvis stats` (with the prefix cache-hit metric of ADR-0013), automatic workflow branching by change risk, a
 native Anthropic provider adapter, adapters for other languages (C#/.NET first), the embeddings gate of

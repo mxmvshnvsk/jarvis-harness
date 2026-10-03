@@ -357,8 +357,12 @@ export async function runApply(ctx: CliContext, ref: string, options: { message?
           runtime.events.emit({ kind: "review.markersRemoved", runId: run.id, payload: { files: stripped } });
         }
       }
-      const message =
-        options.message ?? `${run.task}: apply jarvis run ${shortRunId(run.id)}\n\nJarvis-Run: ${run.id}`;
+      const trailer = `Jarvis-Run: ${run.id}`;
+      const message = options.message
+        ? options.message.includes(trailer)
+          ? options.message
+          : `${options.message.trimEnd()}\n\n${trailer}`
+        : `${run.task}: apply jarvis run ${shortRunId(run.id)}\n\n${trailer}`;
       const result = await wt.apply(message);
       runtime.events.emit({
         kind: "run.applied",

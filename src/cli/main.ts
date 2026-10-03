@@ -8,6 +8,7 @@ import { runContext, runReshape } from "./commands/context.ts";
 import { runDbBackup, runDbMigrate, runDbStatus } from "./commands/db.ts";
 import { renderDoctor, runDoctor } from "./commands/doctor.ts";
 import { runEvalsBaseline, runEvalsDiff, runEvalsRun, runEvalsRunToCase } from "./commands/evals.ts";
+import { runExplain } from "./commands/explain.ts";
 import { runHooksInstall, runHooksStatus, runHooksUninstall, runPrePush } from "./commands/hooks.ts";
 import { runAnswer, runAttach, runReviewStatus, runReviewSubmit, runThreads } from "./commands/human.ts";
 import { renderInit, runInit } from "./commands/init.ts";
@@ -116,6 +117,29 @@ export function buildProgram(options: RunOptions = {}): Command {
       });
     });
 
+  program
+    .command("research <task>")
+    .description("run only the research step for a task (built-in workflow `research`)")
+    .option("--base <ref>", "base ref for the run's worktree (default: HEAD)")
+    .action(async (task: string, opts: { base?: string }) => {
+      await runWork(ctxFor(), task, { workflow: "research", ...(opts.base ? { base: opts.base } : {}) });
+    });
+  program
+    .command("spec <task>")
+    .description("research, requirements and a specification up to its approval (built-in workflow `spec`)")
+    .option("--base <ref>", "base ref for the run's worktree (default: HEAD)")
+    .action(async (task: string, opts: { base?: string }) => {
+      await runWork(ctxFor(), task, { workflow: "spec", ...(opts.base ? { base: opts.base } : {}) });
+    });
+
+  program
+    .command("explain <target>")
+    .description(
+      "why a change exists: <file>[:line], a commit or a run → task, steps, artifacts, approvals, tools",
+    )
+    .action(async (target: string) => {
+      await runExplain(ctxFor(), target);
+    });
   program
     .command("diff <run>")
     .description("diff of a run's worktree against its base commit (ADR-0003 §4)")

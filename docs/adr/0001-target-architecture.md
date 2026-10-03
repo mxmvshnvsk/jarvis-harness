@@ -515,8 +515,11 @@ output tokens; режимы record/replay/live, baseline и diff с допуск
 (`run-to-case`). Сравнение порогов compaction 50/60/70% — отдельный прогон evals с `--variant` по `context.thresholds`.
 
 Trace должен позволять ответить: «почему Jarvis изменил эту строку?» — через цепочку
-task → spec → evidence → plan → tool/model calls → diff. Сегодня цепочка собирается из provenance
-артефактов, событий и `Jarvis-*` трейлеров checkpoint-коммитов; единой команды-объяснения нет.
+task → spec → evidence → plan → tool/model calls → diff. Цепочка собирается из provenance артефактов,
+событий и трейлеров `Jarvis-Run` и выдаётся командой `jarvis explain <file[:line]|commit|run>`: blame →
+коммит → run → шаги, артефакты с источниками и утверждениями, вызовы инструментов. Ограничение: события
+`tool.call` хранят имя возможности, но не аргументы, поэтому «какой вызов правил эту строку» команда не
+указывает — только какие артефакты и источники к ней привели.
 
 ## 15. Developer UX: CLI, OpenCode, Git hooks, CI
 
@@ -532,7 +535,7 @@ task → spec → evidence → plan → tool/model calls → diff. Сегодн�
 | `jarvis resume <run>` | реализовано (`--steal`) |
 | `jarvis context` | реализовано (`context [run]`, плюс MCP-инструмент `context.inspect`) |
 | `jarvis compact`, `reset-context` | реализовано (`--aggressive`, `--dry-run`; ADR-0013) |
-| `jarvis research ABC-123`, `spec ABC-123` | отдельных команд нет; частичный прогон — собственный workflow (`--workflow`) |
+| `jarvis research ABC-123`, `spec ABC-123` | реализовано: встроенные workflow `research` и `spec` (до утверждения спецификации) |
 | `jarvis review [--base origin/main]` | частично: `jarvis standards check --base`, шаг `review` в workflow |
 | `jarvis prepush` | реализовано (`--base`, `--head`, `--semantic`/`--no-semantic`, `--hook`); ставится `jarvis hooks install` |
 | `jarvis knowledge update` | реализовано (+ `status`, `index`, `search`) |
@@ -753,7 +756,7 @@ ADR-0021), включение embeddings после гейта ADR-0015 §6, п�
 | Ни один специализированный агент не зависит от конкретного model provider или Mastra API. | ✔ (Mastra не используется вовсе) |
 | Project knowledge доступно CLI, workflow и OpenCode через общую Jarvis-платформу. | ✔ `knowledge.*`, `jarvis mcp serve` |
 | Context можно inspect/compact/reset; исходные evidence остаются recoverable. | ✔ `jarvis context`, `compact`, `reset-context`; оригиналы — блобы, читаются `knowledge.read` |
-| Jarvis способен объяснить provenance изменения от task/spec до конкретных sources и tool calls. | **частично**: provenance артефактов, события, `Jarvis-*` трейлеры; единой команды нет |
+| Jarvis способен объяснить provenance изменения от task/spec до конкретных sources и tool calls. | ✔ `jarvis explain` (до sources и счёта tool calls; аргументы вызовов в событиях не хранятся) |
 | Model quota является планируемым ресурсом; исчерпание не ломает Run. | ✔ WAITING_BUDGET |
 | Agents имеют минимальные capabilities; policy enforcement выполняется вне LLM. | ✔ Tool Router |
 | Pre-push/CI сначала используют deterministic analysis и только затем LLM там, где нужна семантика. | ✔ `jarvis prepush` (ревью — только при сигнале из стандартов/графа); CI ✔ |
@@ -805,7 +808,7 @@ clients независимо друг от друга, сохраняя глав
 | §11 | 60k/20 мин | Пулы квот, per-run/per-step cap'ы | ADR-0018 |
 | §12 | SQLite | `node:sqlite`, миграции только вперёд, версионированные артефакты, привязка утверждений к хешу | ADR-0014, ADR-0005 |
 | §14 | Метрики, evals | Evals: record/replay/live, baseline/diff, run-to-case | ADR-0012 |
-| §15 | CLI на 13 команд | Реализованы 60+ команд и подкоманд, включая `hooks`, `prepush`, `context`, `compact`, `reset-context`; не сделаны `research`, `spec`, `stats` | ADR-0009, ADR-0018 |
+| §15 | CLI на 13 команд | Реализованы 60+ команд и подкоманд, включая `hooks`, `prepush`, `context`, `compact`, `reset-context`, `research`, `spec`, `explain`; не сделан `stats` | ADR-0009, ADR-0018 |
 | §16 | `context/`, `integrations/` | Контекст в `agents/`, CI в `cli/`; добавлены `app/`, `interaction/`, `capabilities/`, `adapters/` | — |
 | §19 | 8 сценариев отказа | + аренда, неразрешённый эффект, CI без человека, UNSUPPORTED, ручные правки | ADR-0002, ADR-0009, ADR-0019, ADR-0021 |
 | §20, §21 | План и критерии | Добавлены статус и коммиты по каждому пункту | — |
@@ -822,7 +825,8 @@ clients независимо друг от друга, сохраняя глав
 5. **Нативный адаптер Anthropic** (§10); retention policy артефактов (§12).
 6. **Адаптеры других языков** (C#/.NET — первый по ADR-0021); для них проект работает на уровне BASIC.
 7. **Включение embeddings** — после гейта ADR-0015 §6 по evals.
-8. **Единая команда «объяснить изменение»** (§14): цепочка есть в данных, интерфейса нет.
+8. **Аргументы вызовов инструментов в событиях** (`tool.call` хранит имя и исход): `jarvis explain` не может
+   назвать конкретный вызов, изменивший строку.
 
 ## Приложение C. Карта уточняющих ADR
 
