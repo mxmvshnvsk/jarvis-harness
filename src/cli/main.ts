@@ -6,6 +6,7 @@ import { runDbBackup, runDbMigrate, runDbStatus } from "./commands/db.ts";
 import { renderDoctor, runDoctor } from "./commands/doctor.ts";
 import { renderInit, runInit } from "./commands/init.ts";
 import { runModelsList, runModelsProbe } from "./commands/models.ts";
+import { runApprove, runDaemon, runResume, runWork } from "./commands/run.ts";
 import { runCancel, runStatus } from "./commands/status.ts";
 import { type CliContext, defaultContext } from "./context.ts";
 import { CliExit, createOutput, EXIT } from "./output.ts";
@@ -77,6 +78,61 @@ export function buildProgram(options: RunOptions = {}): Command {
     .option("--sources", "show where every value comes from (ADR-0014 §2)")
     .action(async (opts: { sources?: boolean }) => {
       await runConfigShow(ctxFor(), opts);
+    });
+
+  program
+    .command("work <task>")
+    .description("create a run for a task and execute it in the foreground (exit codes: ADR-0009 §3)")
+    .option("--workflow <name>", "workflow definition to use", "sdd")
+    .option("--no-run", "only create the run")
+    .action(async (task: string, opts: { workflow: string; run: boolean }) => {
+      await runWork(ctxFor(), task, { workflow: opts.workflow, noRun: !opts.run });
+    });
+
+  program
+    .command("resume <run>")
+    .description("continue a parked, failed or crashed run from its last checkpoint")
+    .option("--steal", "take the lease from a dead process (recorded in the audit trail)")
+    .action(async (run: string, opts: { steal?: boolean }) => {
+      await runResume(ctxFor(), run, opts);
+    });
+
+  program
+    .command("approve <run>")
+    .description("record a human decision on the artifact the run is waiting for (ADR-0005 §4)")
+    .option("--type <artifactType>", "artifact type (defaults to what the run awaits)")
+    .option("--reject", "reject instead of approve")
+    .option("--request-changes", "ask for changes; goes back along the declared edge")
+    .option("--comment <text>", "comment stored with the decision")
+    .option("--resume", "continue the run right after recording the decision")
+    .action(
+      async (
+        run: string,
+        opts: {
+          type?: string;
+          reject?: boolean;
+          requestChanges?: boolean;
+          comment?: string;
+          resume?: boolean;
+        },
+      ) => {
+        const decision = opts.reject ? "reject" : opts.requestChanges ? "request_changes" : "approve";
+        await runApprove(ctxFor(), run, {
+          ...(opts.type ? { type: opts.type } : {}),
+          decision,
+          ...(opts.comment ? { comment: opts.comment } : {}),
+          ...(opts.resume ? { resume: true } : {}),
+        });
+      },
+    );
+
+  program
+    .command("daemon")
+    .description("resume parked runs when their budget window frees or their approval arrives")
+    .option("--interval <seconds>", "seconds between ticks", (v: string) => Number(v), 30)
+    .option("--once", "run a single tick and exit")
+    .action(async (opts: { interval: number; once?: boolean }) => {
+      await runDaemon(ctxFor(), opts);
     });
 
   program

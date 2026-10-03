@@ -176,6 +176,7 @@ export const BudgetConfigSchema = z.strictObject({
   perRun: BudgetCapSchema.prefault({}),
   perStep: BudgetCapSchema.prefault({}),
 });
+export type BudgetConfig = z.infer<typeof BudgetConfigSchema>;
 
 const ratio = z.number().min(0).max(1);
 

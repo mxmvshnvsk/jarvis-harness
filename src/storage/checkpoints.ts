@@ -117,7 +117,7 @@ export interface StepRecord {
   readonly iteration: number;
   readonly startedAt: string;
   readonly finishedAt?: string;
-  readonly status?: "success" | "failure";
+  readonly status?: "success" | "failure" | "suspended";
   readonly outcome?: string;
   /** Exact `artifactId@version` references consumed and produced. */
   readonly inputs: readonly string[];
@@ -142,7 +142,12 @@ export class StepHistoryStore {
     return Number(result.lastInsertRowid);
   }
 
-  finish(id: number, status: "success" | "failure", outcome?: string, outputs: readonly string[] = []): void {
+  finish(
+    id: number,
+    status: "success" | "failure" | "suspended",
+    outcome?: string,
+    outputs: readonly string[] = [],
+  ): void {
     this.db
       .prepare(
         "UPDATE step_history SET finished_at = ?, status = ?, outcome = ?, outputs_json = ? WHERE id = ?",
@@ -162,7 +167,7 @@ export class StepHistoryStore {
       iteration: number;
       started_at: string;
       finished_at: string | null;
-      status: "success" | "failure" | null;
+      status: "success" | "failure" | "suspended" | null;
       outcome: string | null;
       inputs_json: string;
       outputs_json: string;

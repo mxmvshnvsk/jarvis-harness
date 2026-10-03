@@ -42,6 +42,20 @@ Stage 2 — durable core:
 - `jarvis status [run] [--all] [--watch N]` — active runs and pool budgets, or one run in detail:
   steps, checkpoint, artifacts and approvals, effects, events, tokens; `jarvis cancel <run>`
 
+Stage 3 — resource control and the workflow engine (ADR-0011):
+
+- `LocalWorkflowEngine`: steps as deterministic / agentic / approval / composite, transitions as a
+  pure function with bounded back edges (ADR-0004), checkpoint on every step boundary, suspension
+  to `WAITING_BUDGET` (quota, with `resumeAfter`) and `WAITING_HUMAN` (approval, unresolved effect,
+  per-run/per-step cap), resume from the last checkpoint, cancel at a safe point, lease fencing
+- Human gate modes `fail | artifact | skip-if-approved` with committed approvals in
+  `.jarvis/approvals/<task>/<type>.json` (ADR-0009 §2, §4)
+- Workflow definitions in YAML: built-in `sdd` (the ADR-0004 §6 graph; agents arrive in stage 5)
+  and `smoke`; project overrides in `.jarvis/workflows/*.yaml`
+- `jarvis work <task> [--workflow]`, `jarvis resume <run> [--steal]`,
+  `jarvis approve <run> [--reject | --request-changes] [--comment] [--resume]`,
+  `jarvis daemon [--interval] [--once]`
+
 Configuration precedence: CLI flags → `JARVIS_*` env → `.jarvis/project.yaml` → `~/.jarvis/config.yaml`
 → defaults; profiles (`--profile ci`) may only narrow. Secrets are references (`env:VAR`,
 `keychain:ID`), never literals.

@@ -29,6 +29,10 @@ export const StepDefinitionSchema = z.strictObject({
   kind: StepKindSchema,
   agent: z.string().min(1).optional(),
   tool: z.string().min(1).optional(),
+  /** For approval steps: the artifact type that must be approved (ADR-0005 §4). */
+  artifactType: z.string().min(1).optional(),
+  /** Static arguments for deterministic tools. */
+  args: z.record(z.string(), z.unknown()).default({}),
   phase: z.string().min(1).optional(),
   inputs: z.array(z.string().min(1)).default([]),
   outputs: z.array(z.string().min(1)).default([]),

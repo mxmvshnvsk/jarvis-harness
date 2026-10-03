@@ -10,6 +10,11 @@ import { type AdapterRegistry, adapterFor, defaultAdapters } from "./providers/i
 import { charsOfMessages, TokenEstimator } from "./tokens.ts";
 import type { ModelRequest, ModelResponse, ProviderResult } from "./types.ts";
 
+/** The one method executors need; the budgeted wrapper (ADR-0018 §4) implements it too. */
+export interface ModelCaller {
+  call(request: ModelRequest): Promise<ModelResponse>;
+}
+
 /** Bounded retry policy (ADR-0001 §19, ADR-0011 §1). */
 export interface RetryPolicy {
   readonly maxTransientRetries: number;
@@ -73,7 +78,7 @@ class Semaphore {
  * admission, injects credentials at the transport, retries within bounds, records usage and
  * telemetry, and can record/replay calls for tests and evals.
  */
-export class ModelGateway {
+export class ModelGateway implements ModelCaller {
   private readonly config: ResolvedConfig;
   private readonly adapters: AdapterRegistry;
   private readonly secrets: SecretResolver;

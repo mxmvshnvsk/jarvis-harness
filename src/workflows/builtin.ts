@@ -1,0 +1,105 @@
+/**
+ * Built-in workflow definitions (ADR-0004 §6). Agentic steps need the AgentRuntime (stage 5);
+ * until then `sdd` is a declaration of the target graph, and `smoke` exercises the engine itself.
+ */
+export const SDD_WORKFLOW = `
+name: sdd
+version: 1
+description: Specification-driven development (ADR-0001 §5, ADR-0004 §6)
+entry: research
+steps:
+  - id: research
+    kind: agentic
+    agent: research
+    phase: research
+    outputs: [research]
+    transitions: { onSuccess: spec }
+  - id: spec
+    kind: agentic
+    agent: specification
+    phase: spec
+    inputs: [research]
+    outputs: [spec]
+    transitions: { onSuccess: approve-spec }
+  - id: approve-spec
+    kind: approval
+    artifactType: spec
+    transitions:
+      onSuccess: impact
+      onOutcome:
+        request_changes: { to: spec, maxIterations: 3 }
+  - id: impact
+    kind: agentic
+    agent: impact
+    phase: impact
+    inputs: [research, spec]
+    outputs: [impact]
+    transitions:
+      onSuccess: plan
+      onOutcome:
+        needs_research: { to: research, maxIterations: 2 }
+  - id: plan
+    kind: agentic
+    agent: plan
+    phase: plan
+    inputs: [spec, impact]
+    outputs: [plan]
+    transitions:
+      onSuccess: implementation
+      onOutcome:
+        spec_infeasible: { to: spec, maxIterations: 1 }
+  - id: implementation
+    kind: agentic
+    agent: implementation
+    phase: implementation
+    inputs: [spec, plan]
+    outputs: [implementation]
+    transitions: { onSuccess: verify }
+  - id: verify
+    kind: composite
+    children: [tests]
+    transitions:
+      onSuccess: review
+      onOutcome:
+        defects_found: { to: implementation, maxIterations: 2 }
+  - id: tests
+    kind: agentic
+    agent: test
+    inputs: [spec, implementation]
+    outputs: [tests]
+  - id: review
+    kind: agentic
+    agent: review
+    phase: review
+    inputs: [spec, plan, implementation, tests]
+    outputs: [review]
+    transitions:
+      onSuccess: DONE
+      onOutcome:
+        fix_required: { to: implementation, maxIterations: 3 }
+        plan_wrong: { to: plan, maxIterations: 1 }
+`;
+
+export const SMOKE_WORKFLOW = `
+name: smoke
+version: 1
+description: Exercises the engine with deterministic steps only
+entry: hello
+steps:
+  - id: hello
+    kind: deterministic
+    tool: artifact.write
+    args: { type: note, name: hello.md, content: "# hello from jarvis" }
+    outputs: [note]
+    transitions: { onSuccess: done-check }
+  - id: done-check
+    kind: deterministic
+    tool: noop
+    inputs: [note]
+    transitions: { onSuccess: DONE }
+`;
+
+export const BUILTIN_WORKFLOWS: Readonly<Record<string, string>> = {
+  sdd: SDD_WORKFLOW,
+  smoke: SMOKE_WORKFLOW,
+};

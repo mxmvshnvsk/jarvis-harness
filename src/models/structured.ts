@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { ModelError } from "./errors.ts";
-import type { ModelGateway } from "./gateway.ts";
+import type { ModelCaller } from "./gateway.ts";
 import type { StructuredMode } from "./router.ts";
 import type { Message, ModelRequest, ModelResponse } from "./types.ts";
 
@@ -96,7 +96,7 @@ function withSchemaHint(messages: readonly Message[], hint: string): Message[] {
 }
 
 export async function generateStructured<T>(
-  gateway: ModelGateway,
+  gateway: ModelCaller,
   options: StructuredOptions<T>,
 ): Promise<StructuredResult<T>> {
   const jsonSchema = z.toJSONSchema(options.schema, { target: "draft-7" }) as Record<string, unknown>;
