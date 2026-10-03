@@ -12,6 +12,7 @@ import {
   resolveClarification,
 } from "../../interaction/clarify.ts";
 import { collectReview } from "../../interaction/review/collector.ts";
+import { commentsOf, seedComments } from "../../interaction/review/lifecycle.ts";
 import type { Interaction, InteractionMessage } from "../../interaction/store.ts";
 import { leaseOwner } from "../../orchestration/lease.ts";
 import { LeaseHeldError } from "../../orchestration/types.ts";
@@ -401,14 +402,13 @@ export async function runReviewSubmit(
       contentRef: packageRef,
       origin: "review",
       openedBy: actor.id,
-      meta: { comments: pkg.comments.map((c) => c.id) },
+      meta: { comments: seedComments(runtime, run.id, pkg.comments, actor.id) },
       message: {
         role: "human",
         actor: actor.id,
         text: pkg.comments.map((c) => `${c.id} ${c.file}:${c.line} — ${c.text}`).join("\n"),
       },
     });
-    runtime.interactions.setState(session.id, "acknowledged");
     runtime.events.emit({
       kind: "review.submitted",
       runId: run.id,
@@ -440,6 +440,46 @@ export async function runReviewSubmit(
         ctx.out.line(`  ${padEnd(cls, 23)} ${steps.join(" → ")}`);
       ctx.out.line("");
       ctx.out.line(`continue with \`jarvis resume ${shortRunId(run.id)}\` (or pass --resume)`);
+    });
+  } finally {
+    await runtime.close();
+  }
+}
+
+/** `jarvis review status [run]` — every comment of the run's review sessions with its state (ADR-0019 §5). */
+export async function runReviewStatus(ctx: CliContext, ref: string | undefined): Promise<void> {
+  const loaded = await loadForCli(ctx);
+  const runtime = createRuntime(loaded, { env: ctx.env });
+  try {
+    const run = ref ? runtime.runs.resolve(ref) : runtime.runs.list({ state: "WAITING_HUMAN" })[0];
+    if (!run) {
+      ctx.out.error(ref ? `run "${ref}" not found` : "no run is waiting for a human");
+      throw new CliExit(EXIT.error);
+    }
+    const sessions = runtime.interactions.listForRun(run.id).filter((i) => i.kind === "review");
+    const rows = sessions.map((s) => ({
+      id: s.id,
+      state: s.state,
+      openedAt: s.openedAt,
+      package: s.contentRef,
+      comments: Object.values(commentsOf(s)),
+    }));
+    ctx.out.result({ run: run.id, sessions: rows }, () => {
+      if (rows.length === 0) {
+        ctx.out.line(
+          `run ${shortRunId(run.id)} has no review sessions; annotate the code and run \`jarvis review submit\``,
+        );
+        return;
+      }
+      for (const s of rows) {
+        ctx.out.line(`session ${s.id}  ${s.state}  ${s.openedAt.slice(0, 19)}  ${s.package ?? ""}`);
+        for (const c of s.comments) {
+          ctx.out.line(
+            `  ${padEnd(c.id, 5)} ${padEnd(c.state, 17)} ${padEnd(c.class ?? "-", 22)} ${c.file}:${c.line}  ${c.text}`,
+          );
+          if (c.action) ctx.out.line(`        → ${c.action}`);
+        }
+      }
     });
   } finally {
     await runtime.close();

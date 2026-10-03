@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { afterApproval, afterGateReached } from "../interaction/review/lifecycle.ts";
 import type { StepContext, StepExecutor, StepOutcome } from "./types.ts";
 import { SuspendRun } from "./types.ts";
 
@@ -170,6 +171,7 @@ export class ApprovalExecutor implements StepExecutor {
     const gate = ctx.runtime.artifacts.isApproved(latest.artifactId);
     if (gate.approved) {
       closeApprovalThread(ctx, latest.artifactId);
+      if (type === "implementation") afterApproval(ctx.runtime, ctx.run, gate.approval?.actor.id ?? "human");
       return { status: "success", outputs: [`${latest.artifactId}@${latest.version}`] };
     }
 
@@ -240,6 +242,7 @@ export class ApprovalExecutor implements StepExecutor {
         openedBy: "runtime",
         meta: { artifactType: type },
       });
+    if (type === "implementation") afterGateReached(ctx.runtime, ctx.run);
     throw new SuspendRun("WAITING_HUMAN", `approve ${type} (${latest.name}@${latest.version})`, {
       checkpointState: { awaitingApproval: { artifactId: latest.artifactId, version: latest.version, type } },
       waitingFor: { kind: "approval", interactionId: thread.id, detail: type },

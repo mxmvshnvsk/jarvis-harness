@@ -520,7 +520,14 @@ describe("review mode v1", () => {
     expect(readFileSync(file, "utf8")).toContain("// REVIEW(R-1): use a named constant");
     expect(readFileSync(file, "utf8")).toContain("// REVIEW(R-2): and record the convention");
     const threadsOut = await jarvis(["threads"]);
-    expect(threadsOut.out).toContain("review         acknowledged");
+    expect(threadsOut.out).toContain("review         open");
+    const st0 = JSON.parse((await jarvis(["--json", "review", "status", runId])).out) as {
+      sessions: Array<{ state: string; comments: Array<{ id: string; state: string; class?: string }> }>;
+    };
+    expect(st0.sessions[0]?.comments.map((c) => [c.id, c.state])).toEqual([
+      ["R-1", "open"],
+      ["R-2", "open"],
+    ]);
 
     const resumed = await jarvis(["--json", "resume", runId]);
     expect(resumed.code).toBe(10); // back at the gate after the fix
@@ -561,7 +568,34 @@ describe("review mode v1", () => {
     expect(implPrompt).toContain('review-analysis returned "fix_required"');
     expect(implPrompt).toContain("R-1 src/onboarding.ts:2 use a named constant");
 
+    // ADR-0019 §5 lifecycle: classified → applied by the fix → ready at the gate → resolved on approval
+    const st1 = JSON.parse((await jarvis(["--json", "review", "status", runId])).out) as {
+      sessions: Array<{
+        state: string;
+        comments: Array<{ id: string; state: string; class?: string; history: unknown[] }>;
+      }>;
+    };
+    expect(st1.sessions[0]?.state).toBe("ready_for_review");
+    expect(st1.sessions[0]?.comments.map((c) => [c.id, c.class, c.state])).toEqual([
+      ["R-1", "CODE", "ready_for_review"],
+      ["R-2", "KNOWLEDGE_CANDIDATE", "resolved"],
+    ]);
+    expect(st1.sessions[0]?.comments[0]?.history.map((h) => (h as { state: string }).state)).toEqual([
+      "open",
+      "acknowledged",
+      "applied",
+      "ready_for_review",
+    ]);
+    const text = await jarvis(["review", "status", runId]);
+    expect(text.out).toContain("R-1   ready_for_review  CODE");
+    expect(text.out).toContain("→ use a named constant");
+
     expect((await jarvis(["--json", "approve", runId, "--resume"])).code).toBe(0);
+    const st2 = JSON.parse((await jarvis(["--json", "review", "status", runId])).out) as {
+      sessions: Array<{ state: string; comments: Array<{ state: string }> }>;
+    };
+    expect(st2.sessions[0]?.state).toBe("resolved");
+    expect(st2.sessions[0]?.comments.every((c) => c.state === "resolved")).toBe(true);
     const applied = await jarvis(["apply", runId]);
     expect(applied.code).toBe(0);
     const main = readFileSync(join(sb.project, "src", "onboarding.ts"), "utf8");

@@ -7,7 +7,7 @@ import { runConfigShow } from "./commands/config.ts";
 import { runDbBackup, runDbMigrate, runDbStatus } from "./commands/db.ts";
 import { renderDoctor, runDoctor } from "./commands/doctor.ts";
 import { runEvalsBaseline, runEvalsDiff, runEvalsRun } from "./commands/evals.ts";
-import { runAnswer, runAttach, runReviewSubmit, runThreads } from "./commands/human.ts";
+import { runAnswer, runAttach, runReviewStatus, runReviewSubmit, runThreads } from "./commands/human.ts";
 import { renderInit, runInit } from "./commands/init.ts";
 import {
   runCandidatesList,
@@ -385,6 +385,13 @@ export function buildProgram(options: RunOptions = {}): Command {
     .option("--verify", "determinism check", false)
     .action(async (opts: { verify: boolean }) => {
       await runKnowledgeStatus(ctxFor(), opts);
+    });
+
+  review
+    .command("status [run]")
+    .description("every review comment of the run with its lifecycle state")
+    .action(async (ref: string | undefined) => {
+      await runReviewStatus(ctxFor(), ref);
     });
 
   const standards = program.command("standards").description("project standards (ADR-0020)");

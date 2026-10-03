@@ -11,6 +11,7 @@ import {
   selectTransition,
   type WorkflowDefinition,
 } from "../core/domain/workflow.ts";
+import { afterAnalysis, afterImplementation } from "../interaction/review/lifecycle.ts";
 import { ModelError } from "../models/errors.ts";
 import { LeaseLostError } from "../storage/runStore.ts";
 import { UnresolvedEffectError } from "./effects.ts";
@@ -274,6 +275,7 @@ export class LocalWorkflowEngine {
     outcome: StepOutcome,
     workspace: Workspace,
   ): Promise<{ run: Run; stop: boolean }> {
+    if (outcome.status === "success") this.reviewHooks(run, step, outcome);
     let transition: ReturnType<typeof selectTransition>;
     try {
       transition = selectTransition(step, {
@@ -401,6 +403,29 @@ export class LocalWorkflowEngine {
     const resumed = this.rt.runs.transition(run.id, "RUNNING", { reason: `resumed from ${run.state}` });
     this.emit(resumed, "run.state", { state: resumed.state, reason: resumed.stateReason });
     return resumed;
+  }
+
+  /** ADR-0019 §5: review comments move with the workflow. */
+  private reviewHooks(run: Run, step: StepDefinition, outcome: StepOutcome): void {
+    if (step.agent === "review-analysis") {
+      const ref = outcome.outputs?.[0];
+      const [id, version] = (ref ?? "").split("@");
+      const artifact = id ? this.rt.artifacts.get(id, Number(version)) : undefined;
+      if (artifact && artifact.type === "review-analysis") {
+        try {
+          afterAnalysis(
+            this.rt,
+            run,
+            JSON.parse(this.rt.artifacts.text(artifact)) as {
+              comments?: Array<{ id: string; class: string; action?: string }>;
+            },
+          );
+        } catch {
+          // not JSON — nothing to classify
+        }
+      }
+    }
+    if (step.agent === "implementation") afterImplementation(this.rt, run);
   }
 
   private async park(

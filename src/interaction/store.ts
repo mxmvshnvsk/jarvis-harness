@@ -182,6 +182,11 @@ export class InteractionStore {
     return this.listForRun(runId, { openOnly: true }).find((i) => kind === undefined || i.kind === kind);
   }
 
+  setMeta(id: string, meta: Record<string, unknown>): Interaction {
+    this.db.prepare("UPDATE interactions SET meta_json = ? WHERE id = ?").run(JSON.stringify(meta), id);
+    return this.require(id);
+  }
+
   setState(id: string, state: InteractionState): Interaction {
     this.db.prepare("UPDATE interactions SET state = ? WHERE id = ?").run(state, id);
     return this.require(id);
