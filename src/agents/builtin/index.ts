@@ -26,6 +26,7 @@ const READ_REPO = [
   "git.diff",
   "git.status",
   "knowledge.read",
+  "knowledge.search",
   "graph.impact",
   "graph.neighbors",
 ];

@@ -221,6 +221,37 @@ CREATE INDEX graph_edges_from ON graph_edges(snapshot_id, from_id);
 CREATE INDEX graph_edges_to ON graph_edges(snapshot_id, to_id);
 `,
   },
+  {
+    version: 4,
+    name: "retrieval",
+    sql: `
+-- ADR-0015 §2 v0.1: FTS5 over knowledge, standards, skills and artifacts; §4: vectors by unit identity.
+CREATE VIRTUAL TABLE knowledge_fts USING fts5(
+  source_id UNINDEXED,
+  source_version UNINDEXED,
+  kind UNINDEXED,
+  title,
+  body,
+  tokenize = 'unicode61 remove_diacritics 2'
+);
+CREATE TABLE knowledge_units (
+  source_id      TEXT PRIMARY KEY,
+  source_version TEXT NOT NULL,
+  kind           TEXT NOT NULL,
+  title          TEXT NOT NULL,
+  ref            TEXT NOT NULL,
+  indexed_at     TEXT NOT NULL
+);
+CREATE TABLE knowledge_vectors (
+  source_id      TEXT NOT NULL,
+  source_version TEXT NOT NULL,
+  embedder       TEXT NOT NULL,
+  dims           INTEGER NOT NULL,
+  vector_json    TEXT NOT NULL,
+  PRIMARY KEY (source_id, embedder)
+);
+`,
+  },
 ];
 
 export const LATEST_SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]?.version ?? 0;

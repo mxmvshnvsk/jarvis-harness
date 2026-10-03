@@ -72,7 +72,7 @@ describe("jarvis mcp serve", () => {
 
     const search = await client.callTool({ name: "knowledge.search", arguments: { query: "ledger" } });
     expect((search.content as Array<{ text: string }>)[0]?.text).toContain(
-      "knowledge:domain.md:2: Refunds go through the ledger.",
+      "1. knowledge:domain.md  [knowledge] domain.md — Orders are immutable after dispatch. Refunds go through the [ledger].",
     );
     const std = await client.callTool({ name: "knowledge.search", arguments: { query: "console" } });
     expect((std.content as Array<{ text: string }>)[0]?.text).toContain("standard:no-console@1");

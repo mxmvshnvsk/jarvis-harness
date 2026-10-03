@@ -5,9 +5,8 @@ import type { Runtime } from "../app/runtime.ts";
 import { runDetail } from "../app/status.ts";
 import { effectiveStacks } from "../capabilities/detector.ts";
 import { renderPackage } from "../knowledge/package.ts";
-import { loadKnowledgeDocs, resolvePackage } from "../knowledge/resolver.ts";
-import { loadSkills } from "../knowledge/skills.ts";
-import { loadStandards } from "../knowledge/standards.ts";
+import { resolvePackage } from "../knowledge/resolver.ts";
+import { refreshIndex, search } from "../knowledge/retrieval/service.ts";
 import { shortRunId } from "../storage/runStore.ts";
 
 /**
@@ -30,23 +29,21 @@ export function buildMcpServer(
     "knowledge.search",
     {
       description:
-        "Search project knowledge, standards and skills (.jarvis/) by substring; returns refs and matching lines.",
+        "Search project knowledge, standards, skills and run artifacts (FTS5 + glossary expansion, vectors when configured); returns refs.",
       inputSchema: { query: z.string().min(1), limit: z.number().int().positive().max(50).optional() },
     },
     async ({ query, limit }) => {
-      const q = query.toLowerCase();
-      const hits: string[] = [];
-      const scan = (ref: string, body: string) => {
-        body.split("\n").forEach((line, i) => {
-          if (line.toLowerCase().includes(q)) hits.push(`${ref}:${i + 1}: ${line.trim().slice(0, 200)}`);
-        });
-      };
-      for (const d of loadKnowledgeDocs(roots)) scan(`knowledge:${d.name}`, d.text);
-      for (const s of loadStandards(roots)) scan(`standard:${s.id}@${s.version}`, `${s.title}\n${s.rule}`);
-      for (const s of loadSkills(roots))
-        scan(`skill:${s.id}@${s.version}`, `${s.title ?? ""}\n${s.instructions}`);
-      const shown = hits.slice(0, limit ?? 20);
-      return text(shown.length > 0 ? shown.join("\n") : `no matches for "${query}"`);
+      await refreshIndex(runtime, roots);
+      const result = await search(runtime, roots, query, { limit: limit ?? 10 });
+      const lines = result.evidence.map(
+        (e, i) =>
+          `${i + 1}. ${e.ref}  [${e.kind}] ${e.title}${e.snippet ? ` — ${e.snippet.replace(/\s+/g, " ")}` : ""}`,
+      );
+      if (result.expansions.length > 0)
+        lines.unshift(
+          `expansions: ${result.expansions.map((x) => `${x.term} → ${x.added.join(", ")}`).join("; ")}`,
+        );
+      return text(lines.length > 0 ? lines.join("\n") : `no matches for "${query}"`);
     },
   );
 

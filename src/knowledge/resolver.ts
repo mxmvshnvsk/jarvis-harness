@@ -35,8 +35,9 @@ export function loadKnowledgeDocs(roots: KnowledgeRoots): KnowledgeDoc[] {
   const out: KnowledgeDoc[] = [];
   for (const dir of dirs) {
     if (!dir || !existsSync(dir)) continue;
+    // glossary.md is a lookup table for query expansion (ADR-0015 §3), not a document for agents
     for (const f of readdirSync(dir)
-      .filter((x) => x.endsWith(".md") && x !== "README.md")
+      .filter((x) => x.endsWith(".md") && x !== "README.md" && x !== "glossary.md")
       .sort()) {
       const raw = readFileSync(join(dir, f), "utf8");
       const { data, body } = parseFrontMatter(raw);

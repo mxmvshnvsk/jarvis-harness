@@ -1,5 +1,6 @@
 import { createRuntime } from "../../app/runtime.ts";
 import { repoIdOf, updateGraph, verifyGraph } from "../../knowledge/graph/update.ts";
+import { refreshIndex, search } from "../../knowledge/retrieval/service.ts";
 import type { CliContext } from "../context.ts";
 import { CliExit, EXIT } from "../output.ts";
 import { loadForCli } from "./config.ts";
@@ -97,6 +98,53 @@ export async function runKnowledgeStatus(ctx: CliContext, options: { verify?: bo
         );
     });
     if (verify && !verify.ok) throw new CliExit(EXIT.error);
+  } finally {
+    await runtime.close();
+  }
+}
+
+/** `jarvis knowledge index` — FTS5 (and vectors when configured) over knowledge, standards, skills (ADR-0015). */
+export async function runKnowledgeIndex(ctx: CliContext): Promise<void> {
+  const loaded = await loadForCli(ctx);
+  const runtime = createRuntime(loaded, { env: ctx.env });
+  try {
+    const roots = { projectRoot: loaded.project?.root ?? ctx.cwd, userRoot: loaded.home.root };
+    const report = await refreshIndex(runtime, roots);
+    const counts = runtime.index.count();
+    ctx.out.result({ ...report, ...counts, embedder: runtime.embedder?.id ?? null }, () =>
+      ctx.out.line(
+        `index: ${report.indexed} indexed, ${report.unchanged} unchanged, ${report.removed} removed → ${counts.units} unit(s), ${counts.vectors} vector(s)${runtime.embedder ? ` (${runtime.embedder.id})` : " (lexical only; set knowledge.retrieval.embeddings for vectors)"}`,
+      ),
+    );
+  } finally {
+    await runtime.close();
+  }
+}
+
+/** `jarvis knowledge search <query>` — what an agent's knowledge.search would return. */
+export async function runKnowledgeSearch(
+  ctx: CliContext,
+  query: string,
+  options: { limit?: number },
+): Promise<void> {
+  const loaded = await loadForCli(ctx);
+  const runtime = createRuntime(loaded, { env: ctx.env });
+  try {
+    const roots = { projectRoot: loaded.project?.root ?? ctx.cwd, userRoot: loaded.home.root };
+    await refreshIndex(runtime, roots);
+    const result = await search(runtime, roots, query, { limit: options.limit ?? 10 });
+    ctx.out.result(result, () => {
+      if (result.expansions.length > 0)
+        ctx.out.line(
+          `expansions: ${result.expansions.map((x) => `${x.term} → ${x.added.join(", ")}`).join("; ")}`,
+        );
+      ctx.out.line(`indexes: ${result.indexes.join(" + ")}`);
+      for (const e of result.evidence)
+        ctx.out.line(
+          `${e.ref}  [${e.kind}] ${e.title}${e.snippet ? `\n    ${e.snippet.replace(/\s+/g, " ")}` : ""}`,
+        );
+      if (result.evidence.length === 0) ctx.out.line("no matches");
+    });
   } finally {
     await runtime.close();
   }

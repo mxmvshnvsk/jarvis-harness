@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSy
 import { dirname, join, relative } from "node:path";
 import type { ResolvedConfig } from "../../core/config/schema.ts";
 import { readByRef } from "../../knowledge/resolver.ts";
+import { refreshIndex, search } from "../../knowledge/retrieval/service.ts";
 import { gitIdentityEnv } from "../../orchestration/worktree.ts";
 import { effectMarker } from "../../storage/effects.ts";
 import type { Capability, ToolContext, ToolOutput, ToolProvider } from "../types.ts";
@@ -124,6 +125,35 @@ export class LocalToolProvider implements ToolProvider {
             ref,
           );
           return text === undefined ? { ok: false, error: `unknown ref "${ref}"` } : { ok: true, text };
+        },
+      },
+      {
+        name: "knowledge.search",
+        description:
+          "Search project knowledge, standards, skills and this run's artifacts by meaning and words (FTS + glossary expansion); returns refs for knowledge.read.",
+        network: "none",
+        access: "read",
+        effect: false,
+        parameters: {
+          type: "object",
+          properties: { query: { type: "string" }, limit: { type: "integer" } },
+          required: ["query"],
+        },
+        handler: async (args, ctx) => {
+          const roots = { projectRoot: ctx.workspacePath, userRoot: ctx.runtime.loaded.home.root };
+          await refreshIndex(ctx.runtime, roots, ctx.run.id);
+          const result = await search(ctx.runtime, roots, str(args, "query"), {
+            limit: num(args, "limit", 10),
+          });
+          const lines = result.evidence.map(
+            (e, i) =>
+              `${i + 1}. ${e.ref}  [${e.kind}] ${e.title}${e.snippet ? ` — ${e.snippet.replace(/\s+/g, " ")}` : ""}  (${e.retrievalPath.map((p) => `${p.index}#${p.rank}`).join(",")})`,
+          );
+          if (result.expansions.length > 0)
+            lines.unshift(
+              `glossary expansions: ${result.expansions.map((x) => `${x.term} → ${x.added.join(", ")}`).join("; ")}`,
+            );
+          return { ok: true, text: lines.length > 0 ? lines.join("\n") : "no matches", data: result };
         },
       },
       {

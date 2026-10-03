@@ -17,7 +17,12 @@ import {
   runStandardsCheck,
   runStandardsList,
 } from "./commands/knowledge.ts";
-import { runKnowledgeStatus, runKnowledgeUpdate } from "./commands/knowledgeGraph.ts";
+import {
+  runKnowledgeIndex,
+  runKnowledgeSearch,
+  runKnowledgeStatus,
+  runKnowledgeUpdate,
+} from "./commands/knowledgeGraph.ts";
 import { runMcpList, runMcpServe } from "./commands/mcp.ts";
 import { runModelsList, runModelsProbe } from "./commands/models.ts";
 import { runApply, runApprove, runDaemon, runDiff, runGc, runResume, runWork } from "./commands/run.ts";
@@ -358,6 +363,21 @@ export function buildProgram(options: RunOptions = {}): Command {
     .option("--full", "ignore the cache and rebuild", false)
     .action(async (opts: { full: boolean }) => {
       await runKnowledgeUpdate(ctxFor(), opts);
+    });
+  knowledge
+    .command("index")
+    .description(
+      "index knowledge, standards and skills for search (FTS5; vectors when knowledge.retrieval.embeddings is set)",
+    )
+    .action(async () => {
+      await runKnowledgeIndex(ctxFor());
+    });
+  knowledge
+    .command("search <query>")
+    .description("search the index with glossary expansion, as agents do")
+    .option("--limit <n>", "max hits", Number.parseInt, 10)
+    .action(async (query: string, opts: { limit: number }) => {
+      await runKnowledgeSearch(ctxFor(), query, opts);
     });
   knowledge
     .command("status")

@@ -98,7 +98,7 @@ export class AgentRuntimeRunner implements AgentRunner {
       })
       .filter((a): a is ArtifactVersion => a !== undefined)
       .map((artifact) => ({ artifact, text: rt.artifacts.text(artifact) }));
-    const pkg = packageForStep(ctx, def.id);
+    const pkg = await packageForStep(ctx, def.id);
     const charBudget = Math.floor(route.model.contextWindow * 0.45 * 3.5);
     const base = buildBaseMessages({
       def,

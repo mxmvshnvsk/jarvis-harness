@@ -11,6 +11,8 @@ import { InteractionStore } from "../interaction/store.ts";
 import { GraphStore } from "../knowledge/graph/store.ts";
 import { GraphToolProvider } from "../knowledge/graph/tools.ts";
 import { repoIdOf } from "../knowledge/graph/update.ts";
+import { type Embedder, OpenAiCompatibleEmbedder } from "../knowledge/retrieval/embedder.ts";
+import { KnowledgeIndex } from "../knowledge/retrieval/index.ts";
 import { McpPool, ToolsCache } from "../mcp/client/pool.ts";
 import { McpToolProvider } from "../mcp/provider.ts";
 import { type CassetteMode, FileCassetteStore } from "../models/cassette.ts";
@@ -58,6 +60,9 @@ export interface Runtime {
   /** Language adapters (ADR-0021); empty until an adapter pack registers. */
   readonly capabilities: CapabilityRegistry;
   readonly graph: GraphStore;
+  /** ADR-0015: FTS5 + optional vectors over knowledge, standards, skills and artifacts. */
+  readonly index: KnowledgeIndex;
+  readonly embedder?: Embedder;
   readonly secrets: CompositeSecretResolver;
   readonly mcp: { readonly pool: McpPool; readonly provider: McpToolProvider };
   readonly env: NodeJS.ProcessEnv;
@@ -116,6 +121,13 @@ export function createRuntime(loaded: LoadedConfig, options: RuntimeOptions = {}
   const registry = new ToolRegistry();
   registry.register(new LocalToolProvider(loaded.config));
   const graph = new GraphStore(db.db);
+  const index = new KnowledgeIndex(db.db);
+  const embeddingsModelId = loaded.config.knowledge.retrieval.embeddings;
+  const embeddingsModel = embeddingsModelId ? loaded.config.models[embeddingsModelId] : undefined;
+  const embedder =
+    embeddingsModelId && embeddingsModel
+      ? new OpenAiCompatibleEmbedder(embeddingsModelId, embeddingsModel, secrets)
+      : undefined;
   registry.register(new GraphToolProvider(graph));
   // Adapter packs (ADR-0021 §8): TypeScript ships in-process; others arrive as packs.
   const capabilities = new CapabilityRegistry();
@@ -154,6 +166,8 @@ export function createRuntime(loaded: LoadedConfig, options: RuntimeOptions = {}
     keychain,
     capabilities,
     graph,
+    index,
+    ...(embedder ? { embedder } : {}),
     secrets,
     mcp: { pool, provider: mcpProvider },
     env,

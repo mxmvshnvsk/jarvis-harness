@@ -154,6 +154,18 @@ Stage 12 — specialised agents (ADR-0001 §6):
   `release-notes` closes the workflow after the final gate with publishable markdown
 - The review agent sees docs and telemetry artifacts as inputs
 
+Retrieval (ADR-0015 v0.1–v0.3½, ports for v0.5):
+
+- FTS5 index (migration 0004) over knowledge sections, standards, skills and run artifacts,
+  re-indexed by unit version; `.jarvis/knowledge/glossary.md` expands queries across the
+  business-language / code gap deterministically (every expansion is in the trace)
+- `Embedder` port with an OpenAI-compatible `/embeddings` implementation behind
+  `knowledge.retrieval.embeddings` (off until the ADR-0015 §6 gate), vectors keyed by unit version and
+  embedder id; Reciprocal Rank Fusion of lexical and semantic lists, `retrievalPath` on every hit
+- Once more knowledge documents match a task than `knowledge.retrieval.rankAbove`, the index orders
+  them (nothing is dropped); `knowledge.search` tool for agents, `jarvis knowledge index|search`,
+  MCP `knowledge.search` on the same path
+
 Stage 14 — IDE integration and evals (ADR-0017 §7, ADR-0012):
 
 - `jarvis mcp serve` — Jarvis as a read-only MCP server on stdio for IDEs and other agents:

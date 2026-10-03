@@ -216,6 +216,15 @@ export const KnowledgeConfigSchema = z.strictObject({
   sources: z.array(z.string().min(1)).default([]),
   /** Skills per agent call; the rest are listed as available on request. */
   maxSkills: z.int().positive().default(2),
+  /** ADR-0015: how knowledge documents are chosen when more match than fit. */
+  retrieval: z
+    .strictObject({
+      /** Use the index to rank knowledge docs once more than this many match the scope. */
+      rankAbove: z.int().nonnegative().default(4),
+      /** Model id (from `models`) with an OpenAI-compatible /embeddings endpoint; off by default (§6 gate). */
+      embeddings: z.string().min(1).optional(),
+    })
+    .prefault({}),
   /** Share of the context budget for L4 split among skills / standards / knowledge. */
   split: z
     .strictObject({

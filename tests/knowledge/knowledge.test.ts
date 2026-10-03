@@ -11,7 +11,12 @@ import { loadStandards, parseStandard, StandardLoadError } from "../../src/knowl
 import { type Sandbox, sandbox } from "../helpers/tmp.ts";
 
 let sb: Sandbox;
-const CONFIG = { sources: [], maxSkills: 2, split: { skills: 0.4, standards: 0.35, knowledge: 0.25 } };
+const CONFIG = {
+  sources: [],
+  maxSkills: 2,
+  retrieval: { rankAbove: 4 },
+  split: { skills: 0.4, standards: 0.35, knowledge: 0.25 },
+};
 
 beforeEach(() => {
   sb = sandbox();
