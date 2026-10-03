@@ -43,11 +43,33 @@ export async function runStatus(
       runRef ? renderRun(ctx, runtime, runRef, options) : renderOverview(ctx, runtime, options);
     const watch = options.watch;
     if (watch && !ctx.out.json) {
+      const started = Date.now();
       for (;;) {
         ctx.out.line("\u001b[2J\u001b[H");
         render();
+        ctx.out.line("");
+        ctx.out.line(
+          `watching every ${watch}s for ${Math.round((Date.now() - started) / 1000)}s — Ctrl-C to stop`,
+        );
+        // ADR-0018: a watch ends on its own when there is nothing left to watch.
+        const run = runRef ? runtime.runs.resolve(runRef) : undefined;
+        if (
+          run &&
+          (run.state === "COMPLETED" ||
+            run.state === "FAILED" ||
+            run.state === "CANCELLED" ||
+            run.state === "WAITING_HUMAN")
+        ) {
+          const hint =
+            run.state === "WAITING_HUMAN"
+              ? `run waits for a human${run.waitingFor ? ` (${run.waitingFor.kind})` : ""}: see the hint above`
+              : `run ${run.state.toLowerCase()}`;
+          ctx.out.line(`\u0007${hint}; stopped watching`);
+          break;
+        }
         await new Promise((resolve) => setTimeout(resolve, watch * 1000));
       }
+      return;
     }
     render();
   } finally {

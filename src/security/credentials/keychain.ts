@@ -12,7 +12,7 @@ const execFileAsync = promisify(execFile);
  * Linux. Where neither exists — CI containers, tests — a `file` backend keeps a 0600 JSON file under
  * the Jarvis home; `doctor` reports which backend is active.
  */
-export type KeychainBackendKind = "macos" | "libsecret" | "file";
+export type KeychainBackendKind = "macos" | "libsecret" | "windows" | "file";
 
 export interface KeychainBackend {
   readonly kind: KeychainBackendKind;
@@ -98,6 +98,53 @@ class LibsecretBackend implements KeychainBackend {
   }
 }
 
+/**
+ * Windows: values encrypted per user with DPAPI (`ProtectedData`, CurrentUser scope) through
+ * PowerShell and stored next to the file backend's file; only the same Windows user can decrypt.
+ */
+class WindowsDpapiBackend implements KeychainBackend {
+  readonly kind = "windows" as const;
+  private readonly file: FileBackend;
+
+  constructor(file: string) {
+    this.file = new FileBackend(file);
+  }
+
+  private async powershell(script: string, input: string): Promise<string> {
+    const { stdout } = await execFileAsync(
+      "powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-Command", script],
+      { env: { ...process.env, JARVIS_DPAPI_INPUT: input }, maxBuffer: 1024 * 1024 },
+    );
+    return stdout.trim();
+  }
+
+  async get(account: string): Promise<string | undefined> {
+    const stored = await this.file.get(account);
+    if (!stored) return undefined;
+    const script =
+      "Add-Type -AssemblyName System.Security; " +
+      "$b = [Convert]::FromBase64String($env:JARVIS_DPAPI_INPUT); " +
+      "$p = [System.Security.Cryptography.ProtectedData]::Unprotect($b, $null, 'CurrentUser'); " +
+      "[Console]::Out.Write([Text.Encoding]::UTF8.GetString($p))";
+    return this.powershell(script, stored);
+  }
+
+  async set(account: string, value: string): Promise<void> {
+    const script =
+      "Add-Type -AssemblyName System.Security; " +
+      "$b = [Text.Encoding]::UTF8.GetBytes($env:JARVIS_DPAPI_INPUT); " +
+      "$p = [System.Security.Cryptography.ProtectedData]::Protect($b, $null, 'CurrentUser'); " +
+      "[Console]::Out.Write([Convert]::ToBase64String($p))";
+    const encrypted = await this.powershell(script, value);
+    await this.file.set(account, encrypted);
+  }
+
+  async remove(account: string): Promise<boolean> {
+    return this.file.remove(account);
+  }
+}
+
 export class FileBackend implements KeychainBackend {
   readonly kind = "file" as const;
   private readonly file: string;
@@ -152,10 +199,12 @@ export function selectBackend(options: KeychainOptions): KeychainBackend {
   if (forced === "file") return new FileBackend(options.file);
   if (forced === "macos") return new MacosBackend();
   if (forced === "libsecret") return new LibsecretBackend();
+  if (forced === "windows") return new WindowsDpapiBackend(options.file);
   const platform = options.platform ?? process.platform;
   const has = options.hasCommand ?? defaultHasCommand;
   if (platform === "darwin" && has("security")) return new MacosBackend();
   if (platform === "linux" && has("secret-tool")) return new LibsecretBackend();
+  if (platform === "win32") return new WindowsDpapiBackend(options.file);
   return new FileBackend(options.file);
 }
 

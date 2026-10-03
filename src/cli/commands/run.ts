@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { createEngine } from "../../app/engine.ts";
 import { preflightMcp } from "../../app/preflight.ts";
@@ -383,7 +383,28 @@ export async function runApply(ctx: CliContext, ref: string, options: { message?
   }
 }
 
-/** `jarvis gc` — remove worktrees of terminal runs past retention (ADR-0003 §6). */
+/** Removes graph fact files not read since the cutoff (atime when available, else mtime). */
+function gcGraphCache(dir: string, cutoff: number): number {
+  if (!existsSync(dir)) return 0;
+  let removed = 0;
+  const walk = (d: string) => {
+    for (const entry of readdirSync(d, { withFileTypes: true })) {
+      const p = join(d, entry.name);
+      if (entry.isDirectory()) walk(p);
+      else if (entry.name.endsWith(".json")) {
+        const st = statSync(p);
+        if (Math.max(st.atimeMs, st.mtimeMs) < cutoff) {
+          rmSync(p, { force: true });
+          removed += 1;
+        }
+      }
+    }
+  };
+  walk(dir);
+  return removed;
+}
+
+/** `jarvis gc` — remove worktrees of terminal runs past retention (ADR-0003 §6) and stale graph facts. */
 export async function runGc(
   ctx: CliContext,
   options: { pruneBranches?: boolean; days?: number },
@@ -411,8 +432,12 @@ export async function runGc(
       });
       removed.push(run.id);
     }
-    ctx.out.result({ removed, kept, days }, () => {
-      ctx.out.line(`removed ${removed.length} worktree(s) older than ${days} day(s); kept ${kept.length}`);
+    // Graph facts cache (ADR-0008 §1): blobs nobody referenced within the retention window go.
+    const cacheRemoved = gcGraphCache(join(loaded.home.cacheDir, "graph"), cutoff);
+    ctx.out.result({ removed, kept, days, graphCacheRemoved: cacheRemoved }, () => {
+      ctx.out.line(
+        `removed ${removed.length} worktree(s) older than ${days} day(s); kept ${kept.length}; graph cache: ${cacheRemoved} stale fact file(s) removed`,
+      );
     });
   } finally {
     await runtime.close();
