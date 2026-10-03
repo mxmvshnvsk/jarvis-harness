@@ -24,7 +24,8 @@ import {
   type StepOutcome,
   SuspendRun,
 } from "./types.ts";
-import { cwdWorkspaceFactory, type Workspace, type WorkspaceFactory } from "./workspace.ts";
+import type { Workspace, WorkspaceFactory } from "./workspace.ts";
+import { workspaceFactory } from "./worktree.ts";
 
 /**
  * LocalWorkflowEngine (ADR-0011 §1): step execution, deterministic transitions with bounded
@@ -72,7 +73,7 @@ export class LocalWorkflowEngine {
   constructor(options: EngineOptions) {
     this.rt = options.runtime;
     this.workflows = options.workflows;
-    this.workspaces = options.workspaces ?? cwdWorkspaceFactory;
+    this.workspaces = options.workspaces ?? workspaceFactory(options.runtime.env);
     this.leaseOptions = options.leaseOptions ?? {};
     this.clock = options.clock ?? (() => new Date());
     this.executors = {
@@ -117,6 +118,11 @@ export class LocalWorkflowEngine {
 
     const workspace = await this.workspaces.open(run.workspace);
     try {
+      if (run.state !== "CREATED") {
+        // ADR-0003 §3: the file state of a resumed run is exactly its last checkpoint.
+        const last = this.rt.checkpoints.latest(run.id);
+        await workspace.restore(last?.headCommit);
+      }
       run = this.enter(run, workflow);
       for (;;) {
         if (run.cancelRequested) {
@@ -177,6 +183,15 @@ export class LocalWorkflowEngine {
       stepId: step.id,
       iteration,
     });
+    const tools = this.rt.tools.bind({
+      run,
+      stepId: step.id,
+      iteration,
+      lease,
+      workspacePath: workspace.ref.path,
+      agentCapabilities: ["*"],
+      env: this.rt.env,
+    });
     const ctx: StepContext = {
       run,
       workflow,
@@ -186,6 +201,7 @@ export class LocalWorkflowEngine {
       runtime: this.rt,
       gateway,
       workspace,
+      tools,
       restored,
       inputs,
       saveCheckpoint: (state) => {
@@ -251,7 +267,11 @@ export class LocalWorkflowEngine {
       return { run: failed, stop: true };
     }
 
-    const headCommit = await workspace.checkpoint(`jarvis: ${step.id} #${iteration} ${outcome.status}`);
+    const headCommit = await workspace.checkpoint(`jarvis: ${step.id} #${iteration} ${outcome.status}`, {
+      "Jarvis-Run": run.id,
+      "Jarvis-Step": step.id,
+      "Jarvis-Iteration": String(iteration),
+    });
     const iterations = { ...run.iterations };
     if (transition.edgeId) {
       const count = (iterations[transition.edgeId] ?? 0) + 1;
@@ -369,7 +389,11 @@ export class LocalWorkflowEngine {
     suspend: SuspendRun,
     workspace: Workspace,
   ): Promise<Run> {
-    const headCommit = await workspace.checkpoint(`jarvis: ${step.id} #${iteration} ${suspend.state}`);
+    const headCommit = await workspace.checkpoint(`jarvis: ${step.id} #${iteration} ${suspend.state}`, {
+      "Jarvis-Run": run.id,
+      "Jarvis-Step": step.id,
+      "Jarvis-Iteration": String(iteration),
+    });
     this.rt.checkpoints.save({
       runId: run.id,
       stepId: step.id,

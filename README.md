@@ -56,6 +56,20 @@ Stage 3 — resource control and the workflow engine (ADR-0011):
   `jarvis approve <run> [--reject | --request-changes] [--comment] [--resume]`,
   `jarvis daemon [--interval] [--once]`
 
+Stage 4 — tool platform:
+
+- `Redactor` (ADR-0010): exact env/keychain literals, denied paths refused before reading,
+  pattern detectors (cloud keys, tokens, JWT, PEM, bearer, basic-auth URLs, assignments, high
+  entropy), deterministic per-run placeholders; applied to every tool result
+- Tool Registry / Router (ADR-0001 §9): normalized capabilities with `network`, `access`, `effect`;
+  policy = agent allowlist → profile deny → egress rule → write permission → non-interactive
+  destructive ban; effects go through the journal with lease fencing; outputs capped with the full
+  redacted text kept as a blob
+- Local tools: `repo.read|list|search|write|edit`, `git.status|diff|log|commit|push` (push is a
+  verified effect), `project.<name>` from `tools.local`, `shell.run` when `tools.shell: true`
+- `WorktreeWorkspace` (ADR-0003): `jarvis/<task>/<run>` from the base commit, setup hook,
+  checkpoint = commit with `Jarvis-*` trailers, resume = reset + clean; `jarvis diff|apply|gc`
+
 Configuration precedence: CLI flags → `JARVIS_*` env → `.jarvis/project.yaml` → `~/.jarvis/config.yaml`
 → defaults; profiles (`--profile ci`) may only narrow. Secrets are references (`env:VAR`,
 `keychain:ID`), never literals.

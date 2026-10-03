@@ -7,7 +7,7 @@ import type { WorkspaceRef } from "../core/domain/run.ts";
 export interface Workspace {
   readonly ref: WorkspaceRef;
   /** Records the current file state as a checkpoint; returns a commit sha when the mode supports it. */
-  checkpoint(message: string): Promise<string | undefined>;
+  checkpoint(message: string, trailers?: Record<string, string>): Promise<string | undefined>;
   /** Restores the file state of a checkpoint. */
   restore(commit: string | undefined): Promise<void>;
 }

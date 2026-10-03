@@ -23,8 +23,29 @@ export class DeterministicExecutor implements StepExecutor {
   async execute(ctx: StepContext): Promise<StepOutcome> {
     const name = ctx.step.tool as string;
     const tool = this.tools.get(name);
-    if (!tool) return { status: "failure", reason: `unknown deterministic tool "${name}"` };
-    return tool(ctx, ctx.step.args);
+    if (tool) return tool(ctx, ctx.step.args);
+    // Otherwise a registered capability (project.tests, repo.search, …) run through the router.
+    if (ctx.tools.has(name)) {
+      const result = await ctx.tools.invoke(name, ctx.step.args);
+      if (result.denied) return { status: "failure", reason: `capability ${name} denied: ${result.denied}` };
+      const artifact = ctx.runtime.artifacts.put({
+        runId: ctx.run.id,
+        type: "tool-output",
+        name: `${ctx.step.id}.txt`,
+        content: result.text,
+        provenance: { kind: "tool", capability: name },
+        stepId: ctx.step.id,
+        iteration: ctx.iteration,
+      });
+      return result.ok
+        ? { status: "success", outputs: [`${artifact.artifactId}@${artifact.version}`] }
+        : {
+            status: "failure",
+            reason: result.error ?? `${name} failed`,
+            outputs: [`${artifact.artifactId}@${artifact.version}`],
+          };
+    }
+    return { status: "failure", reason: `unknown deterministic tool "${name}"` };
   }
 }
 

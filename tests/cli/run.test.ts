@@ -10,7 +10,8 @@ let sb: Sandbox;
 beforeEach(() => {
   sb = sandbox();
   sb.write("home/.jarvis/config.yaml", "version: 1\nactor: { id: me@corp }\n");
-  sb.write("project/.jarvis/project.yaml", "version: 1\n");
+  // The sandbox has a bare `.git` directory, not a repository: use the checkout directly.
+  sb.write("project/.jarvis/project.yaml", "version: 1\nworkspace: { mode: cwd }\n");
   // A project workflow with a human gate after a deterministic step.
   sb.write(
     "project/.jarvis/workflows/gated.yaml",

@@ -6,6 +6,7 @@ import { jarvisHome } from "../../core/paths.ts";
 import { ProbeStore, probeDrift, probeIsStale } from "../../models/probe.ts";
 import { evaluateEgress, formatEgressLine } from "../../security/policy/egress.ts";
 import { LATEST_SCHEMA_VERSION, openDatabase, SchemaTooNewError } from "../../storage/index.ts";
+import { hasRipgrep } from "../../tools/local/exec.ts";
 import type { CliContext } from "../context.ts";
 import { CliExit, EXIT, padEnd } from "../output.ts";
 import { loadForCli } from "./config.ts";
@@ -180,6 +181,27 @@ export async function runDoctor(ctx: CliContext): Promise<DoctorReport> {
       }
     }
 
+    checks.push(
+      commandExists("git", ctx.env, ctx.cwd)
+        ? check("tool:git", "ok", "local tool", "git available")
+        : check(
+            "tool:git",
+            "fail",
+            "local tool",
+            "git not found in PATH",
+            "worktrees and checkpoints need git (ADR-0003)",
+          ),
+    );
+    checks.push(
+      (await hasRipgrep())
+        ? check("tool:rg", "ok", "local tool", "ripgrep available")
+        : check(
+            "tool:rg",
+            "warn",
+            "local tool",
+            "ripgrep (rg) not found; repo.search falls back to a slower JS search",
+          ),
+    );
     for (const [name, command] of Object.entries(loaded.config.tools.local)) {
       checks.push(
         commandExists(command, ctx.env, loaded.project?.root ?? ctx.cwd)

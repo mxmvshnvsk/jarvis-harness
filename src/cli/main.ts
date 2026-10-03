@@ -6,7 +6,7 @@ import { runDbBackup, runDbMigrate, runDbStatus } from "./commands/db.ts";
 import { renderDoctor, runDoctor } from "./commands/doctor.ts";
 import { renderInit, runInit } from "./commands/init.ts";
 import { runModelsList, runModelsProbe } from "./commands/models.ts";
-import { runApprove, runDaemon, runResume, runWork } from "./commands/run.ts";
+import { runApply, runApprove, runDaemon, runDiff, runGc, runResume, runWork } from "./commands/run.ts";
 import { runCancel, runStatus } from "./commands/status.ts";
 import { type CliContext, defaultContext } from "./context.ts";
 import { CliExit, createOutput, EXIT } from "./output.ts";
@@ -84,9 +84,38 @@ export function buildProgram(options: RunOptions = {}): Command {
     .command("work <task>")
     .description("create a run for a task and execute it in the foreground (exit codes: ADR-0009 §3)")
     .option("--workflow <name>", "workflow definition to use", "sdd")
+    .option("--base <ref>", "base ref for the run's worktree (default: HEAD)")
     .option("--no-run", "only create the run")
-    .action(async (task: string, opts: { workflow: string; run: boolean }) => {
-      await runWork(ctxFor(), task, { workflow: opts.workflow, noRun: !opts.run });
+    .action(async (task: string, opts: { workflow: string; run: boolean; base?: string }) => {
+      await runWork(ctxFor(), task, {
+        workflow: opts.workflow,
+        noRun: !opts.run,
+        ...(opts.base ? { base: opts.base } : {}),
+      });
+    });
+
+  program
+    .command("diff <run>")
+    .description("diff of a run's worktree against its base commit (ADR-0003 §4)")
+    .action(async (run: string) => {
+      await runDiff(ctxFor(), run);
+    });
+
+  program
+    .command("apply <run>")
+    .description("squash the run's branch onto the current branch of the main repository (ADR-0003 §4)")
+    .option("--message <text>", "commit message")
+    .action(async (run: string, opts: { message?: string }) => {
+      await runApply(ctxFor(), run, opts);
+    });
+
+  program
+    .command("gc")
+    .description("remove worktrees of finished runs past retention (ADR-0003 §6)")
+    .option("--prune-branches", "also delete the jarvis/* branches")
+    .option("--days <n>", "retention in days (default: workspace.retentionDays)", (v: string) => Number(v))
+    .action(async (opts: { pruneBranches?: boolean; days?: number }) => {
+      await runGc(ctxFor(), opts);
     });
 
   program

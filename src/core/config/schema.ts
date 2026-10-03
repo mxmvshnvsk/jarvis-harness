@@ -157,7 +157,14 @@ export const McpConfigSchema = z.strictObject({
  * ---------------------------------------------------------------------------------------------- */
 
 export const ToolsConfigSchema = z.strictObject({
+  /** Project commands exposed as `project.<name>` capabilities (tests, typecheck, lint, …). */
   local: z.record(z.string(), z.string().min(1)).prefault({}),
+  /** Expose `shell.run` for arbitrary commands inside the workspace. Off by default. */
+  shell: z.boolean().default(false),
+  /** Tool output returned to the agent is capped; the full (redacted) output is kept as a blob. */
+  maxOutputBytes: z.int().positive().default(65_536),
+  /** Timeout for project commands and shell. */
+  commandTimeoutMs: z.int().positive().default(600_000),
 });
 
 export const WorkspaceConfigSchema = z.strictObject({
@@ -165,6 +172,8 @@ export const WorkspaceConfigSchema = z.strictObject({
   setup: z.string().min(1).optional(),
   /** Defaults to true in worktree mode and false in cwd mode (ADR-0003 §5). */
   allowWrites: z.boolean().optional(),
+  /** Worktrees of terminal runs older than this are removed by `jarvis gc` (ADR-0003 §6). */
+  retentionDays: z.int().positive().default(7),
 });
 
 const BudgetCapSchema = z.strictObject({

@@ -2,6 +2,7 @@ import type { Runtime } from "../app/runtime.ts";
 import type { Run, RunState } from "../core/domain/run.ts";
 import type { StepDefinition, StepKind, WorkflowDefinition } from "../core/domain/workflow.ts";
 import type { ModelCaller } from "../models/gateway.ts";
+import type { BoundTools } from "../tools/router.ts";
 import type { HeldLease } from "./lease.ts";
 import type { Workspace } from "./workspace.ts";
 
@@ -24,6 +25,8 @@ export interface StepContext {
   readonly runtime: Runtime;
   readonly gateway: ModelCaller;
   readonly workspace: Workspace;
+  /** Tools this step may call: policy-filtered, journaled, redacted (ADR-0001 §9). */
+  readonly tools: BoundTools;
   /** State restored from the latest intra-step checkpoint of this step/iteration, if any. */
   readonly restored: Record<string, unknown> | undefined;
   /** `artifactId@version` references of the inputs this step received (ADR-0005 §5). */
