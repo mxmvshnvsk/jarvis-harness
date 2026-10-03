@@ -1,0 +1,58 @@
+import { join } from "node:path";
+import { BudgetManager } from "../budget/admission.ts";
+import { SqliteUsageStore } from "../budget/usage.ts";
+import type { LoadedConfig } from "../core/config/load.ts";
+import { EnvSecretResolver } from "../core/config/secrets.ts";
+import { type CassetteMode, FileCassetteStore } from "../models/cassette.ts";
+import { ModelGateway } from "../models/gateway.ts";
+import { ProbeStore } from "../models/probe.ts";
+import { FileCalibrationStore, TokenEstimator } from "../models/tokens.ts";
+import { type OpenedDatabase, openDatabase } from "../storage/db.ts";
+import { SqliteEventStore } from "../telemetry/events.ts";
+
+/** Everything that needs the database and the configuration, wired once per process. */
+export interface Runtime {
+  readonly loaded: LoadedConfig;
+  readonly db: OpenedDatabase;
+  readonly events: SqliteEventStore;
+  readonly usage: SqliteUsageStore;
+  readonly budget: BudgetManager;
+  readonly gateway: ModelGateway;
+  readonly probes: ProbeStore;
+  close(): void;
+}
+
+export interface RuntimeOptions {
+  readonly env?: NodeJS.ProcessEnv;
+  readonly cassette?: { readonly mode: CassetteMode; readonly dir: string };
+}
+
+export function createRuntime(loaded: LoadedConfig, options: RuntimeOptions = {}): Runtime {
+  const env = options.env ?? process.env;
+  const db = openDatabase(loaded.home.dbFile);
+  const events = new SqliteEventStore(db.db);
+  const usage = new SqliteUsageStore(db.db);
+  const budget = new BudgetManager(usage, loaded.config.quotaPools);
+  const estimator = new TokenEstimator(new FileCalibrationStore(join(loaded.home.cacheDir, "models")));
+  const gateway = new ModelGateway({
+    config: loaded.config,
+    secrets: new EnvSecretResolver(env),
+    usage,
+    events,
+    budget,
+    estimator,
+    ...(options.cassette
+      ? { cassette: { mode: options.cassette.mode, store: new FileCassetteStore(options.cassette.dir) } }
+      : {}),
+  });
+  return {
+    loaded,
+    db,
+    events,
+    usage,
+    budget,
+    gateway,
+    probes: new ProbeStore(loaded.home.cacheDir),
+    close: () => db.close(),
+  };
+}

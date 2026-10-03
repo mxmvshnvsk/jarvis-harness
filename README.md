@@ -19,6 +19,18 @@ Stage 0 of the roadmap (ADR-0001 §20) — bootstrap:
 - `jarvis config show [--sources]` — resolved configuration and where every value comes from (ADR-0014)
 - `jarvis db status|migrate|backup` — forward-only migrations with a backup (ADR-0014 §4)
 
+Stage 1 — model runtime:
+
+- `ModelGateway` (ADR-0001 §10): one door to LLMs — OpenAI-compatible adapter (corporate gateways,
+  vLLM, Ollama, DeepSeek, Qwen), credentials injected at the transport, egress rule (ADR-0016),
+  budget admission per quota-pool window (ADR-0018 §4–5), bounded retries with quota/rate-limit
+  classification (ADR-0011 §1), usage and `model.call` events in SQLite, record/replay cassettes
+  (ADR-0012 §4), self-calibrating token estimates (ADR-0013 §3)
+- Model router by role, requirements and egress (ADR-0007 §3); structured output with bounded
+  repair in `schema` / `json` / `text` modes (ADR-0007 §4)
+- `jarvis models list` — models, egress, pools, window usage, probe state
+- `jarvis models probe <id>` — canary requests; drift between config and reality shows up in `doctor`
+
 Configuration precedence: CLI flags → `JARVIS_*` env → `.jarvis/project.yaml` → `~/.jarvis/config.yaml`
 → defaults; profiles (`--profile ci`) may only narrow. Secrets are references (`env:VAR`,
 `keychain:ID`), never literals.

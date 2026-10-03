@@ -5,6 +5,7 @@ import { runConfigShow } from "./commands/config.ts";
 import { runDbBackup, runDbMigrate, runDbStatus } from "./commands/db.ts";
 import { renderDoctor, runDoctor } from "./commands/doctor.ts";
 import { renderInit, runInit } from "./commands/init.ts";
+import { runModelsList, runModelsProbe } from "./commands/models.ts";
 import { type CliContext, defaultContext } from "./context.ts";
 import { CliExit, createOutput, EXIT } from "./output.ts";
 
@@ -75,6 +76,22 @@ export function buildProgram(options: RunOptions = {}): Command {
     .option("--sources", "show where every value comes from (ADR-0014 §2)")
     .action(async (opts: { sources?: boolean }) => {
       await runConfigShow(ctxFor(), opts);
+    });
+
+  const models = program
+    .command("models")
+    .description("configured models and their probed capabilities (ADR-0007)");
+  models
+    .command("list")
+    .description("models, egress, pools, window usage and probe state")
+    .action(async () => {
+      await runModelsList(ctxFor());
+    });
+  models
+    .command("probe <modelId>")
+    .description("send canary requests and record what the model supports")
+    .action(async (modelId: string) => {
+      await runModelsProbe(ctxFor(), modelId);
     });
 
   const db = program.command("db").description("local database");

@@ -3,6 +3,7 @@ import { basename, delimiter, dirname, isAbsolute, join } from "node:path";
 import { resolveActor } from "../../core/actor/resolve.ts";
 import { ConfigError, isSecretRef, type LoadedConfig, parseSecretRef } from "../../core/config/index.ts";
 import { jarvisHome } from "../../core/paths.ts";
+import { ProbeStore, probeDrift, probeIsStale } from "../../models/probe.ts";
 import { evaluateEgress, formatEgressLine } from "../../security/policy/egress.ts";
 import { LATEST_SCHEMA_VERSION, openDatabase, SchemaTooNewError } from "../../storage/index.ts";
 import type { CliContext } from "../context.ts";
@@ -190,6 +191,47 @@ export async function runDoctor(ctx: CliContext): Promise<DoctorReport> {
               `${name}: "${command}" — executable not found in PATH`,
             ),
       );
+    }
+
+    const probes = new ProbeStore(home.cacheDir);
+    for (const [id, model] of Object.entries(loaded.config.models)) {
+      const probe = probes.get(id);
+      if (!probe) {
+        checks.push(
+          check(
+            `probe:${id}`,
+            "warn",
+            "model probe",
+            `${id}: never probed`,
+            `run \`jarvis models probe ${id}\``,
+          ),
+        );
+        continue;
+      }
+      const drift = probeDrift(model, probe);
+      if (drift.length > 0) {
+        checks.push(
+          check(
+            `probe:${id}`,
+            "warn",
+            "model probe",
+            `${id}: config disagrees with probe — ${drift.map((x) => `${x.capability} (config ${x.configured}, probe ${x.probed})`).join(", ")}`,
+            "fix supports in the model descriptor (ADR-0007 §1)",
+          ),
+        );
+      } else if (probeIsStale(probe)) {
+        checks.push(
+          check(
+            `probe:${id}`,
+            "warn",
+            "model probe",
+            `${id}: probe older than 30 days (${probe.probedAt.slice(0, 10)})`,
+            `run \`jarvis models probe ${id}\``,
+          ),
+        );
+      } else {
+        checks.push(check(`probe:${id}`, "ok", "model probe", `${id}: ${probe.probedAt.slice(0, 10)}`));
+      }
     }
 
     const egress = evaluateEgress(loaded.config);
