@@ -1,0 +1,299 @@
+import { z } from "zod";
+import { isSecretRef, looksLikeSecretKey, SecretRefSchema } from "./secrets.ts";
+
+/* ------------------------------------------------------------------------------------------------
+ * Shared enums
+ * ---------------------------------------------------------------------------------------------- */
+
+/** ADR-0016 §1 — data class of a project; the default is the safest one. */
+export const DataClassSchema = z.enum(["public", "internal", "confidential"]);
+export type DataClass = z.infer<typeof DataClassSchema>;
+export const DATA_CLASS_ORDER: Record<DataClass, number> = { public: 0, internal: 1, confidential: 2 };
+
+/** ADR-0016 §1 — where a model endpoint lives. Required on every model. */
+export const EgressSchema = z.enum(["private", "cloud"]);
+export type Egress = z.infer<typeof EgressSchema>;
+
+/** ADR-0016 §1 — network reach of a tool/MCP server. Unknown means `internet` (worst case). */
+export const NetworkSchema = z.enum(["none", "intranet", "internet"]);
+export type Network = z.infer<typeof NetworkSchema>;
+
+export const HumanGateModeSchema = z.enum(["fail", "artifact", "skip-if-approved"]);
+export type HumanGateMode = z.infer<typeof HumanGateModeSchema>;
+
+export const WorkspaceModeSchema = z.enum(["worktree", "cwd"]);
+export type WorkspaceMode = z.infer<typeof WorkspaceModeSchema>;
+
+/* ------------------------------------------------------------------------------------------------
+ * Models and quota (ADR-0007, ADR-0017 §2, ADR-0018 §4)
+ * ---------------------------------------------------------------------------------------------- */
+
+export const ModelProviderSchema = z.enum(["openai-compatible", "anthropic", "openai", "ollama"]);
+export type ModelProvider = z.infer<typeof ModelProviderSchema>;
+
+export const ModelAuthSchema = z.discriminatedUnion("type", [
+  z.strictObject({ type: z.literal("none") }),
+  z.strictObject({ type: z.literal("bearer"), token: SecretRefSchema }),
+  z.strictObject({ type: z.literal("header"), header: z.string().min(1), token: SecretRefSchema }),
+]);
+export type ModelAuth = z.infer<typeof ModelAuthSchema>;
+
+export const ModelSupportsSchema = z.strictObject({
+  tools: z.boolean().default(false),
+  parallelTools: z.boolean().default(false),
+  jsonSchema: z.boolean().default(false),
+  jsonMode: z.boolean().default(false),
+  systemRole: z.boolean().default(true),
+  reasoning: z.boolean().default(false),
+  prefixCache: z.boolean().default(false),
+});
+export type ModelSupports = z.infer<typeof ModelSupportsSchema>;
+
+export const ModelConfigSchema = z.strictObject({
+  provider: ModelProviderSchema,
+  baseUrl: z.url().optional(),
+  model: z.string().min(1),
+  auth: ModelAuthSchema.default({ type: "none" }),
+  headers: z.record(z.string(), z.string()).prefault({}),
+  egress: EgressSchema,
+  quotaPool: z.string().min(1).optional(),
+  contextWindow: z.int().positive(),
+  maxOutput: z.int().positive(),
+  supports: ModelSupportsSchema.prefault({}),
+  tokenizer: z.string().min(1).optional(),
+  timeoutMs: z.int().positive().default(120_000),
+  maxConcurrency: z.int().positive().default(2),
+});
+export type ModelConfig = z.infer<typeof ModelConfigSchema>;
+
+export const QuotaWindowSchema = z.strictObject({
+  minutes: z.int().positive(),
+  kind: z.enum(["sliding", "fixed"]).default("sliding"),
+});
+
+export const QuotaLimitsSchema = z.strictObject({
+  outputTokens: z.int().positive().optional(),
+  inputTokens: z.int().positive().optional(),
+  requests: z.int().positive().optional(),
+  concurrency: z.int().positive().optional(),
+});
+
+export const QuotaPoolSchema = z.strictObject({
+  window: QuotaWindowSchema,
+  limits: QuotaLimitsSchema.prefault({}),
+  soft: z.number().min(0).max(1).default(0.8),
+});
+export type QuotaPool = z.infer<typeof QuotaPoolSchema>;
+
+export const RoleConfigSchema = z.strictObject({
+  models: z.array(z.string().min(1)).min(1),
+  maxOutput: z.int().positive().optional(),
+});
+export type RoleConfig = z.infer<typeof RoleConfigSchema>;
+
+/* ------------------------------------------------------------------------------------------------
+ * MCP servers (ADR-0017 §3)
+ * ---------------------------------------------------------------------------------------------- */
+
+const McpProfileSchema = z.union([
+  z.string().min(1),
+  z.strictObject({
+    base: z.string().min(1),
+    /** Additional pure capabilities only; effects cannot be declared from config (ADR-0017 §4). */
+    map: z.record(z.string(), z.string()).prefault({}),
+  }),
+]);
+
+const McpServerCommonShape = {
+  network: NetworkSchema.default("internet"),
+  profile: McpProfileSchema.optional(),
+  allow: z.array(z.string().min(1)).default([]),
+  deny: z.array(z.string().min(1)).default([]),
+  readOnly: z.boolean().default(false),
+};
+
+const McpStdioEnvSchema = z.record(z.string(), z.string()).superRefine((env, ctx) => {
+  for (const [key, value] of Object.entries(env)) {
+    if (looksLikeSecretKey(key) && !isSecretRef(value)) {
+      ctx.addIssue({
+        code: "custom",
+        path: [key],
+        message: `"${key}" looks like a secret; use env:VAR or keychain:ID instead of a literal`,
+      });
+    }
+  }
+});
+
+export const McpServerConfigSchema = z.discriminatedUnion("transport", [
+  z.strictObject({
+    transport: z.literal("stdio"),
+    command: z.string().min(1),
+    args: z.array(z.string()).default([]),
+    env: McpStdioEnvSchema.prefault({}),
+    cwd: z.string().min(1).optional(),
+    ...McpServerCommonShape,
+  }),
+  z.strictObject({
+    transport: z.literal("http"),
+    url: z.url(),
+    auth: ModelAuthSchema.default({ type: "none" }),
+    ...McpServerCommonShape,
+  }),
+  z.strictObject({
+    transport: z.literal("sse"),
+    url: z.url(),
+    auth: ModelAuthSchema.default({ type: "none" }),
+    ...McpServerCommonShape,
+  }),
+]);
+export type McpServerConfig = z.infer<typeof McpServerConfigSchema>;
+
+export const McpConfigSchema = z.strictObject({
+  servers: z.record(z.string(), McpServerConfigSchema).prefault({}),
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * Project-level sections (ADR-0003, ADR-0009, ADR-0010, ADR-0013, ADR-0018)
+ * ---------------------------------------------------------------------------------------------- */
+
+export const ToolsConfigSchema = z.strictObject({
+  local: z.record(z.string(), z.string().min(1)).prefault({}),
+});
+
+export const WorkspaceConfigSchema = z.strictObject({
+  mode: WorkspaceModeSchema.default("worktree"),
+  setup: z.string().min(1).optional(),
+  /** Defaults to true in worktree mode and false in cwd mode (ADR-0003 §5). */
+  allowWrites: z.boolean().optional(),
+});
+
+const BudgetCapSchema = z.strictObject({
+  outputTokens: z.int().positive().optional(),
+  requests: z.int().positive().optional(),
+});
+
+export const BudgetConfigSchema = z.strictObject({
+  perRun: BudgetCapSchema.prefault({}),
+  perStep: BudgetCapSchema.prefault({}),
+});
+
+const ratio = z.number().min(0).max(1);
+
+export const ThresholdsSchema = z.strictObject({
+  watch: ratio.optional(),
+  compact: ratio.optional(),
+  aggressive: ratio.optional(),
+  reset: ratio.optional(),
+});
+export type Thresholds = z.infer<typeof ThresholdsSchema>;
+
+export const ContextConfigSchema = z.strictObject({
+  thresholds: z
+    .strictObject({
+      default: ThresholdsSchema.prefault({}),
+      byModel: z.record(z.string(), ThresholdsSchema).prefault({}),
+      byPhase: z.record(z.string(), ThresholdsSchema).prefault({}),
+    })
+    .prefault({}),
+  compactTarget: ratio.default(0.35),
+  maxContext: z.int().positive().optional(),
+});
+
+export const SecurityConfigSchema = z.strictObject({
+  secretPatterns: z.array(z.strictObject({ name: z.string().min(1), regex: z.string().min(1) })).default([]),
+  secretEnv: z.array(z.string().min(1)).default([]),
+  deniedPaths: z.array(z.string().min(1)).default([]),
+});
+
+export const TelemetryConfigSchema = z.strictObject({
+  export: z
+    .strictObject({
+      enabled: z.boolean().default(false),
+      url: z.url().optional(),
+      network: NetworkSchema.default("intranet"),
+      payloads: z.boolean().default(false),
+      maxPayloadBytes: z.int().positive().default(4096),
+    })
+    .prefault({}),
+});
+
+export const ActorConfigSchema = z.strictObject({
+  id: z.string().min(1).optional(),
+  display: z.string().min(1).optional(),
+});
+
+/** ADR-0009 §1 — a profile may only narrow the base configuration. */
+export const ProfileOverlaySchema = z.strictObject({
+  interactive: z.boolean().optional(),
+  dataClass: DataClassSchema.optional(),
+  workspace: z
+    .strictObject({ mode: WorkspaceModeSchema.optional(), allowWrites: z.boolean().optional() })
+    .optional(),
+  mcp: z.strictObject({ deny: z.array(z.string().min(1)).default([]) }).optional(),
+  tools: z.strictObject({ deny: z.array(z.string().min(1)).default([]) }).optional(),
+  humanGate: HumanGateModeSchema.optional(),
+  budget: BudgetConfigSchema.optional(),
+});
+export type ProfileOverlay = z.infer<typeof ProfileOverlaySchema>;
+
+/* ------------------------------------------------------------------------------------------------
+ * Files
+ * ---------------------------------------------------------------------------------------------- */
+
+export const CONFIG_VERSION = 1 as const;
+
+/** `~/.jarvis/config.yaml` — the machine and the person (ADR-0017 §1). */
+export const UserConfigSchema = z.strictObject({
+  version: z.literal(CONFIG_VERSION),
+  actor: ActorConfigSchema.optional(),
+  quotaPools: z.record(z.string(), QuotaPoolSchema).optional(),
+  models: z.record(z.string(), ModelConfigSchema).optional(),
+  roles: z.record(z.string(), RoleConfigSchema).optional(),
+  mcp: McpConfigSchema.optional(),
+  context: ContextConfigSchema.optional(),
+  telemetry: TelemetryConfigSchema.optional(),
+});
+export type UserConfig = z.infer<typeof UserConfigSchema>;
+
+/** `.jarvis/project.yaml` — the project and the team (ADR-0017 §1). */
+export const ProjectConfigSchema = z.strictObject({
+  version: z.literal(CONFIG_VERSION),
+  dataClass: DataClassSchema.optional(),
+  roles: z.record(z.string(), RoleConfigSchema).optional(),
+  mcp: McpConfigSchema.optional(),
+  tools: ToolsConfigSchema.optional(),
+  workspace: WorkspaceConfigSchema.optional(),
+  budget: BudgetConfigSchema.optional(),
+  profiles: z.record(z.string(), ProfileOverlaySchema).optional(),
+  context: ContextConfigSchema.optional(),
+  security: SecurityConfigSchema.optional(),
+  humanGate: HumanGateModeSchema.optional(),
+  knowledge: z.strictObject({ sources: z.array(z.string().min(1)).default([]) }).optional(),
+});
+export type ProjectConfig = z.infer<typeof ProjectConfigSchema>;
+
+/** The merged, validated configuration every subsystem reads. */
+export const ResolvedConfigSchema = z.strictObject({
+  version: z.literal(CONFIG_VERSION),
+  dataClass: DataClassSchema.default("confidential"),
+  interactive: z.boolean().default(true),
+  humanGate: HumanGateModeSchema.default("artifact"),
+  actor: ActorConfigSchema.prefault({}),
+  quotaPools: z.record(z.string(), QuotaPoolSchema).prefault({}),
+  models: z.record(z.string(), ModelConfigSchema).prefault({}),
+  roles: z.record(z.string(), RoleConfigSchema).prefault({}),
+  mcp: McpConfigSchema.prefault({}),
+  tools: ToolsConfigSchema.prefault({}),
+  workspace: WorkspaceConfigSchema.prefault({}),
+  budget: BudgetConfigSchema.prefault({}),
+  profiles: z.record(z.string(), ProfileOverlaySchema).prefault({}),
+  context: ContextConfigSchema.prefault({}),
+  security: SecurityConfigSchema.prefault({}),
+  telemetry: TelemetryConfigSchema.prefault({}),
+  knowledge: z.strictObject({ sources: z.array(z.string().min(1)).default([]) }).prefault({}),
+  /** Capability patterns denied by the active profile (ADR-0009 §1); applied by the Tool Router. */
+  deniedCapabilities: z.array(z.string().min(1)).default([]),
+  /** Name of the applied profile, if any. */
+  profile: z.string().min(1).optional(),
+});
+export type ResolvedConfig = z.infer<typeof ResolvedConfigSchema>;

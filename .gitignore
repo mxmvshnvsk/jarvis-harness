@@ -1,18 +1,11 @@
-### macOS
-# Finder metadata
+node_modules/
+.pnpm-store/
+dist/
+coverage/
+*.log
 .DS_Store
 
-# Thumbnails
-._*
-
-# Custom folder icons
-Icon
-
-# Volume root files
-.DocumentRevisions-V100
-.fseventsd
-.Spotlight-V100
-.TemporaryItems
-.Trashes
-.VolumeIcon.icns
-.com.apple.timemachine.donotpresent
+# Jarvis runtime state never belongs to a repository (see ADR-0001 §3)
+.jarvis/runs/
+.jarvis/cache/
+*.jarvis.tar.zst
