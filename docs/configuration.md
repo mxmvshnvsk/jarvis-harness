@@ -59,7 +59,7 @@ roles:                         # могут быть и в проекте; пр�
   research:       { models: [deepseek-flash] }
   implementation: { models: [qwen-coder, deepseek-flash] }   # порядок = предпочтение
   review:         { models: [deepseek-flash], maxOutput: 4096 }
-  compaction:     { models: [deepseek-flash] }   # зарезервировано: компакции контекста ещё нет (ADR-0013)
+  compaction:     { models: [deepseek-flash] }   # суммаризация при компакции контекста (ADR-0013); нет роли — модель самого агента
 
 mcp: { servers: {} }           # можно и здесь (личные серверы), обычно — в проекте
 context: {}                    # пороги сжатия контекста, см. ниже
@@ -69,8 +69,8 @@ telemetry:                     # ЗАРЕЗЕРВИРОВАНО: политик�
 
 Роли, которые используют встроенные агенты: `research` (research, requirements, specification, impact,
 plan, release-notes), `implementation` (implementation, test, docs, telemetry), `review` (review,
-review-analysis); `compaction` зарезервирована под компакцию контекста (ADR-0013), runtime её пока не
-использует. Роутер выбирает первую модель роли, которая
+review-analysis); `compaction` — суммаризатор контекста при компакции (ADR-0013); без неё суммаризирует
+модель самого агента. Роутер выбирает первую модель роли, которая
 удовлетворяет требованиям агента (tools, structured output) и правилу egress для `dataClass` проекта.
 
 ## `.jarvis/project.yaml`
@@ -128,13 +128,22 @@ knowledge:                     # ADR-0020 §3, §5; ADR-0015
     embeddings: embed          # id модели с /embeddings; выключено по умолчанию (ADR-0015 §6)
   sources: []                  # зарезервировано
 
-context:                       # ADR-0013 — ЗАРЕЗЕРВИРОВАНО: схема принимается, runtime пока не применяет
-  thresholds:
-    default: { watch: 0.6, compact: 0.75, aggressive: 0.85, reset: 0.95 }
-    byModel: { deepseek-flash: { compact: 0.7 } }
-    byPhase: { implementation: { compact: 0.8 } }
-  compactTarget: 0.35
-  maxContext: 100000
+context:                       # ADR-0013
+  thresholds:                  # доли эффективного окна; по умолчанию как ниже
+    default: { watch: 0.40, compact: 0.60, aggressive: 0.75, reset: 0.85 }
+    byModel: { deepseek-flash: { compact: 0.5 } }       # приоритет: фаза > модель > default
+    byPhase: { implementation: { compact: 0.65 } }
+  compactTarget: 0.35          # до какой доли окна сжимать при компакции
+  maxContext: 100000           # потолок окна, если модель заявляет больше
+
+hooks:                         # git pre-push (ADR-0001 §15); читает `jarvis prepush`
+  prePush:
+    mode: block                # block | advisory — advisory только сообщает
+    standards: true            # детерминированные проверки стандартов по диапазону
+    checks: [typecheck, test]  # имена из tools.local, по порядку; пусто = ничего
+    semanticReview: auto       # auto | never | always — ревью агентом review (workflow review-diff)
+    blockOn: blocker           # blocker | major — с какой серьёзности замечание ревью блокирует
+    skipBranches: ["wip/**"]   # ветки, которые хук пропускает
 
 security:                      # ADR-0010
   secretPatterns: [{ name: corp-token, regex: "corp_[A-Za-z0-9]{32}" }]

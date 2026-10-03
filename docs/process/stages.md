@@ -3,10 +3,33 @@
 Как строился Jarvis: этапы дорожной карты [ADR-0001](../adr/0001-target-architecture.md) §20 в порядке их выполнения, с тем, что появилось на
 каждом. Это исторический журнал; актуальное описание возможностей — в [`docs/`](../README.md).
 
-Коммиты по этапам: `94748d5` (ADR-0019…0021), `723f3c5` (6), `6887cf0` (8), `8db955b` (9+10),
+Коммиты по этапам (нумерация журнала; этапы 8 и 12 дорожной карты ADR-0001 §20 — первые два блока ниже): `94748d5` (ADR-0019…0021), `723f3c5` (6), `6887cf0` (8), `8db955b` (9+10),
 `0dd2b8f` (11, часть), `474d113` (13 ф.1), `031c092` (quickstart), `ee23341` (12), `9f72b44` (13 ф.2),
 `2e8e6ed` (14), `10fa9f5` (retrieval), `3dbee63` (review lifecycle), `bfa3ce3` (polyglot + run-to-case),
 `5aa5810` (Windows DPAPI, watch, gc).
+
+ADR-0001 §20 stage 12 (git hooks) — `f11ca47`:
+
+- `jarvis hooks install|uninstall|status` — a thin `pre-push` shim honouring `core.hooksPath` and linked
+  worktrees; a foreign hook is backed up on `--force` and restored on uninstall
+- `jarvis prepush [--base] [--head] [--semantic|--no-semantic] [--hook]` — per pushed range: the
+  deterministic standards check, `hooks.prePush.checks` (from `tools.local`), graph impact (dependents and
+  covering tests the change did not touch), and the review agent only when that evidence or a
+  semantic/hybrid standard asks for it; deterministic failures skip the paid step; review infrastructure
+  trouble never blocks a push
+- built-in workflow `review-diff` (one `review` step over the range, read-only); config `hooks.prePush`
+  (`mode`, `standards`, `checks`, `semanticReview`, `blockOn`, `skipBranches`); the pushed branch is checked
+  in a temporary worktree when it is not the checked-out one; tests include a real `git push` through the hook
+
+ADR-0001 §20 stage 8 (context pressure) — `6a9c6d4` (ADR-0013):
+
+- `src/context/`: effective window and threshold resolution (`byPhase` > `byModel` > default, kept ordered),
+  tool-result trimming into blobs, handoff compaction with accumulating `Originals:`, resets bounded per step,
+  `ContextManager` called before every model call; events `context.*`
+- the agent loop gets a `compaction` role summariser (agent's own model as fallback), a tighter L3/L4 rebuild at
+  `aggressive`, and a hard-trimming fallback when the summariser fails
+- `jarvis context|compact|reset-context` over the transcript of a parked run (new checkpoint, resume continues
+  from it); `knowledge.read` serves `blob:<ref>` and run artifacts; token calibration is clamped to a sane range
 
 Stage 0 of the roadmap (ADR-0001 §20) — bootstrap:
 

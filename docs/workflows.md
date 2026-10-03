@@ -109,9 +109,29 @@ flowchart LR
 | L2 | текущее состояние: шаг, итерация, loop reasons, принятые уточнения | |
 | L3 | входные артефакты | укладывается в бюджет вместе с L4 |
 | L4 | EngineeringContextPackage: навыки > стандарты > знание | справедливое деление бюджета; остальное «по запросу» через `knowledge.read` |
-| L5 | история вызовов инструментов | растёт в пределах `limits`; автоматическая компакция по порогам (ADR-0013) ещё не реализована |
+| L5 | история вызовов инструментов | растёт в пределах `limits`; по порогам давления (ADR-0013) старые результаты обрезаются до начала и ссылки на блоб, старые блоки сворачиваются в handoff |
 
 Ссылки пакета (какие навыки/стандарты/документы агент видел) попадают в provenance артефакта результата.
+
+### Давление контекста (ADR-0013)
+
+Перед каждым обращением к модели измеряется доля эффективного окна — `min(contextWindow, context.maxContext)`
+минус резерв под вывод и 5% окна. Уровень определяют `context.thresholds` (по умолчанию 0,40 / 0,60 /
+0,75 / 0,85; фаза > модель > по умолчанию):
+
+| Уровень | Что делает цикл агента |
+|---|---|
+| healthy | ничего |
+| watch | старые результаты инструментов заменяются началом и ссылкой `blob:<ref>` (читается `knowledge.read`) |
+| compact | trimming, затем старые блоки сворачиваются в один handoff до `compactTarget` (35%) |
+| aggressive | то же с меньшим хвостом и пересобранной с бюджетом ×0,6 базой L3/L4 (раз за шаг) |
+| reset | handoff вместо всей истории, не больше двух раз за шаг |
+
+Суммаризирует роль `compaction`, а без неё — модель агента. Оригинал сжатой части лежит блобом, ссылки
+`Originals:` накапливаются в handoff; пары вызов/результат инструмента не разрываются. Сбой суммаризатора —
+жёсткий trimming и событие `context.compaction_failed`, run продолжается; исчерпание квоты и ошибки
+авторизации паркуют run как обычно. Вручную — `jarvis context`, `jarvis compact`, `jarvis reset-context`
+([cli.md](cli.md#контекст-агента)).
 
 ### Переопределение
 
@@ -161,5 +181,6 @@ steps:
 `effect.done|failed|verified|replayed|unresolved`, `approval.recorded|skipped|committed`,
 `interaction.opened|turn|resolved|rejected`, `review.submitted|classified|resolved`,
 `standards.checked`, `retrieval.knowledge`, `graph.update`, `security.redaction`,
+`context.pressure|trimmed|compacted|reset|tightened|compaction_failed|overflow`, `prepush.checked`,
 `mcp.discovered|unavailable`, `daemon.tick`. `jarvis status <run> --events n` показывает последние.
 Внешнего экспорта событий пока нет: схема `telemetry.export` и проверка egress есть, экспортёра — нет.

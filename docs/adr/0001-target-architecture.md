@@ -96,7 +96,7 @@ Developer / Git / CI / OpenCode / IDE
 +---------------------------------------------------------------------+
 |                               JARVIS                                |
 |                                                                     |
-|   CLI / MCP Server / CI Adapter / [Git Hooks — не реализовано]      |
+|   CLI / MCP Server / CI Adapter / Git Hooks (pre-push)               |
 |                                  |                                  |
 |                                  v                                  |
 |                         Orchestration Layer                         |
@@ -155,7 +155,7 @@ keychain (macOS / libsecret / Windows DPAPI / файл 0600) под акторо
 | Режим | Назначение | Статус |
 |---|---|---|
 | Local CLI | Основной интерактивный запуск разработчиком. | реализовано |
-| Git hooks | Pre-push/pre-commit проверки документации, spec, telemetry и impact. | **не реализовано** |
+| Git hooks | Pre-push: стандарты, проверки проекта, impact по графу, ревью агентом только по необходимости: `jarvis hooks install`, `jarvis prepush`. Pre-commit не реализован: проверки идут при push и в CI. | реализовано |
 | CI | Non-interactive review/validation с теми же workflow definitions; `jarvis ci`, бандлы run. **[ADR-0009]** | реализовано |
 | Jarvis MCP Server | knowledge/spec/run/context сервисы OpenCode и другим клиентам: `jarvis mcp serve`. | реализовано |
 | Daemon/Scheduler | Автовозобновление quota-blocked runs: `jarvis daemon`. | реализовано |
@@ -291,7 +291,7 @@ L5 Tool history / conversational residue      EVICTABLE
 (`knowledge.read`) и самокалибрующаяся оценка токенов **реализованы**. L4 теперь — не «найденное»,
 а детерминированно выбранный пакет: навыки > стандарты > знание **[ADR-0020]**.
 
-### Context pressure policy **[не реализовано; ADR-0013]**
+### Context pressure policy **[ADR-0013]**
 
 | Usage | Политика |
 |---|---|
@@ -301,14 +301,33 @@ L5 Tool history / conversational residue      EVICTABLE
 | 75-85% | Aggressive compaction + более строгий retrieval. |
 | >= 85% | Context reset / новый agent session с structured handoff. |
 
-60% является стартовой гипотезой, а не универсальным законом; порог настраивается по модели и
-подтверждается evals. Схема конфигурации (`context.thresholds`, `compactTarget`, роль `compaction`)
-принимается, но runtime пока её **не применяет**: сжатие и автоматический reset не реализованы.
-Фактическая защита от раздувания контекста сегодня — reset между фазами (каждый агент стартует с чистого
-окна и получает только артефакты и retrieved evidence), лимиты `maxToolCalls`/`maxModelCalls`, cap на
-вывод инструментов (`tools.maxOutputBytes`) и checkpoint транскрипта.
+«Usage» — доля эффективного окна: `min(contextWindow, context.maxContext) − резерв под вывод − 5% окна`.
+Пороги (`context.thresholds`: `default`, `byModel`, `byPhase`; приоритет — фаза > модель > по умолчанию;
+значения зажимаются так, чтобы порядок сохранялся) и `compactTarget` настраиваются; 60% остаётся
+стартовой гипотезой, а не универсальным законом, и подтверждается evals. Реализация — `src/context/`:
 
-### Compaction (целевая модель)
+- **watch** — старые результаты инструментов заменяются началом и ссылкой на блоб с оригиналом
+  (`knowledge.read blob:<ref>`);
+- **compact** — сначала trimming, затем старые блоки сворачиваются в один structured handoff (goal,
+  requirements, decisions, business rules, progress, unresolved, next actions, sources); суммаризацию
+  делает роль `compaction`, а если её нет — модель самого агента; оригинал сохраняется блобом, ссылки
+  `Originals:` накапливаются между сжатиями; пары tool-call/tool-result не разрываются;
+- **aggressive** — то же с меньшим хвостом и пересобранной (×0,6) базой L3/L4, один раз за шаг;
+- **reset** — handoff вместо всей истории, не более двух сбросов за шаг;
+- отказ суммаризатора не ломает run: жёсткий trimming и событие `context.compaction_failed`; исчерпание
+  квоты и ошибки авторизации пробрасываются как обычно;
+- ручное управление: `jarvis context [run]`, `jarvis compact <run> [--aggressive] [--dry-run]`,
+  `jarvis reset-context <run> [--dry-run]` — работают с транскриптом припаркованного run и сохраняют
+  новый checkpoint, с которого resume продолжит;
+- события: `context.pressure`, `context.trimmed`, `context.compacted`, `context.reset`,
+  `context.tightened`, `context.compaction_failed`, `context.overflow`; в `agent.finish` — пик давления
+  и счётчики. Не сделано: сериализатор префикса для метрики cache-hit и `jarvis stats`.
+
+Дополнительно остаются прежние ограничители раздувания: reset между фазами (каждый агент стартует с
+чистого окна и получает только артефакты и retrieved evidence), лимиты `maxToolCalls`/`maxModelCalls`,
+cap на вывод инструментов (`tools.maxOutputBytes`) и checkpoint транскрипта.
+
+### Compaction
 
 ```
 RAW SOURCE ----------------------------> Artifact Store
@@ -321,8 +340,9 @@ Active Context -> artifact/search/read -> original source
 
 Compaction сохраняет goal, requirements, decisions, business rules, constraints, progress, modified
 files, unresolved questions, next actions и source references. Исходные данные остаются доступными,
-чтобы избежать каскадного summary-of-summary. Инвариант «исходники переживают сводки» уже выполняется:
-tool outputs и артефакты хранятся content-addressed блобами.
+чтобы избежать каскадного summary-of-summary: сжатая часть и обрезанные результаты хранятся
+content-addressed блобами, а предыдущий handoff при следующем сжатии переносится вперёд, а не
+пересказывается по памяти.
 
 ### Reset между фазами
 
@@ -480,7 +500,7 @@ Jarvis измеряет не только latency и tokens, но и качес�
 | Уровень | Метрики / события | Статус |
 |---|---|---|
 | Model | input/output tokens, model, latency, finish reason, retries (`model.call/retry/error`, `usage`). | реализовано |
-| Context | peak usage, compactions, reset, compression ratio, retrieved sources (`retrieval.knowledge`; compaction/reset-метрик нет — механизма нет). | частично |
+| Context | peak usage, trims, compactions, reset (`context.*`, `agent.finish.context`), retrieved sources (`retrieval.knowledge`). Compression ratio и cache-hit — нет. | реализовано (кроме cache-hit) |
 | Tools | calls, failures, duration, denied capabilities (`tool.call`, `tool.denied`, `security.redaction`). | реализовано |
 | Workflow | step duration, suspend/resume, retries, approvals, interactions, review lifecycle. | реализовано |
 | Outcome | tests, review findings, rework (loops), human corrections, task success — в evals. | реализовано (evals) |
@@ -492,7 +512,7 @@ Jarvis измеряет не только latency и tokens, но и качес�
 Evals **[ADR-0012]** сравнивают конфигурации (модели, навыки, стандарты, пороги, retrieval) по task
 success, покрытию acceptance и file recall, циклам и стоимости; главная метрика — successes per 10k
 output tokens; режимы record/replay/live, baseline и diff с допуском; кейс из реального run
-(`run-to-case`). Сравнение порогов compaction 50/60/70% — когда появится compaction.
+(`run-to-case`). Сравнение порогов compaction 50/60/70% — отдельный прогон evals с `--variant` по `context.thresholds`.
 
 Trace должен позволять ответить: «почему Jarvis изменил эту строку?» — через цепочку
 task → spec → evidence → plan → tool/model calls → diff. Сегодня цепочка собирается из provenance
@@ -510,18 +530,18 @@ task → spec → evidence → plan → tool/model calls → diff. Сегодн�
 | `jarvis work ABC-123` | реализовано (`--workflow`, `--base`) |
 | `jarvis status [run]` | реализовано (`--watch`, `--all`, `--events`) |
 | `jarvis resume <run>` | реализовано (`--steal`) |
-| `jarvis context` | как MCP-инструмент `context.inspect`; CLI-команды нет |
-| `jarvis compact`, `reset-context` | **не реализовано** (нет compaction, ADR-0013) |
+| `jarvis context` | реализовано (`context [run]`, плюс MCP-инструмент `context.inspect`) |
+| `jarvis compact`, `reset-context` | реализовано (`--aggressive`, `--dry-run`; ADR-0013) |
 | `jarvis research ABC-123`, `spec ABC-123` | отдельных команд нет; частичный прогон — собственный workflow (`--workflow`) |
 | `jarvis review [--base origin/main]` | частично: `jarvis standards check --base`, шаг `review` в workflow |
-| `jarvis prepush` | **не реализовано** |
+| `jarvis prepush` | реализовано (`--base`, `--head`, `--semantic`/`--no-semantic`, `--hook`); ставится `jarvis hooks install` |
 | `jarvis knowledge update` | реализовано (+ `status`, `index`, `search`) |
 | `jarvis stats` | нет; `jarvis status` и события |
 | `jarvis doctor`, `jarvis daemon` | реализовано |
 
 Добавлено сверх исходного набора: `approve`, `cancel`, `diff`, `apply`, `gc`, `threads`, `answer`,
 `attach`, `review submit|status`, `standards`, `skills`, `candidates`, `ci`, `export`, `import`, `evals`,
-`models`, `mcp`, `auth`, `config`, `db`. Полный справочник — [docs/cli.md](../cli.md).
+`models`, `mcp`, `auth`, `config`, `db`, `hooks`. Полный справочник — [docs/cli.md](../cli.md).
 
 ### OpenCode и другие клиенты
 
@@ -532,8 +552,26 @@ OpenCode остаётся интерактивной исследователь�
 ### Git / CI
 
 CI запускает те же workflow definitions, что и локальный CLI (`jarvis ci`). Pre-push сначала
-выполняет deterministic impact analysis по diff, затем только при необходимости семантический review
-**[не реализовано]**.
+выполняет всё детерминированное по диапазону коммитов, затем — только если данные это оправдывают —
+семантический review:
+
+```
+git push → .git/hooks/pre-push (shim) → jarvis prepush --hook
+  1. диапазон: от tip удалённой ветки (или точки ответвления от upstream/trunk) до отправляемого коммита
+  2. стандарты: детерминированные проверки по изменённым файлам
+  3. проверки проекта (hooks.prePush.checks → tools.local): typecheck, lint, tests
+  4. граф: затронутые, но не изменённые зависимые файлы и покрывающие тесты
+  5. review-агент (workflow review-diff, только чтение) — если semanticReview=always, либо применимы
+     semantic/hybrid-стандарты, либо граф нашёл незатронутые зависимые/тесты;
+     при провалах п. 2–3 платный шаг пропускается
+  → блокирует: required-нарушение, упавшая проверка, замечание не ниже blockOn (mode: block)
+```
+
+Хук — тонкий shim: вся логика в CLI; уважает `core.hooksPath` и linked worktrees, чужой хук не
+перезаписывает без `--force` (резервная копия возвращается при `uninstall`); если `jarvis` не найден,
+push не блокируется. Сбои инфраструктуры ревью (нет модели, квота, ошибка) никогда не блокируют push —
+они попадают в отчёт. Обход: `git push --no-verify` или `JARVIS_SKIP_HOOKS=1`. Если отправляемая ветка
+не выгружена, проверки идут во временном worktree (команды проекта в нём пропускаются: нет зависимостей).
 
 ## 16. Целевая структура репозитория
 
@@ -566,7 +604,7 @@ jarvis/
 ```
 
 Отличия от исходной структуры: нет отдельного `context/` (сборка контекста — `agents/context.ts`) и
-`integrations/` (CI-адаптер — `cli/commands/ci.ts`, git hooks не реализованы); добавлены `app/`,
+`integrations/` (CI-адаптер — `cli/commands/ci.ts`, git hooks — `hooks/` и `cli/commands/hooks.ts`); добавлены `app/`,
 `interaction/`, `capabilities/`, `adapters/`.
 
 ## 17. Целевой стек
@@ -638,7 +676,7 @@ Model call -> Budget admission denied
         -> continue exact workflow step
 ```
 
-### Context exhaustion **[целевая модель; ADR-0013, не реализовано]**
+### Context exhaustion **[ADR-0013]**
 
 ```
 Context pressure >= threshold
@@ -670,7 +708,7 @@ Gate reached, interactive=false
 | Process killed | Resume с последнего durable checkpoint (аренда истекает; `resume --steal`). |
 | Двое возобновляют один run | Аренда с эпохой + fencing: устаревший процесс не может записать. **[ADR-0002]** |
 | Эффект «неизвестно, выполнился ли» | Verify через тот же сервер по маркеру; иначе `unresolved` → WAITING_HUMAN. **[ADR-0002]** |
-| Compaction lost detail | Retrieve original Artifact; summary не source-of-truth (механизм compaction — целевая модель). |
+| Compaction lost detail | Retrieve original: `knowledge.read blob:<ref>` (в handoff перечислены `Originals:`); summary не source-of-truth. |
 | Unsafe action | Policy denial или WAITING_HUMAN. |
 | Гейт в CI без человека | exit 10 (артефакт/бандл) или 12 (`humanGate: fail`). **[ADR-0009]** |
 | Стек без адаптера и команд | UNSUPPORTED → остановка с причиной `policy:`. **[ADR-0021]** |
@@ -691,11 +729,11 @@ Roadmap не определяет архитектуру снизу вверх: 
 | 5. Research | Первый structured agent + artifact. | ✔ (агенты research…review) |
 | 6. MCP | Jira, затем Confluence/Bitbucket/Elastic. | ✔ `723f3c5` (профили atlassian, bitbucket; Elastic — через `readOnly`-сервер без профиля) |
 | 7. v0.1 workflow | Research → Implementation → Review. | ✔ (сразу полный `sdd`) |
-| 8. Context Engine | trimming/compaction/reset/manual controls. | **частично**: слои, prefix-stable system layer, бюджет L4, reset между фазами ✔; trimming/compaction/manual controls ✗ [ADR-0013] |
+| 8. Context Engine | trimming/compaction/reset/manual controls. | ✔ `6a9c6d4` (слои, prefix-stable system layer, бюджет L4, пороги, trimming, compaction, reset, `context`/`compact`/`reset-context`) [ADR-0013]; не сделано: метрика cache-hit |
 | 9. SDD | Spec + Impact + Plan. | ✔ `8db955b` + участие человека [ADR-0019] |
 | 10. Knowledge | versioned docs + targeted injection. | ✔ `6887cf0` (стандарты, навыки, резолвер) [ADR-0020] |
 | 11. Specialization | Tests/Metrics/Telemetry/Docs agents. | ✔ `ee23341` (Metrics объединён с Telemetry) |
-| 12. Dev workflow | pre-push + CI. | **частично**: CI ✔ `0dd2b8f`, бандлы run; pre-push/git hooks ✗ |
+| 12. Dev workflow | pre-push + CI. | ✔ CI `0dd2b8f`, бандлы run; pre-push `f11ca47` (`hooks install`, `prepush`, workflow `review-diff`) |
 | 13. Project Graph | symbols/dependencies/tests/events + hybrid retrieval. | ✔ `474d113`, `9f72b44` (граф TS), `10fa9f5` (retrieval; embeddings выключены) [ADR-0008, 0015, 0021] |
 | 14. Jarvis MCP | knowledge/spec/context/run APIs для OpenCode/IDE. | ✔ `2e8e6ed` (+ evals [ADR-0012]) |
 | 15. Daemon | auto-resume/scheduling/background runs. | ✔ `jarvis daemon` (реализован вместе с этапом 3) |
@@ -703,8 +741,7 @@ Roadmap не определяет архитектуру снизу вверх: 
 Сверх плана: Review Mode и жизненный цикл замечаний [ADR-0019], polyglot-репозитории (`stackScopes`),
 `run-to-case`, Windows-бэкенд credentials, `status --watch`, `gc` кэша графа.
 
-Не закрыто: compaction и ручное управление контекстом (этап 8), git hooks / pre-push (этап 12),
-экспорт телеметрии, нативный Anthropic-адаптер, адаптеры других языков (C#/.NET — следующий по
+Не закрыто: экспорт телеметрии и `jarvis stats`, нативный Anthropic-адаптер, адаптеры других языков (C#/.NET — следующий по
 ADR-0021), включение embeddings после гейта ADR-0015 §6, пилот на реальном репозитории.
 
 ## 21. Acceptance criteria зрелого Jarvis
@@ -715,11 +752,11 @@ ADR-0021), включение embeddings после гейта ADR-0015 §6, п�
 | Run переживает завершение процесса, quota wait и ручное resume без потери состояния. | ✔ checkpoints, аренда, daemon |
 | Ни один специализированный агент не зависит от конкретного model provider или Mastra API. | ✔ (Mastra не используется вовсе) |
 | Project knowledge доступно CLI, workflow и OpenCode через общую Jarvis-платформу. | ✔ `knowledge.*`, `jarvis mcp serve` |
-| Context можно inspect/compact/reset; исходные evidence остаются recoverable. | **частично**: inspect (`context.inspect`) и recoverable evidence ✔; compact/reset-команд нет |
+| Context можно inspect/compact/reset; исходные evidence остаются recoverable. | ✔ `jarvis context`, `compact`, `reset-context`; оригиналы — блобы, читаются `knowledge.read` |
 | Jarvis способен объяснить provenance изменения от task/spec до конкретных sources и tool calls. | **частично**: provenance артефактов, события, `Jarvis-*` трейлеры; единой команды нет |
 | Model quota является планируемым ресурсом; исчерпание не ломает Run. | ✔ WAITING_BUDGET |
 | Agents имеют минимальные capabilities; policy enforcement выполняется вне LLM. | ✔ Tool Router |
-| Pre-push/CI сначала используют deterministic analysis и только затем LLM там, где нужна семантика. | **частично**: CI ✔, pre-push ✗ |
+| Pre-push/CI сначала используют deterministic analysis и только затем LLM там, где нужна семантика. | ✔ `jarvis prepush` (ревью — только при сигнале из стандартов/графа); CI ✔ |
 | Новые агенты, RAG и orchestration complexity принимаются только после измеримого улучшения evals. | ✔ процесс и инфраструктура evals; embeddings за гейтом |
 
 ## 22. Итоговое решение
@@ -760,7 +797,7 @@ clients независимо друг от друга, сохраняя глав
 | §5, §17 | Собственный WorkflowRuntime, Mastra первым | Только собственный `LocalWorkflowEngine`, Mastra не используется | ADR-0011 |
 | §5 | Линейный граф с ветвлением CODE/TESTS/METRICS/TELEMETRY | Фактический граф `sdd`: `discover`, `requirements`, composite `verify`, обратные рёбра с лимитами, `review-analysis`, `release-notes` | ADR-0004, ADR-0019 |
 | §6 | Агенты: Research, Spec, Impact, Impl, Test, Metrics, Telemetry, Docs, Review | Metrics объединён с Telemetry; добавлены Requirements, Plan, Review-analysis, Release-notes | ADR-0019 |
-| §7 | Слои L0–L5 + пороги + compaction | Слои реализованы; пороги и compaction остались целевой моделью, runtime их не применяет | ADR-0013 |
+| §7 | Слои L0–L5 + пороги + compaction | Реализовано: пороги от эффективного окна (по умолчанию 0,40/0,60/0,75/0,85, по фазе и модели), trimming с блобами, handoff-компакция, reset, ручные команды | ADR-0013 |
 | §8 | Hybrid retrieval, vector DB «если надо» | Лексический FTS5 + глоссарий + порт Embedder за флагом; стандарты и навыки как вид знания | ADR-0015, ADR-0020 |
 | §8 | Граф: ts-morph | Граф через адаптер языка, факты кэшируются по хешу, снимки на дерево git | ADR-0008, ADR-0021 |
 | §9 | Local + MCP | + GraphToolProvider; профили MCP с проверяемыми эффектами | ADR-0017, ADR-0002 |
@@ -768,7 +805,7 @@ clients независимо друг от друга, сохраняя глав
 | §11 | 60k/20 мин | Пулы квот, per-run/per-step cap'ы | ADR-0018 |
 | §12 | SQLite | `node:sqlite`, миграции только вперёд, версионированные артефакты, привязка утверждений к хешу | ADR-0014, ADR-0005 |
 | §14 | Метрики, evals | Evals: record/replay/live, baseline/diff, run-to-case | ADR-0012 |
-| §15 | CLI на 13 команд | Реализованы 30+ команд; git hooks и ряд команд контекста не реализованы | ADR-0009, ADR-0018 |
+| §15 | CLI на 13 команд | Реализованы 60+ команд и подкоманд, включая `hooks`, `prepush`, `context`, `compact`, `reset-context`; не сделаны `research`, `spec`, `stats` | ADR-0009, ADR-0018 |
 | §16 | `context/`, `integrations/` | Контекст в `agents/`, CI в `cli/`; добавлены `app/`, `interaction/`, `capabilities/`, `adapters/` | — |
 | §19 | 8 сценариев отказа | + аренда, неразрешённый эффект, CI без человека, UNSUPPORTED, ручные правки | ADR-0002, ADR-0009, ADR-0019, ADR-0021 |
 | §20, §21 | План и критерии | Добавлены статус и коммиты по каждому пункту | — |
@@ -777,9 +814,9 @@ clients независимо друг от друга, сохраняя глав
 
 Целевая модель сохраняется; кода пока нет.
 
-1. **Context pressure: trimming, compaction, автоматический reset, ручные команды** (`compact`,
-   `reset-context`, `context`) — схема конфигурации есть, runtime её не использует (ADR-0013).
-2. **Git hooks / pre-push** с детерминированным impact по diff (§3, §15, §20 этап 12).
+1. **Метрики контекста сверх событий**: cache-hit префикса (сериализатор из ADR-0013 §4), compression ratio,
+   `jarvis stats`; выбор порогов по evals (50/60/70%) ещё не проведён.
+2. **Pre-commit хук** (§3) — не реализован; `prepush` покрывает push.
 3. **Экспорт телеметрии** во внешний backend; `jarvis stats`.
 4. **Автоматический выбор веток workflow по риску** изменения (§5).
 5. **Нативный адаптер Anthropic** (§10); retention policy артефактов (§12).

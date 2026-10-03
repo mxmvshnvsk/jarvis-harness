@@ -56,6 +56,7 @@ jarvis work ABC-42                                   # run the sdd workflow for 
 jarvis status <run> --watch 5                        # … until it waits for you
 jarvis approve <run> --resume                        # the spec; later the implementation
 jarvis diff <run> && jarvis apply <run>              # one squash commit on your branch
+jarvis hooks install                                 # optional: standards, checks and impact before every git push
 ```
 
 The full pilot walkthrough is in [docs/QUICKSTART.md](docs/QUICKSTART.md).
@@ -78,15 +79,13 @@ The full pilot walkthrough is in [docs/QUICKSTART.md](docs/QUICKSTART.md).
 
 ## Status
 
-The roadmap of [ADR-0001 §20](docs/adr/0001-target-architecture.md) is implemented and tested except two
-stages that are partial: bootstrap, model runtime, durable core, workflow engine, tool platform with
+The roadmap of [ADR-0001 §20](docs/adr/0001-target-architecture.md) is implemented and tested: bootstrap, model runtime, durable core, workflow engine, tool platform with
 redaction, agents and the `sdd` workflow, MCP and credentials, standards/skills/knowledge with retrieval,
 human collaboration (gates, threads, Review Mode), CI mode and run transfer, specialised agents, the
 capability layer with a TypeScript adapter and the incremental project graph, IDE integration
-(`jarvis mcp serve`), the daemon and evals.
+(`jarvis mcp serve`), the daemon and evals, the context engine with pressure thresholds, compaction and manual controls (`jarvis context|compact|reset-context`), and the pre-push hook (`jarvis hooks install`, `jarvis prepush`).
 
-Not done yet (ADR-0001, appendix B): context compaction and manual context controls (ADR-0013 — the
-configuration schema exists, the runtime does not use it), git hooks / pre-push, telemetry export, a
+Not done yet (ADR-0001, appendix B): telemetry export and `jarvis stats` (with the prefix cache-hit metric of ADR-0013), automatic workflow branching by change risk, a
 native Anthropic provider adapter, adapters for other languages (C#/.NET first), the embeddings gate of
 ADR-0015 §6 — and the real-repository pilot.
 

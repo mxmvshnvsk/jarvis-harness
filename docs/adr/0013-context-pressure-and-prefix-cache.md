@@ -6,9 +6,11 @@
   стартовая гипотеза, порог настраивается по модели и подтверждается evals»), §10 (ModelGateway собирает
   usage); [ADR-0007](0007-model-capabilities.md) §1 (`contextWindow`, `maxOutput`, `tokenizer`,
   `supports.prefixCache`), [ADR-0012](0012-evals-and-record-replay.md) §5 (варианты порогов)
-- Код (план): `src/context/pressure.ts` (расчёт), `src/context/tokens.ts` (оценка и калибровка),
-  `src/context/serialize.ts` (байт-стабильная сериализация слоёв), профили порогов в конфиге
-  (`context.thresholds`), метрики `context.*` в telemetry
+- Код: `src/context/pressure.ts` (знаменатель, пороги, уровень), `src/context/transcript.ts` (trimming,
+  компакция, handoff), `src/context/manager.ts` (`ContextManager` в цикле агента), `src/agents/contextOps.ts` и
+  `src/cli/commands/context.ts` (ручные команды), `src/models/tokens.ts` (калибровка), профили порогов в
+  конфиге (`context.thresholds`), события `context.*`. Не сделано: `src/context/serialize.ts` и метрика
+  cache-hit (§4), `context.toolSchemaTokens` (§5)
 
 ## Контекст
 
@@ -96,3 +98,25 @@ L2 внутри шага (иначе теряется prefix cache на ровн
 - **Точные токенизаторы для каждой модели.** В закрытом контуре их может не быть; калибровка даёт
   достаточную точность.
 - **Одни пороги для всех моделей и фаз.** Противоречит оговорке ADR-0001 о настройке по модели.
+
+## Реализация
+
+Реализованы §1–3, §5 (кроме `context.toolSchemaTokens`) и §6; коммит `6a9c6d4`.
+
+- **Знаменатель** (§1): `effectiveWindow` = `min(contextWindow, context.maxContext) − min(maxOutput, maxOutput роли) −
+  5% окна` (не меньше 1024).
+- **Пороги** (§2): по умолчанию `watch 0.40 / compact 0.60 / aggressive 0.75 / reset 0.85`; приоритет
+  `byPhase` > `byModel` > `default`; значения зажимаются, чтобы порядок сохранялся.
+- **Подсчёт** (§3): оценщик самокалибруется по usage; наблюдаемое «символов на токен» зажато в диапазон
+  [1,5; 8], чтобы один сбойный usage не отравлял оценку.
+- **Действия** (§6): `watch` обрезает результаты инструментов старше нескольких последних (голова ≈240 символов
+  и `blob:<ref>`), `compact` обрезает и сворачивает старые блоки в handoff до `compactTarget`, `aggressive`
+  оставляет меньше хвоста и пересобирает L3/L4 с бюджетом ×0,6 (раз за шаг), `reset` заменяет историю
+  handoff'ом (не более двух раз за шаг). Блоки «вызов + результаты» не разрываются; L0–L2 не трогаются.
+- **Суммаризация**: роль `compaction`, иначе модель агента; сбой суммаризатора — жёсткий trimming и
+  `context.compaction_failed`, ошибки квоты и авторизации не маскируются. Оригиналы хранятся блобами, ссылки
+  `Originals:` накапливаются; агент читает их `knowledge.read blob:<ref>`.
+- **Вручную**: `jarvis context`, `jarvis compact`, `jarvis reset-context` меняют транскрипт припаркованного
+  run новым checkpoint'ом; `resume` продолжает с него.
+- **Не сделано**: сериализатор слоёв и метрика cache-hit (§4), `context.toolSchemaTokens`, сравнение порогов
+  по evals.
