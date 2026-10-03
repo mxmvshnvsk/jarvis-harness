@@ -6,7 +6,8 @@ workflows, versioned project knowledge, context policies, resource governance, r
 > Jarvis ≠ AI coding chat. Jarvis = engineering runtime + SDD workflows + project knowledge +
 > context policies + resource governance + tools + replaceable LLMs.
 
-Architecture and every decision live in [`docs/adr/`](docs/adr/). Start with ADR-0001 (target
+Pilot walkthrough: [`docs/QUICKSTART.md`](docs/QUICKSTART.md). Architecture and every decision live in
+[`docs/adr/`](docs/adr/). Start with ADR-0001 (target
 architecture); ADR-0002…0018 refine it.
 
 ## Status
