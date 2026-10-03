@@ -190,5 +190,58 @@ export const ReviewAnalysisResult = z.object({
     .default("ok"),
 });
 
+/** ADR-0001 §6 specialised agents: documentation, telemetry, release notes. */
+export const DocsResult = z.object({
+  ...Base,
+  updatedFiles: z.array(z.string()).default([]).describe("documentation files changed in the workspace"),
+  sections: z
+    .array(
+      z.object({ file: z.string(), heading: z.string(), change: z.enum(["added", "updated", "removed"]) }),
+    )
+    .default([]),
+  gaps: z.array(z.string()).default([]).describe("behaviour that has no documentation home yet"),
+  outcome: z.enum(["ok"]).default("ok"),
+});
+
+export const TelemetryResult = z.object({
+  ...Base,
+  events: z
+    .array(
+      z.object({
+        name: z.string().min(1),
+        when: z.string().min(1).describe("the user/system moment that emits it"),
+        properties: z.array(z.string()).default([]),
+        status: z.enum(["existing", "added", "proposed"]),
+        file: z.string().optional(),
+      }),
+    )
+    .default([]),
+  metrics: z
+    .array(z.object({ name: z.string(), question: z.string().describe("what the metric answers") }))
+    .default([]),
+  privacy: z.array(z.string()).default([]).describe("PII or sensitive fields and how they are handled"),
+  outcome: z.enum(["ok", "spec_gap"]).default("ok"),
+});
+
+export const ReleaseNotesResult = z.object({
+  ...Base,
+  title: z.string().min(1),
+  audience: z.enum(["users", "developers", "both"]).default("both"),
+  highlights: z.array(z.string()).min(1),
+  changes: z
+    .array(
+      z.object({
+        kind: z.enum(["feature", "fix", "change", "deprecation", "internal"]),
+        text: z.string().min(1),
+        refs: z.array(Source).default([]),
+      }),
+    )
+    .default([]),
+  breaking: z.array(z.string()).default([]),
+  migration: z.array(z.string()).default([]),
+  markdown: z.string().min(1).describe("the notes as they will be published"),
+  outcome: z.enum(["ok"]).default("ok"),
+});
+
 export type ResearchResultT = z.infer<typeof ResearchResult>;
 export type ReviewResultT = z.infer<typeof ReviewResult>;

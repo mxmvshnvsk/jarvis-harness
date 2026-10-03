@@ -87,6 +87,9 @@ profiles:
     implementation: { ...base, changedFiles: [], outcome: "ok" },
     test: { ...base, commandsRun: [], passed: true, outcome: "ok" },
     review: { ...base, findings: [], verdict: "approve", outcome: "ok" },
+    docs: { ...base, updatedFiles: [], outcome: "ok" },
+    telemetry: { ...base, events: [], outcome: "ok" },
+    "release-notes": { ...base, title: "t", highlights: ["h"], markdown: "# t", outcome: "ok" },
   };
   server.respond((req: CapturedRequest) => {
     const system = (req.body.messages as Array<{ content: string }>)[0]?.content ?? "";

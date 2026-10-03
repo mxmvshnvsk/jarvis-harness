@@ -163,6 +163,25 @@ const docs: Record<string, () => unknown> = {
   implementation: () => ({ ...base, changedFiles: ["src/onboarding.ts"], outcome: "ok" }),
   test: () => ({ ...base, commandsRun: ["project.check"], passed: true, outcome: "ok" }),
   review: () => ({ ...base, findings: [], verdict: "approve", outcome: "ok" }),
+  docs: () => ({ ...base, updatedFiles: ["README.md"], sections: [], gaps: [], outcome: "ok" }),
+  telemetry: () => ({
+    ...base,
+    events: [{ name: "onboarding_restarted", when: "restart", properties: [], status: "proposed" }],
+    metrics: [],
+    privacy: [],
+    outcome: "ok",
+  }),
+  "release-notes": () => ({
+    ...base,
+    title: "Onboarding restart",
+    audience: "both",
+    highlights: ["restart allowed"],
+    changes: [],
+    breaking: [],
+    migration: [],
+    markdown: "# Onboarding restart\n- restart allowed",
+    outcome: "ok",
+  }),
 };
 
 /** A scripted model for the whole workflow; `overrides` answers specific agents first. */
@@ -514,7 +533,7 @@ describe("review mode v1", () => {
       "approve-impl->review-analysis#review_submitted": 1,
       "review-analysis->implementation#fix_required": 1,
     });
-    expect(detail.steps.map((s) => s.stepId).slice(-9)).toEqual([
+    expect(detail.steps.map((s) => s.stepId).slice(-11)).toEqual([
       "approve-impl",
       "approve-impl",
       "review-analysis",
@@ -522,6 +541,8 @@ describe("review mode v1", () => {
       "verify",
       "tests",
       "standards",
+      "docs",
+      "telemetry",
       "review",
       "approve-impl",
     ]);

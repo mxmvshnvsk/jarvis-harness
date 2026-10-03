@@ -6,8 +6,7 @@ workflows, versioned project knowledge, context policies, resource governance, r
 > Jarvis ≠ AI coding chat. Jarvis = engineering runtime + SDD workflows + project knowledge +
 > context policies + resource governance + tools + replaceable LLMs.
 
-Pilot walkthrough: [`docs/QUICKSTART.md`](docs/QUICKSTART.md). Architecture and every decision live in
-[`docs/adr/`](docs/adr/). Start with ADR-0001 (target
+Architecture and every decision live in [`docs/adr/`](docs/adr/). Start with ADR-0001 (target
 architecture); ADR-0002…0018 refine it.
 
 ## Status
@@ -147,6 +146,13 @@ Stage 11 (part) — CI mode and run transfer (ADR-0009):
   worktree from the base commit with the patch applied and refuses duplicates
 - `jarvis approve --commit` writes `.jarvis/approvals/<task>/<type>.json` and commits it, so a
   later CI run with `humanGate: skip-if-approved` passes that gate for the same content
+
+Stage 12 — specialised agents (ADR-0001 §6):
+
+- `docs` (documentation in step with the change), `telemetry` (events/metrics with privacy notes;
+  `spec_gap` sends the spec back) run inside the `verify` composite next to tests and standards;
+  `release-notes` closes the workflow after the final gate with publishable markdown
+- The review agent sees docs and telemetry artifacts as inputs
 
 Stage 13 (phase 1) — capability layer (ADR-0021 §2–3, §7):
 

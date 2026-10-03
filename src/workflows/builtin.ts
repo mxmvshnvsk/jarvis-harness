@@ -67,14 +67,26 @@ steps:
     inputs: [spec, plan]
     outputs: [implementation]
     transitions: { onSuccess: verify }
+  # ADR-0019 §8 DAG: implementation → {tests, docs, telemetry} → review; children run in parallel.
   - id: verify
     kind: composite
-    children: [tests, standards]
+    children: [tests, standards, docs, telemetry]
     transitions:
       onSuccess: review
       onOutcome:
         defects_found: { to: implementation, maxIterations: 2 }
         standards_violation: { to: implementation, maxIterations: 2 }
+        spec_gap: { to: spec, maxIterations: 1 }
+  - id: docs
+    kind: agentic
+    agent: docs
+    inputs: [spec, implementation]
+    outputs: [docs]
+  - id: telemetry
+    kind: agentic
+    agent: telemetry
+    inputs: [spec, impact, implementation]
+    outputs: [telemetry]
   - id: standards
     kind: deterministic
     tool: standards.check
@@ -88,7 +100,7 @@ steps:
     kind: agentic
     agent: review
     phase: review
-    inputs: [spec, plan, implementation, tests]
+    inputs: [spec, plan, implementation, tests, docs, telemetry]
     outputs: [review]
     transitions:
       onSuccess: approve-impl
@@ -102,7 +114,7 @@ steps:
     kind: approval
     artifactType: implementation
     transitions:
-      onSuccess: DONE
+      onSuccess: release-notes
       onOutcome:
         request_changes: { to: implementation, maxIterations: 3 }
         review_submitted: { to: review-analysis, maxIterations: 5 }
@@ -118,6 +130,13 @@ steps:
         fix_required: { to: implementation, maxIterations: 3 }
         spec_wrong: { to: spec, maxIterations: 1 }
         requirements_wrong: { to: requirements, maxIterations: 1 }
+  - id: release-notes
+    kind: agentic
+    agent: release-notes
+    phase: release
+    inputs: [spec, implementation, review]
+    outputs: [release-notes]
+    transitions: { onSuccess: DONE }
 `;
 
 export const SMOKE_WORKFLOW = `

@@ -1,13 +1,16 @@
 import { type AgentDefinition, DEFAULT_LIMITS } from "../definition.ts";
 import {
+  DocsResult,
   ImpactResult,
   ImplementationResult,
   PlanResult,
+  ReleaseNotesResult,
   RequirementsResult,
   ResearchResult,
   ReviewAnalysisResult,
   ReviewResult,
   SpecResult,
+  TelemetryResult,
   TestResult,
 } from "./schemas.ts";
 
@@ -203,6 +206,63 @@ Read the code around each comment before classifying; quote the comment id in ev
   contextInputs: ["review-package", "spec", "requirements"],
 };
 
+export const DOCS_AGENT: AgentDefinition = {
+  id: "docs",
+  role: "implementation",
+  description: "Keeps the documentation in the repository in step with the change.",
+  instructions: `You are the documentation agent of Jarvis.
+Goal: after the implementation, make the repository's documentation describe the new behaviour — nothing more.
+Method:
+- Find where this behaviour is (or should be) documented: README, docs/, ADRs, CHANGELOG, inline API docs. Use the specification's requirements as the checklist of what must be described.
+- Edit existing documents in their own style and structure; add a new document only when nothing fits, and say so in "gaps" when even that is unclear.
+- Do not describe implementation details that the specification does not promise; do not touch code.
+- Record every file you changed in "updatedFiles" and each section in "sections".
+Produce the result document when every requirement has a documentation home or a listed gap.`,
+  capabilities: [...READ_REPO, ...WRITE_REPO],
+  requires: { tools: true, structuredOutput: "json" },
+  output: { type: "docs", schema: DocsResult, outcomes: ["ok"] },
+  limits: DEFAULT_LIMITS,
+  contextInputs: ["spec", "implementation"],
+};
+
+export const TELEMETRY_AGENT: AgentDefinition = {
+  id: "telemetry",
+  role: "implementation",
+  description: "Makes sure the change is observable: events, metrics, privacy of their payloads.",
+  instructions: `You are the telemetry agent of Jarvis.
+Goal: every behaviour the specification promises can be seen in production — through events and metrics that already exist or that you add.
+Method:
+- Read how the project emits analytics/telemetry today (search for the existing event helpers, naming scheme, schemas) and follow that scheme exactly.
+- For each requirement decide: an existing event covers it (status existing), you add one in code (status added, with the file), or it needs a decision you cannot take (status proposed).
+- Payloads: name every property; flag PII or sensitive fields in "privacy" and keep them out of payloads unless the project already has an approved way.
+- If the specification promises behaviour that cannot be observed at all and the gap matters, set outcome spec_gap and explain in "reasons".
+Produce the result document.`,
+  capabilities: [...READ_REPO, ...WRITE_REPO],
+  requires: { tools: true, structuredOutput: "json" },
+  output: { type: "telemetry", schema: TelemetryResult, outcomes: ["ok", "spec_gap"] },
+  limits: DEFAULT_LIMITS,
+  contextInputs: ["spec", "impact", "implementation"],
+};
+
+export const RELEASE_NOTES_AGENT: AgentDefinition = {
+  id: "release-notes",
+  role: "research",
+  description: "Writes the release notes of the change from the specification, the diff and the review.",
+  instructions: `You are the release-notes agent of Jarvis.
+Goal: notes a product manager can paste into a release and a developer can trust.
+Method:
+- Lead with what changed for the user (highlights), in the project's existing release-notes tone if a CHANGELOG or release notes exist in the repository — read them first.
+- List every change with its kind; cite the requirement ids and files. Breaking changes and migration steps are separate sections and never hidden in prose.
+- Do not invent behaviour that is not in the specification or the diff; what the review flagged as deferred goes under "internal" or is omitted.
+- "markdown" is the final text; keep it under 60 lines.
+Produce the result document.`,
+  capabilities: [...READ_REPO],
+  requires: { tools: true, structuredOutput: "json" },
+  output: { type: "release-notes", schema: ReleaseNotesResult, outcomes: ["ok"] },
+  limits: DEFAULT_LIMITS,
+  contextInputs: ["spec", "implementation", "review"],
+};
+
 export const BUILTIN_AGENTS: readonly AgentDefinition[] = [
   RESEARCH_AGENT,
   REQUIREMENTS_AGENT,
@@ -213,4 +273,7 @@ export const BUILTIN_AGENTS: readonly AgentDefinition[] = [
   TEST_AGENT,
   REVIEW_AGENT,
   REVIEW_ANALYSIS_AGENT,
+  DOCS_AGENT,
+  TELEMETRY_AGENT,
+  RELEASE_NOTES_AGENT,
 ];

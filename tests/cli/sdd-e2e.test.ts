@@ -97,7 +97,7 @@ async function jarvis(args: string[]) {
 
 function agentOf(req: CapturedRequest): string {
   const system = (req.body.messages as Array<{ content: string }>)[0]?.content ?? "";
-  return /# Agent: (\w+)/.exec(system)?.[1] ?? "?";
+  return /# Agent: ([\w-]+)/.exec(system)?.[1] ?? "?";
 }
 function lastUser(req: CapturedRequest): string {
   const messages = req.body.messages as Array<{ role: string; content: string | null }>;
@@ -152,6 +152,26 @@ const docs: Record<string, (reviewRound: number) => unknown> = {
     outcome: "ok",
   }),
   implementation: () => ({ ...base, changedFiles: ["src/onboarding.ts"], notes: [], outcome: "ok" }),
+  docs: () => ({ ...base, updatedFiles: ["README.md"], sections: [], gaps: [], outcome: "ok" }),
+  telemetry: () => ({
+    ...base,
+    events: [{ name: "onboarding_restarted", when: "restart", properties: [], status: "proposed" }],
+    metrics: [],
+    privacy: [],
+    outcome: "ok",
+  }),
+  "release-notes": () => ({
+    ...base,
+    title: "Onboarding restart",
+    audience: "both",
+    highlights: ["restart allowed"],
+    changes: [],
+    breaking: [],
+    migration: [],
+    markdown: "# Onboarding restart\n- restart allowed",
+    outcome: "ok",
+  }),
+
   test: () => ({ ...base, commandsRun: ["project.check"], passed: true, failures: [], outcome: "ok" }),
   review: (round) =>
     round === 1
@@ -245,14 +265,19 @@ describe("sdd end to end", () => {
       "verify",
       "tests",
       "standards",
+      "docs",
+      "telemetry",
       "review",
       "implementation",
       "verify",
       "tests",
       "standards",
+      "docs",
+      "telemetry",
       "review",
       "approve-impl",
       "approve-impl",
+      "release-notes",
     ]);
     expect(done.steps.find((s) => s.stepId === "review")?.outcome).toBe("fix_required");
 
@@ -275,6 +300,9 @@ describe("sdd end to end", () => {
       "implementation/implementation.json@2",
       "tests/tests.json@2",
       "review/review.json@2",
+      "docs/docs.json@2",
+      "telemetry/telemetry.json@2",
+      "release-notes/release-notes.json@1",
     ]) {
       expect(status.out).toContain(t);
     }
