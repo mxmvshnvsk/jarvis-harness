@@ -47,6 +47,8 @@ export const CaseSchema = z.strictObject({
   /** Cassette directory relative to the case directory. */
   cassette: z.string().min(1).default("cassette"),
   maxApprovals: z.int().positive().default(6),
+  /** Where a derived case came from (`jarvis evals run-to-case`, ADR-0012 §3). */
+  source: z.record(z.string(), z.unknown()).optional(),
 });
 export type EvalCase = z.infer<typeof CaseSchema> & { readonly dir: string; readonly id: string };
 

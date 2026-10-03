@@ -1,4 +1,4 @@
-import { effectiveStacks } from "../capabilities/detector.ts";
+import { detectStackScopes, effectiveStacks, stacksForPaths } from "../capabilities/detector.ts";
 import { type EngineeringContextPackage, resolvePackage } from "../knowledge/resolver.ts";
 import { rankKnowledge, refreshIndex } from "../knowledge/retrieval/service.ts";
 import type { StepContext } from "../orchestration/types.ts";
@@ -51,15 +51,18 @@ export async function packageForStep(ctx: StepContext, agentId: string): Promise
   const workspace = ctx.workspace.ref.path;
   const home = ctx.runtime.loaded.home.root;
   const roots = { projectRoot: workspace, userRoot: home };
+  const affectedPaths = affectedPathsOf(ctx);
+  const config = ctx.runtime.loaded.config;
+  // ADR-0021 §9: in a polyglot repository the affected scope decides which stack packs apply.
+  const stacks = stacksForPaths(
+    affectedPaths,
+    detectStackScopes(workspace, config.stackScopes),
+    effectiveStacks(config.stack, workspace),
+  );
   const pkg = resolvePackage({
     roots,
-    config: ctx.runtime.loaded.config.knowledge,
-    task: {
-      kind: taskKindOf(ctx),
-      affectedPaths: affectedPathsOf(ctx),
-      stacks: effectiveStacks(ctx.runtime.loaded.config.stack, workspace),
-      agentId,
-    },
+    config: config.knowledge,
+    task: { kind: taskKindOf(ctx), affectedPaths, stacks, agentId },
   });
   if (pkg.knowledge.length <= ctx.runtime.loaded.config.knowledge.retrieval.rankAbove) return pkg;
   // ADR-0015: the index keeps pace with the project and the run before it ranks.

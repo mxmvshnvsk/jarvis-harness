@@ -331,6 +331,8 @@ export const ProjectConfigSchema = z.strictObject({
   human: HumanConfigSchema.optional(),
   /** Stack tags (ADR-0021 §3): typescript, react, csharp, … Empty = detected from the workspace. */
   stack: z.array(z.string().min(1)).optional(),
+  /** ADR-0021 §9 polyglot: path glob → stacks, e.g. "backend/**": [csharp, aspnet]. */
+  stackScopes: z.record(z.string().min(1), z.array(z.string().min(1))).optional(),
 });
 export type ProjectConfig = z.infer<typeof ProjectConfigSchema>;
 
@@ -355,6 +357,7 @@ export const ResolvedConfigSchema = z.strictObject({
   knowledge: KnowledgeConfigSchema.prefault({}),
   human: HumanConfigSchema.prefault({}),
   stack: z.array(z.string().min(1)).default([]),
+  stackScopes: z.record(z.string().min(1), z.array(z.string().min(1))).prefault({}),
   /** Capability patterns denied by the active profile (ADR-0009 §1); applied by the Tool Router. */
   deniedCapabilities: z.array(z.string().min(1)).default([]),
   /** Name of the applied profile, if any. */

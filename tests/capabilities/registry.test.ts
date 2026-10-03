@@ -1,4 +1,4 @@
-import { writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { CapabilityRegistry } from "../../src/capabilities/registry.ts";
@@ -72,5 +72,39 @@ describe("CapabilityRegistry.discover (ADR-0021 §3, §7)", () => {
       graph: "adapter",
     });
     expect(caps.reasons).toEqual([]);
+  });
+});
+
+describe("polyglot scopes (ADR-0021 §9)", () => {
+  it("detects per-directory stacks and resolves stacks by affected paths", async () => {
+    const { detectStackScopes, stacksForPaths } = await import("../../src/capabilities/detector.ts");
+    mkdirSync(join(sb.project, "frontend"), { recursive: true });
+    mkdirSync(join(sb.project, "backend"), { recursive: true });
+    writeFileSync(
+      join(sb.project, "frontend", "package.json"),
+      JSON.stringify({ dependencies: { react: "19" }, devDependencies: { typescript: "5" } }),
+    );
+    writeFileSync(join(sb.project, "backend", "Api.csproj"), "");
+    const scopes = detectStackScopes(sb.project);
+    expect(scopes).toEqual({
+      "frontend/**": ["node", "react", "typescript"],
+      "backend/**": ["csharp", "dotnet"],
+    });
+    expect(stacksForPaths(["backend/Api/Orders.cs"], scopes, ["typescript"])).toEqual(["csharp", "dotnet"]);
+    expect(stacksForPaths(["backend/x.cs", "frontend/src/a.tsx"], scopes, [])).toEqual([
+      "csharp",
+      "dotnet",
+      "node",
+      "react",
+      "typescript",
+    ]);
+    expect(stacksForPaths(["docs/readme.md"], scopes, ["typescript"])).toEqual(["typescript"]);
+    expect(stacksForPaths([], scopes, ["typescript"])).toEqual(["typescript"]);
+    expect(detectStackScopes(sb.project, { "svc/**": ["python"] })).toEqual({ "svc/**": ["python"] });
+
+    const caps = await discover("version: 1\ntools: { local: { test: 'true' } }\n", [fakeTs]);
+    expect(caps.scopes).toEqual(scopes);
+    expect(caps.stacks).toEqual(["csharp", "dotnet", "node", "react", "typescript"]);
+    expect(caps.adapters.map((a) => a.id)).toEqual(["typescript"]); // reached through the frontend scope
   });
 });

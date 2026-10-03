@@ -6,7 +6,7 @@ import { runCi, runExport, runImport } from "./commands/ci.ts";
 import { runConfigShow } from "./commands/config.ts";
 import { runDbBackup, runDbMigrate, runDbStatus } from "./commands/db.ts";
 import { renderDoctor, runDoctor } from "./commands/doctor.ts";
-import { runEvalsBaseline, runEvalsDiff, runEvalsRun } from "./commands/evals.ts";
+import { runEvalsBaseline, runEvalsDiff, runEvalsRun, runEvalsRunToCase } from "./commands/evals.ts";
 import { runAnswer, runAttach, runReviewStatus, runReviewSubmit, runThreads } from "./commands/human.ts";
 import { renderInit, runInit } from "./commands/init.ts";
 import {
@@ -276,6 +276,21 @@ export function buildProgram(options: RunOptions = {}): Command {
     .option("--out <file>", "result file (default: evals/results/<date>-<suite>.json)")
     .action(async (opts: { suite: string; mode: string; variant?: string[]; out?: string }) => {
       await runEvalsRun(ctxFor(), opts);
+    });
+  evals
+    .command("run-to-case <run>")
+    .description(
+      "turn a finished run into an eval case: fixture at the base commit, gold from what the human accepted",
+    )
+    .requiredOption("--suite <name|dir>", "suite to add the case to")
+    .option("--id <id>", "case id (default: from the task key)")
+    .option("--no-fixture", "write case.yaml only")
+    .action(async (ref: string, opts: { suite: string; id?: string; fixture: boolean }) => {
+      await runEvalsRunToCase(ctxFor(), ref, {
+        suite: opts.suite,
+        ...(opts.id ? { id: opts.id } : {}),
+        fixture: opts.fixture,
+      });
     });
   evals
     .command("baseline <suite>")

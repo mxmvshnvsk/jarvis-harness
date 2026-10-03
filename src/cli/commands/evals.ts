@@ -1,9 +1,12 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
+import { createRuntime } from "../../app/runtime.ts";
 import { diffResults, runSuite, type SuiteResult } from "../../evals/runner.ts";
+import { runToCase } from "../../evals/runToCase.ts";
 import type { CassetteMode } from "../../models/cassette.ts";
 import type { CliContext } from "../context.ts";
 import { CliExit, EXIT, padEnd } from "../output.ts";
+import { loadForCli } from "./config.ts";
 
 /** `jarvis evals run|baseline|diff` (ADR-0012 §4–5). Suites live in `evals/<suite>/<case>/`. */
 export interface EvalsRunOptions {
@@ -137,4 +140,37 @@ export async function runEvalsDiff(
     ctx.out.line(diff.ok ? "no regression beyond tolerance" : `REGRESSION: ${diff.regressions.join("; ")}`);
   });
   if (!diff.ok) throw new CliExit(EXIT.error);
+}
+
+/** `jarvis evals run-to-case <run> --suite <name> [--id] [--no-fixture]` (ADR-0012 §3). */
+export async function runEvalsRunToCase(
+  ctx: CliContext,
+  ref: string,
+  options: { suite: string; id?: string; fixture?: boolean },
+): Promise<void> {
+  const loaded = await loadForCli(ctx);
+  const runtime = createRuntime(loaded, { env: ctx.env });
+  try {
+    const run = runtime.runs.resolve(ref);
+    if (!run) throw new CliExit(EXIT.error, `run "${ref}" not found`);
+    const suiteDir = resolve(
+      ctx.cwd,
+      options.suite.includes("/") ? options.suite : join("evals", options.suite),
+    );
+    const result = await runToCase(runtime, run.id, {
+      suiteDir,
+      ...(options.id ? { id: options.id } : {}),
+      ...(options.fixture === false ? { fixture: false } : {}),
+    });
+    ctx.out.result(result, () => {
+      ctx.out.line(`case written to ${result.caseDir}${result.fixture ? " (with fixture)" : ""}`);
+      ctx.out.line(`  gold files: ${result.files.join(", ") || "-"}`);
+      ctx.out.line(
+        `  acceptance: ${result.acceptance.length}; required sources: ${result.requiredSources.length}${result.humanVersions.length > 0 ? ` (from human versions ${result.humanVersions.join(", ")})` : " (no human-edited artifacts: review the gold by hand)"}`,
+      );
+      ctx.out.line("  next: review case.yaml, then `jarvis evals run --suite <suite> --mode record`");
+    });
+  } finally {
+    await runtime.close();
+  }
 }

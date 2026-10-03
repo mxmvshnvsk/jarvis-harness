@@ -1,6 +1,6 @@
 import type { LanguageAdapter, LanguageCapability } from "../core/capabilities/contracts.ts";
 import type { ResolvedConfig } from "../core/config/schema.ts";
-import { detectStacks } from "./detector.ts";
+import { detectStackScopes, detectStacks } from "./detector.ts";
 
 /**
  * Capability registry and the ProjectCapabilities artifact (ADR-0021 §3, §7). Adapters register
@@ -12,6 +12,8 @@ export interface ProjectCapabilities {
   readonly stacks: string[];
   readonly detected: string[];
   readonly configured: string[];
+  /** ADR-0021 §9: path scope → stacks when the repository holds several. */
+  readonly scopes: Record<string, string[]>;
   readonly adapters: Array<{ id: string; capabilities: LanguageCapability[]; evidence: string[] }>;
   readonly commands: Record<string, string>;
   readonly capabilities: Record<string, "adapter" | "project" | "missing">;
@@ -33,7 +35,9 @@ export class CapabilityRegistry {
   async discover(config: ResolvedConfig, workspacePath: string): Promise<ProjectCapabilities> {
     const detected = detectStacks(workspacePath);
     const configured = [...config.stack];
-    const stacks = configured.length > 0 ? configured : detected;
+    const scopes = detectStackScopes(workspacePath, config.stackScopes);
+    const scoped = [...new Set(Object.values(scopes).flat())].sort();
+    const stacks = configured.length > 0 ? configured : detected.length > 0 ? detected : scoped;
     const adapters: ProjectCapabilities["adapters"] = [];
     const commands: Record<string, string> = { ...config.tools.local };
     const caps: ProjectCapabilities["capabilities"] = {};
@@ -73,6 +77,6 @@ export class CapabilityRegistry {
         "no language adapter with code intelligence: repo search, commands and model reading only",
       );
     }
-    return { stacks, detected, configured, adapters, commands, capabilities: caps, level, reasons };
+    return { stacks, detected, configured, scopes, adapters, commands, capabilities: caps, level, reasons };
   }
 }

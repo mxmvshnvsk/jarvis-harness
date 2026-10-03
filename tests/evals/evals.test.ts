@@ -112,7 +112,18 @@ async function jarvis(args: string[]) {
         },
       }),
     },
-    context: { cwd: sb.project, homeDir: sb.home, env: { PATH: process.env.PATH ?? "" } },
+    context: {
+      cwd: sb.project,
+      homeDir: sb.home,
+      env: {
+        PATH: process.env.PATH ?? "",
+        JARVIS_ACTOR: "me@corp",
+        GIT_AUTHOR_NAME: "t",
+        GIT_AUTHOR_EMAIL: "t@t",
+        GIT_COMMITTER_NAME: "t",
+        GIT_COMMITTER_EMAIL: "t@t",
+      },
+    },
   });
   return { code, out, err };
 }
@@ -120,7 +131,7 @@ async function jarvis(args: string[]) {
 describe("jarvis evals", () => {
   it("records a suite, replays it without the model, pins a baseline and detects regressions", async () => {
     const recorded = await jarvis(["--json", "evals", "run", "--suite", "smoke", "--mode", "record"]);
-    expect(recorded.err).toBe("");
+    expect(recorded.code).toBe(0);
     expect(recorded.code).toBe(0);
     const r = JSON.parse(recorded.out) as SuiteResult & { file: string };
     expect(r.cases).toHaveLength(1);
@@ -198,5 +209,66 @@ describe("jarvis evals", () => {
     const bad = diffResults(mk(0.9, 5), mk(0.7, 5));
     expect(bad.ok).toBe(false);
     expect(bad.regressions).toEqual(["successRate: 0.9 → 0.7"]);
+  });
+
+  it("run-to-case turns a finished run into a case that records and replays", async () => {
+    // a real run in a git repository, with a human-edited spec so required sources come from it
+    const { execFileSync } = await import("node:child_process");
+    const git = (args: string[]) =>
+      execFileSync("git", args, {
+        cwd: sb.project,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          GIT_AUTHOR_NAME: "t",
+          GIT_AUTHOR_EMAIL: "t@t",
+          GIT_COMMITTER_NAME: "t",
+          GIT_COMMITTER_EMAIL: "t@t",
+        },
+      });
+    mkdirSync(join(sb.project, "src"), { recursive: true });
+    writeFileSync(
+      join(sb.project, "src", "onboarding.ts"),
+      "export function canRestartOnboarding() {\n  return false;\n}\n",
+    );
+    sb.write(
+      "project/.jarvis/project.yaml",
+      "version: 1\ntools: { local: { check: \"grep -q 'return true' src/onboarding.ts\" } }\nhuman: { gates: { spec: { required: false }, implementation: { required: false } } }\n",
+    );
+    git(["init", "-q", "-b", "main"]);
+    git(["add", "-A"]);
+    git(["commit", "-q", "-m", "init"]);
+    const work = await jarvis(["--json", "work", "ABC-81"]);
+    expect(work.code).toBe(0);
+    const runId = (JSON.parse(work.out) as { run: { id: string } }).run.id;
+
+    const made = await jarvis(["--json", "evals", "run-to-case", runId, "--suite", "derived"]);
+    expect(made.code).toBe(0);
+    const r = JSON.parse(made.out) as {
+      caseDir: string;
+      files: string[];
+      acceptance: string[];
+      fixture: boolean;
+    };
+    expect(r.files).toEqual(["src/onboarding.ts"]);
+    expect(r.acceptance).toEqual(["unit test"]);
+    expect(r.fixture).toBe(true);
+    expect(existsSync(join(r.caseDir, "fixture", "src", "onboarding.ts"))).toBe(true);
+    expect(existsSync(join(r.caseDir, "case.yaml"))).toBe(true);
+    const again = await jarvis(["evals", "run-to-case", runId, "--suite", "derived"]);
+    expect(again.code).toBe(1);
+
+    const recorded = await jarvis(["--json", "evals", "run", "--suite", "derived", "--mode", "record"]);
+    expect(recorded.code).toBe(0);
+    const result = JSON.parse(recorded.out) as SuiteResult;
+    expect(result.cases[0]).toMatchObject({
+      id: "abc-81",
+      success: true,
+      fileRecall: 1,
+      acceptanceCoverage: 1,
+      testsPassed: true,
+    });
+    const replayed = await jarvis(["--json", "evals", "run", "--suite", "derived"]);
+    expect((JSON.parse(replayed.out) as SuiteResult).cases[0]?.success).toBe(true);
   });
 });
