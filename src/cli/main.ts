@@ -1,6 +1,8 @@
 import { Command } from "commander";
 import { ConfigError } from "../core/config/errors.ts";
+import { errorFields } from "../telemetry/log.ts";
 import { packageInfo } from "../version.ts";
+import { cliLogger } from "./cliLog.ts";
 import { runAsk } from "./commands/ask.ts";
 import { runAuthRemove, runAuthSet, runAuthStatus } from "./commands/auth.ts";
 import { runCi, runExport, runImport } from "./commands/ci.ts";
@@ -27,6 +29,7 @@ import {
   runKnowledgeStatus,
   runKnowledgeUpdate,
 } from "./commands/knowledgeGraph.ts";
+import { runLogs } from "./commands/logs.ts";
 import { runMcpList, runMcpServe } from "./commands/mcp.ts";
 import { runModelsList, runModelsProbe } from "./commands/models.ts";
 import { runOnboard } from "./commands/onboard.ts";
@@ -157,13 +160,32 @@ export function buildProgram(options: RunOptions = {}): Command {
       },
     );
   program
+    .command("logs [run]")
+    .description(
+      "technical log (NDJSON in ~/.jarvis/logs): errors, events, and with JARVIS_LOG=debug model and tool bodies",
+    )
+    .option("--level <level>", "error, info (default) or debug", "info")
+    .option("--event <text>", "only events whose name contains this, e.g. model.error")
+    .option("--tail <n>", "last n records", (v: string) => Number.parseInt(v, 10), 100)
+    .option("--since <age>", "only records newer than 30m, 2h, 1d …")
+    .option("--full", "do not shorten long values", false)
+    .option("--path", "print the log directory", false)
+    .action(
+      async (
+        run: string | undefined,
+        opts: { level: string; event?: string; tail: number; since?: string; full: boolean; path: boolean },
+      ) => {
+        await runLogs(ctxFor(), run, opts);
+      },
+    );
+  program
     .command("ask <question...>")
     .description(
       "reference desk: glossary terms and answers from the project knowledge base, with checked citations",
     )
     .option("--no-llm", "glossary and ranked sources only, no model")
     .option("--general", "also allow a clearly labelled note from the model's own knowledge", false)
-    .option("--limit <n>", "max candidate sources", Number.parseInt, 8)
+    .option("--limit <n>", "max candidate sources", (v: string) => Number.parseInt(v, 10), 8)
     .action(async (question: string[], opts: { llm: boolean; general: boolean; limit: number }) => {
       await runAsk(ctxFor(), question, opts);
     });
@@ -515,7 +537,7 @@ export function buildProgram(options: RunOptions = {}): Command {
   knowledge
     .command("search <query>")
     .description("search the index with glossary expansion, as agents do")
-    .option("--limit <n>", "max hits", Number.parseInt, 10)
+    .option("--limit <n>", "max hits", (v: string) => Number.parseInt(v, 10), 10)
     .action(async (query: string, opts: { limit: number }) => {
       await runKnowledgeSearch(ctxFor(), query, opts);
     });
@@ -608,12 +630,24 @@ export async function run(argv: readonly string[], options: RunOptions = {}): Pr
     writeOut: (s) => streams.out.write(s),
     writeErr: (s) => streams.err.write(s),
   });
+  const log = cliLogger(options.context);
+  const started = Date.now();
+  log.info("cli.invoke", {
+    args: argv.slice(2),
+    cwd: options.context?.cwd ?? process.cwd(),
+    pid: process.pid,
+  });
   try {
     await program.parseAsync([...argv]);
+    log.info("cli.exit", { code: EXIT.ok, ms: Date.now() - started });
     return EXIT.ok;
   } catch (error) {
-    if (error instanceof CliExit) return error.code;
+    if (error instanceof CliExit) {
+      log.info("cli.exit", { code: error.code, ms: Date.now() - started });
+      return error.code;
+    }
     if (error instanceof ConfigError) {
+      log.error("cli.error", { message: error.message, ms: Date.now() - started });
       streams.err.write(`${error.message}\n`);
       return EXIT.error;
     }
@@ -622,6 +656,7 @@ export async function run(argv: readonly string[], options: RunOptions = {}): Pr
       const code = (error as { exitCode: number }).exitCode;
       return code;
     }
+    log.error("cli.crash", { ...errorFields(error), ms: Date.now() - started });
     streams.err.write(`${error instanceof Error ? (error.stack ?? error.message) : String(error)}\n`);
     return EXIT.error;
   }

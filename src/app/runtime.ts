@@ -32,6 +32,7 @@ import { type OpenedDatabase, openDatabase } from "../storage/db.ts";
 import { EffectJournal } from "../storage/effects.ts";
 import { SqliteRunStore } from "../storage/runStore.ts";
 import { SqliteEventStore } from "../telemetry/events.ts";
+import { eventLevel, Logger, logLevelFrom, logSettingsFrom } from "../telemetry/log.ts";
 import { LocalToolProvider } from "../tools/local/provider.ts";
 import { ToolRegistry } from "../tools/registry.ts";
 import { ToolRouter } from "../tools/router.ts";
@@ -41,6 +42,8 @@ export interface Runtime {
   readonly loaded: LoadedConfig;
   readonly db: OpenedDatabase;
   readonly events: SqliteEventStore;
+  /** Technical log (NDJSON in `<home>/logs`, level from JARVIS_LOG). */
+  readonly log: Logger;
   readonly usage: SqliteUsageStore;
   readonly budget: BudgetManager;
   readonly gateway: ModelGateway;
@@ -99,6 +102,21 @@ export function createRuntime(loaded: LoadedConfig, options: RuntimeOptions = {}
     literals: secretLiteralsFromEnv(env, security.secretEnv),
     patterns: compilePatterns(security.secretPatterns),
   });
+  const log = new Logger({
+    dir: loaded.home.logsDir,
+    level: logLevelFrom(env),
+    redact: (text) => redactor.redact(text).text,
+    ...logSettingsFrom(env),
+  });
+  events.setTap((event) => {
+    log.log(eventLevel(event.kind), event.kind, {
+      ...(event.runId ? { runId: event.runId } : {}),
+      ...(event.stepId ? { stepId: event.stepId } : {}),
+      ...(event.iteration !== undefined ? { iteration: event.iteration } : {}),
+      ...(event.actor ? { actor: event.actor } : {}),
+      ...(event.payload ? { payload: event.payload } : {}),
+    });
+  });
   const keychain = createKeychain(loaded, env);
   // Values pulled from the keychain join the Redactor's literal set the moment they are read (ADR-0010 §2).
   const secrets = new CompositeSecretResolver([
@@ -112,6 +130,7 @@ export function createRuntime(loaded: LoadedConfig, options: RuntimeOptions = {}
     events,
     budget,
     estimator,
+    log,
     ...(options.cassette
       ? { cassette: { mode: options.cassette.mode, store: new FileCassetteStore(options.cassette.dir) } }
       : {}),
@@ -149,6 +168,7 @@ export function createRuntime(loaded: LoadedConfig, options: RuntimeOptions = {}
     loaded,
     db,
     events,
+    log,
     usage,
     budget,
     gateway,

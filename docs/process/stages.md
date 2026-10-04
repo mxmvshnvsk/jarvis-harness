@@ -28,6 +28,11 @@ Remaining commands of ADR-0001 §15:
   skills only; citations are verified against the source text, an unconfirmed answer is not shown, `--general` adds
   a separately labelled model note (`src/knowledge/ask.ts`, `src/cli/commands/ask.ts`, `tests/cli/ask.test.ts`)
 
+- Technical log (`src/telemetry/log.ts`, `src/cli/commands/logs.ts`, `src/cli/cliLog.ts`): NDJSON in `~/.jarvis/logs`, levels
+  `JARVIS_LOG=off|error|info|debug`, mirror of the event journal, model request/response and tool bodies at debug (prompts as
+  deltas), redaction, retention; `step.error` with stack, provider message in `model.error`, `args` in `tool.call`;
+  `jarvis logs` and a `doctor` line. The `JARVIS_LOG*` variables are reserved (they used to be read as configuration paths)
+
 ADR-0001 §20 stage 12 (git hooks) — `f11ca47`:
 
 - `jarvis hooks install|uninstall|status` — a thin `pre-push` shim honouring `core.hooksPath` and linked

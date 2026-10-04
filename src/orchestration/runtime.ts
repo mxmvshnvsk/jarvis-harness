@@ -14,6 +14,7 @@ import {
 import { afterAnalysis, afterImplementation } from "../interaction/review/lifecycle.ts";
 import { ModelError } from "../models/errors.ts";
 import { LeaseLostError } from "../storage/runStore.ts";
+import { errorFields } from "../telemetry/log.ts";
 import { UnresolvedEffectError } from "./effects.ts";
 import { AgenticExecutor, ApprovalExecutor, CompositeExecutor, DeterministicExecutor } from "./executors.ts";
 import { HeldLease, type HeldLeaseOptions } from "./lease.ts";
@@ -166,6 +167,21 @@ export class LocalWorkflowEngine {
             this.emit(run, "run.leaseLost", { reason: error.message });
             throw error;
           }
+          // an unexpected exception: the stack goes to the journal (cut) and to the log (whole)
+          const detail = errorFields(error);
+          this.emit(run, "step.error", {
+            stepId: step.id,
+            iteration,
+            error: String(detail.name ?? "Error"),
+            message: String(detail.message ?? "").slice(0, 600),
+            stack: String(detail.stack ?? "").slice(0, 4000),
+          });
+          this.rt.log.error("step.error.detail", {
+            runId: run.id,
+            stepId: step.id,
+            iteration,
+            ...detail,
+          });
           run = this.rt.runs.transition(run.id, "FAILED", {
             reason: error instanceof Error ? error.message : String(error),
           });

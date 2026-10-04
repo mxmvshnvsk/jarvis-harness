@@ -205,7 +205,8 @@ profiles:                      # ADR-0009 §1 — только сужение
 ## Переменные окружения
 
 Зарезервированные: `JARVIS_HOME`, `JARVIS_CONFIG`, `JARVIS_PROFILE`, `JARVIS_ACTOR`,
-`JARVIS_KEYCHAIN_BACKEND`.
+`JARVIS_KEYCHAIN_BACKEND` и переменные технического лога `JARVIS_LOG`, `JARVIS_LOG_DIR`,
+`JARVIS_LOG_KEEP_DAYS`, `JARVIS_LOG_MAX_FIELD` (см. [workflows.md](workflows.md#технический-лог)).
 
 Остальные `JARVIS_<PATH>` переопределяют конфигурацию: `__` разделяет сегменты пути, сегменты
 сопоставляются с ключами без учёта регистра, `_` и `-`:

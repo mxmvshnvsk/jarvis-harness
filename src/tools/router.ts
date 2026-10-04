@@ -233,7 +233,18 @@ export class BoundTools {
         source,
         error: result.error,
         access: capability.access,
+        // what the agent asked for, redacted and cut (`jarvis explain` and `jarvis logs` name the call)
+        args: this.ctx.redactor.redact(safeJson(args)).text.slice(0, 600),
       },
+    });
+    this.rt.log.debug("tool.result", {
+      ...base,
+      capability: name,
+      args,
+      ok: result.ok,
+      error: result.error,
+      truncated: result.truncated,
+      text: result.text,
     });
     return result;
   }
@@ -283,5 +294,13 @@ export class BoundTools {
       ...(redactedError ? { error: redactedError } : {}),
       ...(source ? { source } : {}),
     };
+  }
+}
+
+function safeJson(value: unknown): string {
+  try {
+    return JSON.stringify(value) ?? "";
+  } catch {
+    return String(value);
   }
 }

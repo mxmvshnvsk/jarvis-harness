@@ -10,6 +10,7 @@ export interface JarvisHome {
   readonly runsDir: string;
   readonly artifactsDir: string;
   readonly cacheDir: string;
+  readonly logsDir: string;
   readonly worktreesDir: string;
   readonly socketFile: string;
 }
@@ -23,6 +24,7 @@ export function jarvisHome(env: NodeJS.ProcessEnv = process.env, home: string = 
     runsDir: join(root, "runs"),
     artifactsDir: join(root, "artifacts"),
     cacheDir: join(root, "cache"),
+    logsDir: env.JARVIS_LOG_DIR ? resolve(env.JARVIS_LOG_DIR) : join(root, "logs"),
     worktreesDir: join(root, "worktrees"),
     socketFile: join(root, "daemon.sock"),
   };

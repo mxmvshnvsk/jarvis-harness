@@ -20,6 +20,11 @@ export const RESERVED_ENV = new Set([
   "JARVIS_ACTOR",
   "JARVIS_CONFIG",
   "JARVIS_KEYCHAIN_BACKEND",
+  // technical log (src/telemetry/log.ts)
+  "JARVIS_LOG",
+  "JARVIS_LOG_DIR",
+  "JARVIS_LOG_KEEP_DAYS",
+  "JARVIS_LOG_MAX_FIELD",
 ]);
 
 function normalizeKey(key: string): string {

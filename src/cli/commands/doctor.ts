@@ -10,10 +10,12 @@ import { McpToolProvider, type ServerReport } from "../../mcp/provider.ts";
 import { ProbeStore, probeDrift, probeIsStale } from "../../models/probe.ts";
 import { evaluateEgress, formatEgressLine } from "../../security/policy/egress.ts";
 import { LATEST_SCHEMA_VERSION, openDatabase, SchemaTooNewError } from "../../storage/index.ts";
+import { logLevelFrom, logSettingsFrom } from "../../telemetry/log.ts";
 import { hasRipgrep } from "../../tools/local/exec.ts";
 import type { CliContext } from "../context.ts";
 import { CliExit, EXIT, padEnd } from "../output.ts";
 import { loadForCli } from "./config.ts";
+import { logDirSummary } from "./logs.ts";
 
 export type CheckStatus = "ok" | "warn" | "fail";
 
@@ -336,7 +338,7 @@ export async function runDoctor(ctx: CliContext): Promise<DoctorReport> {
       );
     }
 
-    checks.push(...databaseChecks(home.dbFile));
+    checks.push(...databaseChecks(home.dbFile), logCheck(home.logsDir, ctx.env));
     const report: DoctorReport = {
       checks,
       egress: formatEgressLine(egress),
@@ -345,7 +347,7 @@ export async function runDoctor(ctx: CliContext): Promise<DoctorReport> {
     return report;
   }
 
-  checks.push(...databaseChecks(home.dbFile));
+  checks.push(...databaseChecks(home.dbFile), logCheck(home.logsDir, ctx.env));
   return { checks, ok: !checks.some((c) => c.status === "fail") };
 }
 
@@ -357,6 +359,25 @@ function mcpReports(loaded: LoadedConfig, env: NodeJS.ProcessEnv): ServerReport[
     env,
   });
   return new McpToolProvider(loaded.config, pool).reports();
+}
+
+function logCheck(dir: string, env: NodeJS.ProcessEnv): Check {
+  const level = logLevelFrom(env);
+  if (level === "off")
+    return check(
+      "logs",
+      "warn",
+      "technical log",
+      "off (JARVIS_LOG=off): failures will leave only the journal's counters",
+      "unset JARVIS_LOG or set it to info / debug",
+    );
+  const { files, bytes } = logDirSummary(dir);
+  return check(
+    "logs",
+    "ok",
+    "technical log",
+    `level ${level} → ${dir} (${files} file(s), ${Math.ceil(bytes / 1024)} KB, kept ${logSettingsFrom(env).keepDays} days); read with \`jarvis logs\`${level === "debug" ? "" : "; JARVIS_LOG=debug adds model and tool bodies"}`,
+  );
 }
 
 function databaseChecks(dbFile: string): Check[] {

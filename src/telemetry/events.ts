@@ -22,9 +22,15 @@ export interface EventSink {
 
 export class SqliteEventStore implements EventSink {
   private readonly db: DatabaseSync;
+  private tap: ((event: JarvisEvent) => void) | undefined;
 
   constructor(db: DatabaseSync) {
     this.db = db;
+  }
+
+  /** Every stored event is also handed to `tap` (the technical log mirrors the journal). */
+  setTap(tap: (event: JarvisEvent) => void): void {
+    this.tap = tap;
   }
 
   emit(event: JarvisEvent): void {
@@ -42,6 +48,11 @@ export class SqliteEventStore implements EventSink {
         event.kind,
         event.payload ? JSON.stringify(event.payload) : null,
       );
+    try {
+      this.tap?.(event);
+    } catch {
+      // the log never breaks the journal
+    }
   }
 
   /** Events after `afterSeq`, oldest first (used by `status --watch` and the TUI). */

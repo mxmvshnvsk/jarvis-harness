@@ -4,6 +4,7 @@ import type { ModelConfig, ResolvedConfig } from "../core/config/schema.ts";
 import { EnvSecretResolver, type SecretRef, type SecretResolver } from "../core/config/secrets.ts";
 import { modelAllowed } from "../security/policy/egress.ts";
 import { type EventSink, MemoryEventStore } from "../telemetry/events.ts";
+import { errorFields, type Logger, NULL_LOGGER } from "../telemetry/log.ts";
 import { type CassetteMode, type CassetteStore, cassetteKey, cassetteRequest } from "./cassette.ts";
 import { ModelError } from "./errors.ts";
 import { type AdapterRegistry, adapterFor, defaultAdapters } from "./providers/index.ts";
@@ -39,6 +40,7 @@ export interface GatewayOptions {
   readonly secrets?: SecretResolver;
   readonly usage?: UsageStore;
   readonly events?: EventSink;
+  readonly log?: Logger;
   readonly budget?: BudgetManager;
   readonly estimator?: TokenEstimator;
   readonly cassette?: { readonly mode: CassetteMode; readonly store: CassetteStore };
@@ -84,6 +86,7 @@ export class ModelGateway implements ModelCaller {
   private readonly secrets: SecretResolver;
   private readonly usage: UsageStore;
   private readonly events: EventSink;
+  private readonly log: Logger;
   readonly budget: BudgetManager;
   readonly estimator: TokenEstimator;
   private readonly cassette: GatewayOptions["cassette"];
@@ -98,6 +101,7 @@ export class ModelGateway implements ModelCaller {
     this.secrets = options.secrets ?? new EnvSecretResolver();
     this.usage = options.usage ?? new MemoryUsageStore();
     this.events = options.events ?? new MemoryEventStore();
+    this.log = options.log ?? NULL_LOGGER;
     this.clock = options.clock ?? (() => new Date());
     this.budget = options.budget ?? new BudgetManager(this.usage, options.config.quotaPools, this.clock);
     this.estimator = options.estimator ?? new TokenEstimator();
@@ -180,6 +184,30 @@ export class ModelGateway implements ModelCaller {
       throw error;
     }
 
+    if (this.log.enabled("debug")) {
+      const delta = this.log.promptDelta(
+        `${request.runId ?? "-"}:${request.stepId ?? "-"}:${request.iteration ?? 0}:${modelId}`,
+        request.messages,
+      );
+      this.log.debug("model.request", {
+        ...(request.runId ? { runId: request.runId } : {}),
+        ...(request.stepId ? { stepId: request.stepId } : {}),
+        ...(request.iteration !== undefined ? { iteration: request.iteration } : {}),
+        modelId,
+        model: model.model,
+        role: request.role,
+        agentId: request.agentId,
+        estimatedPromptTokens: estimatedPrompt,
+        maxOutput: request.maxOutput,
+        tools: request.tools?.map((t) => t.name),
+        messageCount: delta.total,
+        // only what was not logged before for this step; `from` is where the delta starts
+        messagesFrom: delta.from,
+        ...(delta.rewritten > 0 ? { rewrittenEarlier: delta.rewritten } : {}),
+        messages: delta.messages,
+      });
+    }
+
     const headers = await this.authHeaders(model, modelId);
     const adapter = adapterFor(this.adapters, model.provider, modelId);
     const semaphore = this.semaphore(modelId, decision.soft ? 1 : model.maxConcurrency);
@@ -205,6 +233,17 @@ export class ModelGateway implements ModelCaller {
             });
           }
           this.emitCall(request, response, estimatedPrompt);
+          this.log.debug("model.response", {
+            ...(request.runId ? { runId: request.runId } : {}),
+            ...(request.stepId ? { stepId: request.stepId } : {}),
+            ...(request.iteration !== undefined ? { iteration: request.iteration } : {}),
+            modelId,
+            finishReason: response.finishReason,
+            latencyMs: response.latencyMs,
+            usage: response.usage,
+            text: response.text,
+            toolCalls: response.toolCalls,
+          });
           return response;
         } catch (error) {
           const modelError =
@@ -227,6 +266,7 @@ export class ModelGateway implements ModelCaller {
               kind: modelError.kind,
               status: modelError.status,
               delayMs: delay,
+              message: modelError.message.slice(0, 600),
             },
           });
           await this.sleep(delay);
@@ -373,7 +413,16 @@ export class ModelGateway implements ModelCaller {
         status: error.status,
         retries,
         retryAfterMs: error.retryAfterMs,
+        // includes the start of the provider's response body (classifyHttpError)
+        message: error.message.slice(0, 600),
       },
+    });
+    // the stack and the cause belong in the log, not in the journal
+    this.log.error("model.error.detail", {
+      ...(request.runId ? { runId: request.runId } : {}),
+      ...(request.stepId ? { stepId: request.stepId } : {}),
+      modelId: request.modelId,
+      ...errorFields(error),
     });
   }
 }

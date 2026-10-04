@@ -184,3 +184,27 @@ steps:
 `context.pressure|trimmed|compacted|reset|tightened|compaction_failed|overflow`, `prepush.checked`,
 `mcp.discovered|unavailable`, `daemon.tick`. `jarvis status <run> --events n` показывает последние.
 Внешнего экспорта событий пока нет: схема `telemetry.export` и проверка egress есть, экспортёра — нет.
+
+Кроме журнала в базе есть `step.error` (необработанное исключение шага: сообщение и стек, урезанные), у `model.error` и
+`model.retry` — `message` (начало ответа провайдера), у `tool.call` — `args` (редактированные, до 600 символов).
+
+## Технический лог
+
+Журнал событий — это счётчики и исходы; чтобы разбирать, а не гадать, рядом пишется технический лог:
+NDJSON-файлы `~/.jarvis/logs/jarvis-YYYY-MM-DD.ndjson` (каталог — `JARVIS_LOG_DIR`), по одному на день, файлы старше
+`JARVIS_LOG_KEEP_DAYS` (14) удаляются. Одна строка — одна запись: `ts`, `level`, `event`, `runId`/`stepId`/`iteration`
+и поля. Любая строка проходит редактор секретов (ADR-0010), длинные значения режутся на `JARVIS_LOG_MAX_FIELD`
+(20000) символах, запись лога никогда не ломает run.
+
+Уровень задаёт `JARVIS_LOG`:
+
+| Уровень | Что пишется |
+|---|---|
+| `off` | ничего |
+| `error` | отказы: `model.error` (с сообщением провайдера), `model.error.detail` (стек и причина), `step.error` и `step.error.detail`, `tool.denied`, `cli.crash`, `*_failed`, `context.overflow` |
+| `info` (по умолчанию) | то же и **каждое событие журнала** (зеркало), плюс `cli.invoke` (аргументы, cwd) и `cli.exit` (код, миллисекунды): падение процесса видно даже тогда, когда до базы оно не дошло |
+| `debug` | то же и тела: `model.request` — промпт **дельтой** (первый вызов шага целиком, дальше только новые сообщения; `messagesFrom` — откуда дельта, `rewrittenEarlier` — сколько прежних сообщений изменила компакция), `model.response` (текст, вызовы инструментов, usage, latency), `tool.result` (аргументы и результат) |
+
+`debug` содержит код и промпты проекта: лог лежит на той же машине, что база и артефакты, но не включай его в
+общих средах без надобности. Читает лог `jarvis logs` ([cli.md](cli.md#jarvis-logs-run---level-level---event-text---tail-n---since-age---full---path)),
+`jarvis doctor` показывает уровень, каталог и размер.
