@@ -251,6 +251,21 @@ steps:
       onSuccess: DONE
 `;
 
+export const ASK_WORKFLOW = `
+name: ask
+version: 1
+description: Answer a question from the project knowledge base (jarvis ask)
+entry: answer
+steps:
+  - id: answer
+    kind: agentic
+    agent: knowledge-answerer
+    phase: research
+    outputs: [answer]
+    transitions:
+      onSuccess: DONE
+`;
+
 export const BUILTIN_WORKFLOWS: Readonly<Record<string, string>> = {
   sdd: SDD_WORKFLOW,
   smoke: SMOKE_WORKFLOW,
@@ -258,4 +273,5 @@ export const BUILTIN_WORKFLOWS: Readonly<Record<string, string>> = {
   spec: SPEC_WORKFLOW,
   "review-diff": REVIEW_DIFF_WORKFLOW,
   "onboard-module": ONBOARD_MODULE_WORKFLOW,
+  ask: ASK_WORKFLOW,
 };

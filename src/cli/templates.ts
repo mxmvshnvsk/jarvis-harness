@@ -107,7 +107,7 @@ Versioned project knowledge read by Jarvis (ADR-0001 §8). Keep it short and fac
 - architecture.md — subsystems, boundaries, where things live
 - domain.md — business rules and vocabulary
 - conventions.md — code conventions and review expectations
-- glossary.md — business term → code symbols (ADR-0015 §3)
+- glossary.md — business term → synonyms, code symbols, sources and an optional definition (ADR-0015 §3); jarvis ask <term> reads it
 
 Optional front matter narrows a document to a scope (ADR-0020 §3):
 

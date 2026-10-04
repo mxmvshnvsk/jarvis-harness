@@ -105,6 +105,7 @@ The full walkthrough — project policy, knowledge, clarifications, review — i
 
 ```sh
 jarvis onboard               # scan an existing repo: suggest tools.local, write architecture.md/conventions.md skeletons
+jarvis ask "how do we pass dependencies into hooks"   # answer from your knowledge base with checked citations; `jarvis ask RTL` decodes a glossary term
 jarvis spec ABC-42              # only research → requirements → spec, up to its approval
 jarvis hooks install            # standards, checks and impact analysis before every git push
 jarvis explain src/foo.ts:42    # why this line exists: task → spec → sources → tool calls

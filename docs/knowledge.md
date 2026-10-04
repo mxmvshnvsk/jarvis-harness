@@ -88,6 +88,8 @@ agents: [research, specification]
 | заявка | application | Application, applications/ | | |
 ```
 
+Необязательная шестая колонка `определение` — что термин значит; её выводит `jarvis ask <термин>`.
+
 Запрос «повторная регистрация заявки после отказа» расширяется до `restart onboarding`,
 `canRestartOnboarding`, `application`, `applications/` — детерминированно, с учётом словоформ (основа
 термина), и каждое расширение попадает в трассу результата.
@@ -130,7 +132,8 @@ provenance артефакта. `jarvis mcp serve` → `context.inspect` пока
 - **Слияние** — Reciprocal Rank Fusion (k = 60); у каждого результата `retrievalPath`
   (`[{index: lexical, rank: 1}, {index: semantic, rank: 3}]`).
 
-Агентам доступны `knowledge.search` и `knowledge.read`; человеку — `jarvis knowledge index|search`;
+Агентам доступны `knowledge.search` и `knowledge.read`; человеку — `jarvis knowledge index|search` и справочник
+`jarvis ask` (термины из глоссария, ответ по базе с проверенными цитатами);
 IDE — `knowledge.search` через MCP.
 
 ## Граф проекта (ADR-0008, ADR-0021)

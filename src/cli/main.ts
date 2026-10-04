@@ -1,6 +1,7 @@
 import { Command } from "commander";
 import { ConfigError } from "../core/config/errors.ts";
 import { packageInfo } from "../version.ts";
+import { runAsk } from "./commands/ask.ts";
 import { runAuthRemove, runAuthSet, runAuthStatus } from "./commands/auth.ts";
 import { runCi, runExport, runImport } from "./commands/ci.ts";
 import { runConfigShow } from "./commands/config.ts";
@@ -155,6 +156,17 @@ export function buildProgram(options: RunOptions = {}): Command {
         await runOnboard(ctxFor(), opts);
       },
     );
+  program
+    .command("ask <question...>")
+    .description(
+      "reference desk: glossary terms and answers from the project knowledge base, with checked citations",
+    )
+    .option("--no-llm", "glossary and ranked sources only, no model")
+    .option("--general", "also allow a clearly labelled note from the model's own knowledge", false)
+    .option("--limit <n>", "max candidate sources", Number.parseInt, 8)
+    .action(async (question: string[], opts: { llm: boolean; general: boolean; limit: number }) => {
+      await runAsk(ctxFor(), question, opts);
+    });
   program
     .command("explain <target>")
     .description(

@@ -206,6 +206,33 @@ export const ModuleMapResult = z.object({
   outcome: z.enum(["ok"]).default("ok"),
 });
 
+/** `jarvis ask`: an answer from the knowledge base; citations are checked against the cited text. */
+export const AnswerResult = z.object({
+  ...Base,
+  found: z.boolean().describe("false when the knowledge base does not answer the question"),
+  answer: z
+    .string()
+    .default("")
+    .describe("markdown answer built ONLY from the knowledge base; empty when found is false"),
+  citations: z
+    .array(
+      z.object({
+        ref: z.string().min(1).describe("knowledge:name, standard:ID@v or skill:id@v"),
+        quote: z
+          .string()
+          .min(3)
+          .describe("a short verbatim excerpt of the cited text that supports the answer"),
+      }),
+    )
+    .default([]),
+  gaps: z.array(z.string()).default([]).describe("what the question asks that the base does not cover"),
+  general: z
+    .string()
+    .optional()
+    .describe("general knowledge outside the base — only when the task explicitly allows it"),
+  outcome: z.enum(["ok"]).default("ok"),
+});
+
 /** ADR-0019 §5: what each human review comment means for the workflow. */
 export const ReviewAnalysisResult = z.object({
   ...Base,

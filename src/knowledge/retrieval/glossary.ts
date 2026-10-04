@@ -11,6 +11,8 @@ export interface GlossaryEntry {
   readonly synonyms: string[];
   readonly symbols: string[];
   readonly sources: string[];
+  /** Optional sixth column: what the term means, in the project's own words. */
+  readonly definition?: string;
 }
 
 export function parseGlossary(markdown: string): GlossaryEntry[] {
@@ -33,6 +35,7 @@ export function parseGlossary(markdown: string): GlossaryEntry[] {
       synonyms: split(cells[1]),
       symbols: split(cells[2]),
       sources: split(cells[3]),
+      ...(cells[5] ? { definition: cells[5] } : {}),
     });
   }
   return entries;
@@ -76,6 +79,29 @@ export function expandQuery(
     if (added.length > 0) expansions.push({ term: e.term, added });
   }
   return { terms: [...terms], expansions };
+}
+
+/**
+ * Glossary entries whose term or synonym occurs in `text` as a whole word or phrase (case-insensitive).
+ * Unlike `expandQuery` this does not stem: it answers "what does RTL mean", not "what to search for".
+ */
+export function matchTerms(text: string, glossary: readonly GlossaryEntry[]): GlossaryEntry[] {
+  const hay = text.toLowerCase();
+  const found = (needle: string) => {
+    const n = needle.toLowerCase().trim();
+    if (!n) return false;
+    let from = 0;
+    for (;;) {
+      const at = hay.indexOf(n, from);
+      if (at < 0) return false;
+      const before = hay[at - 1];
+      const after = hay[at + n.length];
+      const word = /[\p{L}\p{N}_]/u;
+      if (!(before && word.test(before)) && !(after && word.test(after))) return true;
+      from = at + 1;
+    }
+  };
+  return glossary.filter((e) => [e.term, ...e.synonyms].some(found));
 }
 
 export function tokenize(text: string): string[] {

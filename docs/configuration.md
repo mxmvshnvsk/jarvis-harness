@@ -68,7 +68,7 @@ telemetry:                     # ЗАРЕЗЕРВИРОВАНО: политик�
 ```
 
 Роли, которые используют встроенные агенты: `research` (research, requirements, specification, impact,
-plan, release-notes, onboard-mapper), `implementation` (implementation, test, docs, telemetry), `review` (review,
+plan, release-notes, onboard-mapper, knowledge-answerer), `implementation` (implementation, test, docs, telemetry), `review` (review,
 review-analysis); `compaction` — суммаризатор контекста при компакции (ADR-0013); без неё суммаризирует
 модель самого агента. Роутер выбирает первую модель роли, которая
 удовлетворяет требованиям агента (tools, structured output) и правилу egress для `dataClass` проекта.

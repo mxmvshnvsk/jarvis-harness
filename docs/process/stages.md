@@ -23,6 +23,11 @@ Remaining commands of ADR-0001 §15:
   what survives becomes a knowledge `candidate` with `paths`, promoted by a human. Not yet: fan-out over all modules,
   an LLM verification pass, `--refresh` by module hash, an eval of sdd runs with and without the generated knowledge
 
+- `jarvis ask <question>` — knowledge base as a reference desk: glossary terms without a model (optional `определение`
+  column), answers by the read-only `knowledge-answerer` agent (workflow `ask`) from knowledge docs, standards and
+  skills only; citations are verified against the source text, an unconfirmed answer is not shown, `--general` adds
+  a separately labelled model note (`src/knowledge/ask.ts`, `src/cli/commands/ask.ts`, `tests/cli/ask.test.ts`)
+
 ADR-0001 §20 stage 12 (git hooks) — `f11ca47`:
 
 - `jarvis hooks install|uninstall|status` — a thin `pre-push` shim honouring `core.hooksPath` and linked

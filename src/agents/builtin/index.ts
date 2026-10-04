@@ -1,5 +1,6 @@
 import { type AgentDefinition, DEFAULT_LIMITS } from "../definition.ts";
 import {
+  AnswerResult,
   DocsResult,
   ImpactResult,
   ImplementationResult,
@@ -290,6 +291,24 @@ Produce the result document when the module is covered.`,
   limits: { maxToolCalls: 60, maxModelCalls: 80, checkpointEvery: 5 },
 };
 
+export const KNOWLEDGE_ANSWERER_AGENT: AgentDefinition = {
+  id: "knowledge-answerer",
+  role: "research",
+  description: "Answers a question from the project knowledge base only, with checked citations.",
+  instructions: `You are the reference desk of Jarvis. You answer a question from the project's knowledge base: knowledge documents, standards and skills. You have no access to the code.
+Method:
+- Start from the candidate refs in the task, then use knowledge.search (it expands project glossary terms) and knowledge.read to read the sources in full.
+- Answer ONLY from what the sources say. Structure the answer for a reader who will act on it: the short answer first, then the rule or approach, then a caveat or exception if the sources give one. Say which source each part comes from.
+- "citations": for every source you rely on, its ref and a short verbatim excerpt (copied, not paraphrased) that supports the answer. Citations are checked mechanically against the source text; an answer without a confirmed citation is discarded.
+- If the base does not answer the question, or answers only part of it, say so: found=false (or found=true with the uncovered part in "gaps"). Never fill a gap from memory into "answer".
+- "general": only when the task says general knowledge is allowed — a clearly separate, short note from your own knowledge. It is shown as "not from the knowledge base". Otherwise leave it empty.
+Produce the result document when you have read what you need.`,
+  capabilities: ["knowledge.read", "knowledge.search"],
+  requires: { tools: true, structuredOutput: "json" },
+  output: { type: "answer", schema: AnswerResult, outcomes: ["ok"] },
+  limits: { maxToolCalls: 12, maxModelCalls: 20, checkpointEvery: 5 },
+};
+
 export const BUILTIN_AGENTS: readonly AgentDefinition[] = [
   RESEARCH_AGENT,
   REQUIREMENTS_AGENT,
@@ -304,4 +323,5 @@ export const BUILTIN_AGENTS: readonly AgentDefinition[] = [
   TELEMETRY_AGENT,
   RELEASE_NOTES_AGENT,
   ONBOARD_MAPPER_AGENT,
+  KNOWLEDGE_ANSWERER_AGENT,
 ];
