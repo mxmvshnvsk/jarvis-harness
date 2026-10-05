@@ -102,13 +102,17 @@ describe("ModelGateway", () => {
     expect(response.text).toBe("ok");
     expect(response.retries).toBe(2);
     expect(sleeps).toEqual([500, 1000]);
-    expect(events.events.filter((e) => e.kind === "model.retry")).toHaveLength(2);
+    const retries = events.events.filter((e) => e.kind === "model.retry");
+    expect(retries).toHaveLength(2);
+    expect(retries[0]?.payload).toMatchObject({ attempt: 1, maxRetries: 2, status: 503 });
+    expect(typeof retries[0]?.payload?.attemptMs).toBe("number");
   });
 
   it("gives up on transient errors after the bounded retries", async () => {
     server.queue({ status: 500, body: "a" }, { status: 500, body: "b" }, { status: 500, body: "c" });
     await expect(gateway().call(ask)).rejects.toMatchObject({ kind: "transient", status: 500 });
     expect(events.events.at(-1)?.kind).toBe("model.error");
+    expect(events.events.at(-1)?.payload).toMatchObject({ retries: 2, attemptMs: expect.any(Number) });
   });
 
   it("honours a short Retry-After on rate limits", async () => {

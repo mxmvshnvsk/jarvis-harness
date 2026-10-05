@@ -55,6 +55,9 @@ Remaining commands of ADR-0001 §15:
 - live progress (`src/app/activity.ts`, `src/cli/progress.ts`): the activity of a run from its events — step and
   agent, model calls and the current wait (slow vs past the timeout), tool budget bar, tokens, last tool — drawn on
   stderr by `work`/`resume`/`onboard --module`/`ask` and shown as `now` by `status`; `JARVIS_PROGRESS=off`
+- provider trouble on screen: `model.retry`/`model.error` carry `attemptMs` and `maxRetries`; foreground commands
+  print every retry (reason, attempt time, `traceId`), the final failure and a failed or parked run as lines that
+  stay on stderr; the progress line counts the wait across retries; Ctrl-C releases the lease and says how to go on
 
 ADR-0001 §20 stage 12 (git hooks) — `f11ca47`:
 

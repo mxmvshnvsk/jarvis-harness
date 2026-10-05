@@ -213,9 +213,11 @@ export class ModelGateway implements ModelCaller {
     const semaphore = this.semaphore(modelId, decision.soft ? 1 : model.maxConcurrency);
     const release = await semaphore.acquire();
     const started = this.clock().getTime();
+    let attemptStarted = started;
     let retries = 0;
     try {
       for (;;) {
+        attemptStarted = this.clock().getTime();
         try {
           const result = await adapter.call(request, model, { headers });
           const latency = this.clock().getTime() - started;
@@ -251,8 +253,9 @@ export class ModelGateway implements ModelCaller {
               ? error
               : new ModelError("transient", String(error), { cause: error, modelId });
           const delay = this.retryDelay(modelError, retries);
+          const attemptMs = this.clock().getTime() - attemptStarted;
           if (delay === undefined) {
-            this.emitError(request, modelError, retries);
+            this.emitError(request, modelError, retries, attemptMs);
             throw this.escalate(modelError);
           }
           retries += 1;
@@ -263,6 +266,13 @@ export class ModelGateway implements ModelCaller {
             payload: {
               modelId,
               attempt: retries,
+              // how many retries this kind of failure gets, and how long the failed attempt took:
+              // a gateway that cuts every request at 5:00 shows up as the same attemptMs (pilot)
+              maxRetries:
+                modelError.kind === "rate_limited"
+                  ? this.retry.maxRateLimitRetries
+                  : this.retry.maxTransientRetries,
+              attemptMs,
               kind: modelError.kind,
               status: modelError.status,
               delayMs: delay,
@@ -401,7 +411,7 @@ export class ModelGateway implements ModelCaller {
     });
   }
 
-  private emitError(request: ModelRequest, error: ModelError, retries: number): void {
+  private emitError(request: ModelRequest, error: ModelError, retries: number, attemptMs?: number): void {
     this.events.emit({
       kind: "model.error",
       ...(request.runId ? { runId: request.runId } : {}),
@@ -412,6 +422,7 @@ export class ModelGateway implements ModelCaller {
         kind: error.kind,
         status: error.status,
         retries,
+        ...(attemptMs !== undefined ? { attemptMs } : {}),
         retryAfterMs: error.retryAfterMs,
         // includes the start of the provider's response body (classifyHttpError)
         message: error.message.slice(0, 600),

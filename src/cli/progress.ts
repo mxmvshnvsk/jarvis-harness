@@ -1,4 +1,4 @@
-import { activityOf, formatActivity } from "../app/activity.ts";
+import { activityOf, formatActivity, noticeOf } from "../app/activity.ts";
 import type { Runtime } from "../app/runtime.ts";
 import type { StoredEvent } from "../telemetry/events.ts";
 import type { CliContext } from "./context.ts";
@@ -6,7 +6,8 @@ import type { CliContext } from "./context.ts";
 /**
  * The live line of a foreground command (`work`, `resume`, `onboard --module`, `ask`): what the run
  * does now, read from the event journal once a second and redrawn on stderr. Drawn only on a
- * terminal; `--json`, pipes and JARVIS_PROGRESS=off get nothing.
+ * terminal; `--json`, pipes and JARVIS_PROGRESS=off get no progress line. Retries, provider failures
+ * and a failed or parked run are printed to stderr as lines that stay — in a pipe and with `--json` too.
  */
 export interface Progress {
   stop(): void;
@@ -28,7 +29,12 @@ export function followRun(
       seq = e.seq;
       // a new run announces itself; a resumed one is known up front
       if (!runId && e.kind === "run.created" && e.runId) runId = e.runId;
-      if (runId && e.runId === runId) events.push(e);
+      if (runId && e.runId === runId) {
+        events.push(e);
+        // retries, provider failures, a failed or parked run: a line that stays, also in a pipe
+        const notice = noticeOf(e);
+        if (notice) ctx.out.error(notice);
+      }
     }
   };
 
@@ -57,7 +63,16 @@ export function followRun(
   const detach = () => process.removeListener("SIGINT", onInterrupt);
 
   if (!ctx.out.live) {
-    return { stop: detach };
+    // no progress line, but the notices still matter (CI logs, pipes)
+    const timer = setInterval(poll, options.intervalMs ?? 1000);
+    timer.unref?.();
+    return {
+      stop: () => {
+        clearInterval(timer);
+        poll();
+        detach();
+      },
+    };
   }
   const draw = () => {
     poll();
@@ -83,6 +98,7 @@ export function followRun(
   return {
     stop: () => {
       clearInterval(timer);
+      poll();
       detach();
       ctx.out.progress(undefined);
     },

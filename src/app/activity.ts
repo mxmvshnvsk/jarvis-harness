@@ -256,3 +256,45 @@ export function formatActivity(a: Activity, options: FormatOptions = {}): string
   }
   return parts.join(" · ");
 }
+
+/** `HH:MM:SS` in local time — notices sit in a terminal next to the clock on the wall. */
+function wallClock(iso: string): string {
+  const d = new Date(iso);
+  return [d.getHours(), d.getMinutes(), d.getSeconds()].map((n) => String(n).padStart(2, "0")).join(":");
+}
+
+function traceOf(message: string): string | undefined {
+  return /trace[-_ ]?id["':=\s]+([A-Za-z0-9-]{8,})/i.exec(message)?.[1];
+}
+
+/**
+ * Lines that stay in the terminal (stderr) above the progress line: what a developer must know about a
+ * failing provider without opening the log — every retry with the reason, how long the attempt took,
+ * the provider's trace id, and the final failure. Pilot: the corporate gateway cut requests with HTTP
+ * 500 after exactly five minutes, and nothing on screen said so.
+ */
+export function noticeOf(event: StoredEvent): string | undefined {
+  const p = (event.payload ?? {}) as Record<string, unknown>;
+  const message = str(p.message) ?? "";
+  const reason = reasonOf(message);
+  const took = num(p.attemptMs) > 0 ? ` after ${clock(num(p.attemptMs))}` : "";
+  const trace = traceOf(message);
+  const traceText = trace ? `; traceId ${trace}` : "";
+  const model = str(p.modelId) ?? "model";
+  if (event.kind === "model.retry") {
+    const of = num(p.maxRetries) > 0 ? `/${num(p.maxRetries)}` : "";
+    const delay = num(p.delayMs) > 0 ? ` in ${(num(p.delayMs) / 1000).toFixed(1)}s` : "";
+    return `⚠ ${wallClock(event.ts)} ${model}: ${reason}${took} — retry ${num(p.attempt)}${of}${delay}${traceText}`;
+  }
+  if (event.kind === "model.error") {
+    const attempts = num(p.retries) + 1;
+    return `✗ ${wallClock(event.ts)} ${model}: ${reason}${took} — gave up after ${attempts} attempt${attempts === 1 ? "" : "s"}${traceText}`;
+  }
+  if (event.kind === "run.state") {
+    const state = str(p.state);
+    const why = str(p.reason);
+    if (state === "FAILED" || state === "WAITING_BUDGET")
+      return `${state === "FAILED" ? "✗" : "⏸"} ${wallClock(event.ts)} run ${state}${why ? `: ${why}` : ""}`;
+  }
+  return undefined;
+}

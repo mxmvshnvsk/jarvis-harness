@@ -1,7 +1,10 @@
 import { Writable } from "node:stream";
 import { describe, expect, it } from "vitest";
-import { activityOf, formatActivity } from "../../src/app/activity.ts";
+import { activityOf, formatActivity, noticeOf } from "../../src/app/activity.ts";
+import type { Runtime } from "../../src/app/runtime.ts";
+import type { CliContext } from "../../src/cli/context.ts";
 import { createOutput } from "../../src/cli/output.ts";
+import { followRun } from "../../src/cli/progress.ts";
 import type { StoredEvent } from "../../src/telemetry/events.ts";
 
 const T0 = Date.parse("2026-10-05T09:00:00.000Z");
@@ -159,5 +162,63 @@ describe("the progress line", () => {
     const err = stream(false);
     createOutput(false, { out: stream(false).s, err: err.s }).progress("x");
     expect(err.text()).toBe("");
+  });
+});
+
+describe("notices that stay in the terminal", () => {
+  const RETRY = ev(301, "model.retry", {
+    modelId: "deepseek-flash",
+    attempt: 1,
+    maxRetries: 2,
+    attemptMs: 300_000,
+    delayMs: 500,
+    kind: "transient",
+    status: 500,
+    message:
+      'model deepseek-flash: provider error (500): {"error":"Error processing request, traceId:0f1e2d3c4b5a69788796a5b4c3d2e1f0"}',
+  });
+
+  it("says why a call is retried, how long the attempt took and the provider's trace id", () => {
+    const line = noticeOf(RETRY) as string;
+    expect(line).toMatch(
+      /^⚠ \d\d:\d\d:\d\d deepseek-flash: provider error \(500\) after 5:00 — retry 1\/2 in 0\.5s; traceId 0f1e2d3c4b5a69788796a5b4c3d2e1f0$/,
+    );
+    const failed = noticeOf(
+      ev(902, "model.error", {
+        modelId: "deepseek-flash",
+        retries: 2,
+        attemptMs: 300_000,
+        kind: "transient",
+        message: "model deepseek-flash: timeout: The operation was aborted due to timeout",
+      }),
+    );
+    expect(failed).toMatch(/^✗ .* deepseek-flash: timeout after 5:00 — gave up after 3 attempts$/);
+    expect(
+      noticeOf(ev(903, "run.state", { state: "FAILED", reason: "model deepseek-flash: timeout" })),
+    ).toMatch(/^✗ .* run FAILED: model deepseek-flash: timeout$/);
+    expect(noticeOf(ev(904, "run.state", { state: "COMPLETED" }))).toBeUndefined();
+    expect(noticeOf(RUN[3] as StoredEvent)).toBeUndefined();
+  });
+
+  it("prints them from a foreground run even without a terminal (a pipe, CI)", async () => {
+    const journal: StoredEvent[] = [];
+    const runtime = {
+      events: {
+        lastSeq: () => 0,
+        list: ({ afterSeq }: { afterSeq: number }) => journal.filter((e) => e.seq > afterSeq),
+      },
+      runs: { get: () => undefined, releaseLease: () => false },
+      loaded: { config: { models: {}, budget: { perStep: {} } } },
+    } as unknown as Runtime;
+    const err = stream(false);
+    const ctx = {
+      out: createOutput(false, { out: stream(false).s, err: err.s }),
+    } as unknown as CliContext;
+    const progress = followRun(ctx, runtime, { intervalMs: 5, signals: false });
+    journal.push(RUN[0] as StoredEvent, RETRY);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    progress.stop();
+    expect(err.text()).toContain("provider error (500) after 5:00 — retry 1/2");
+    expect(err.text().match(/retry 1\/2/g)).toHaveLength(1);
   });
 });
