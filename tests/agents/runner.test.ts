@@ -188,6 +188,47 @@ describe("AgentRuntimeRunner", () => {
     expect(finish).toMatchObject({ agent: "research", status: "success", toolCalls: 2, modelCalls: 4 });
   });
 
+  it("takes the result document from the answer the tool loop ended with, without asking again (pilot)", async () => {
+    sb.write("project/.jarvis/project.yaml", "version: 1\nworkspace: { mode: cwd }\n");
+    rt = await testRuntime(sb, { PATH: process.env.PATH ?? "" });
+    server.respond((_req, i) => {
+      if (i === 0) return toolCallCompletion("repo.read", { path: "src/onboarding.ts" });
+      // DeepSeek ended its loop with the document in a fence
+      return completion(`Here it is:\n\`\`\`json\n${JSON.stringify(RESEARCH_DOC, null, 2)}\n\`\`\``);
+    });
+    const run = createRun(rt, "r");
+    const result = await engineWith(rt, researchOnly).execute(run.id, { owner: "cli:t" });
+    expect(result.run.state).toBe("COMPLETED");
+    expect(server.requests).toHaveLength(2);
+    const artifact = rt.artifacts.find(run.id, "research", "research.json");
+    expect(JSON.parse(rt.artifacts.text(artifact as NonNullable<typeof artifact>))).toMatchObject({
+      summary: RESEARCH_DOC.summary,
+    });
+    const finish = rt.events.list({ kind: "agent.finish" })[0]?.payload;
+    expect(finish).toMatchObject({ status: "success", modelCalls: 2, repairs: 0, finalizedFromLoop: true });
+  });
+
+  it("asks to fix a loop answer that misses the schema, keeping that answer in the request", async () => {
+    sb.write("project/.jarvis/project.yaml", "version: 1\nworkspace: { mode: cwd }\n");
+    rt = await testRuntime(sb, { PATH: process.env.PATH ?? "" });
+    const { summary: _missing, ...withoutSummary } = RESEARCH_DOC;
+    server.respond((_req, i) => {
+      if (i === 0) return completion(JSON.stringify(withoutSummary));
+      return completion(JSON.stringify(RESEARCH_DOC));
+    });
+    const run = createRun(rt, "r");
+    const result = await engineWith(rt, researchOnly).execute(run.id, { owner: "cli:t" });
+    expect(result.run.state).toBe("COMPLETED");
+    expect(server.requests).toHaveLength(2);
+    const final = server.requests[1] as CapturedRequest;
+    const messages = final.body.messages as Array<{ role: string; content: string }>;
+    expect(messages.at(-2)).toMatchObject({ role: "assistant", content: JSON.stringify(withoutSummary) });
+    expect(lastUserContent(final)).toContain("Produce the result document");
+    expect(lastUserContent(final)).toContain("summary:");
+    const finish = rt.events.list({ kind: "agent.finish" })[0]?.payload;
+    expect(finish).toMatchObject({ status: "success", modelCalls: 2, finalizedFromLoop: false });
+  });
+
   it("feeds denied and malformed tool calls back to the model instead of failing", async () => {
     sb.write("project/.jarvis/project.yaml", "version: 1\nworkspace: { mode: cwd }\n");
     rt = await testRuntime(sb, { PATH: process.env.PATH ?? "" });

@@ -186,12 +186,18 @@ describe("jarvis context / compact / reset-context", () => {
 
     // the resumed step sees the handoff instead of the five tool rounds
     phase = 1;
+    const beforeResume = server.requests.length;
     const resumed = await engine.execute(created.id, { owner: "cli:t" });
     expect(resumed.run.state).toBe("COMPLETED");
-    const sent = server.requests.filter(
-      (r) => !((r.body.messages as Array<{ content: string }>)[0]?.content ?? "").startsWith("You compress"),
-    );
-    const firstAfter = sent.at(-2)?.body.messages as Array<{ role: string; content: string }>;
+    const sent = server.requests
+      .slice(beforeResume)
+      .filter(
+        (r) =>
+          !((r.body.messages as Array<{ content: string }>)[0]?.content ?? "").startsWith("You compress"),
+      );
+    // the step's answer is already the result document: one call, no separate finalization
+    expect(sent).toHaveLength(1);
+    const firstAfter = sent[0]?.body.messages as Array<{ role: string; content: string }>;
     expect(firstAfter.some((m) => m.content?.startsWith("## Context handoff (reset)"))).toBe(true);
     expect(firstAfter.filter((m) => m.role === "tool")).toHaveLength(0);
   });

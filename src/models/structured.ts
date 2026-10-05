@@ -79,6 +79,32 @@ export function extractJson(text: string): string | undefined {
   return undefined;
 }
 
+export type ParsedStructured<T> =
+  | { readonly ok: true; readonly value: T }
+  | { readonly ok: false; readonly issues: string[] };
+
+/** Reads a structured document out of a model answer — fenced or bare JSON — and checks the schema. */
+export function parseStructured<T>(
+  text: string,
+  schema: z.ZodType<T>,
+  mode: StructuredMode = "text",
+): ParsedStructured<T> {
+  const raw = mode === "text" ? extractJson(text) : (extractJson(text) ?? text);
+  if (raw === undefined) return { ok: false, issues: ["no JSON document found in the response"] };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    return { ok: false, issues: [`invalid JSON: ${error instanceof Error ? error.message : String(error)}`] };
+  }
+  const result = schema.safeParse(parsed);
+  if (result.success) return { ok: true, value: result.data };
+  return {
+    ok: false,
+    issues: result.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`),
+  };
+}
+
 function schemaInstruction(name: string, jsonSchema: Record<string, unknown>): string {
   return `Respond with a single JSON document named "${name}" that conforms to this JSON Schema and nothing else:\n${JSON.stringify(jsonSchema)}`;
 }
@@ -124,26 +150,11 @@ export async function generateStructured<T>(
     totalUsage.cachedTokens += response.usage.cachedTokens;
     totalUsage.outputTokens += response.usage.outputTokens;
     lastText = response.text;
-    const raw =
-      options.mode === "text" ? extractJson(response.text) : (extractJson(response.text) ?? response.text);
-    let parsed: unknown;
-    let issues: string[] = [];
-    if (raw === undefined) {
-      issues = ["no JSON document found in the response"];
-    } else {
-      try {
-        parsed = JSON.parse(raw);
-      } catch (error) {
-        issues = [`invalid JSON: ${error instanceof Error ? error.message : String(error)}`];
-      }
+    const parsed = parseStructured(response.text, options.schema, options.mode);
+    if (parsed.ok) {
+      return { value: parsed.value, response, repairs, mode: options.mode, totalUsage };
     }
-    if (issues.length === 0) {
-      const result = options.schema.safeParse(parsed);
-      if (result.success) {
-        return { value: result.data, response, repairs, mode: options.mode, totalUsage };
-      }
-      issues = result.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`);
-    }
+    const issues = parsed.issues;
     lastIssues = issues;
     if (repairs >= maxRepairs) break;
     repairs += 1;

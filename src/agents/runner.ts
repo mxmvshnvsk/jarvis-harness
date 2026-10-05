@@ -2,7 +2,12 @@ import { ContextManager, effectiveWindow, resolveThresholds, summarizerMessages 
 import type { ArtifactVersion } from "../core/domain/artifact.ts";
 import { ModelError } from "../models/errors.ts";
 import { resolveModel } from "../models/router.ts";
-import { generateStructured, StructuredOutputError } from "../models/structured.ts";
+import {
+  extractJson,
+  generateStructured,
+  parseStructured,
+  StructuredOutputError,
+} from "../models/structured.ts";
 import type { Message, ToolDefinition } from "../models/types.ts";
 import type { AgentRunner } from "../orchestration/executors.ts";
 import type { StepContext, StepOutcome } from "../orchestration/types.ts";
@@ -209,6 +214,8 @@ export class AgentRuntimeRunner implements AgentRunner {
     };
 
     let budgetExhaustedNotice = false;
+    /** The answer the loop ended with (no tool calls) — often the result document already. */
+    let finalAnswer: string | undefined;
     for (;;) {
       if (ctx.cancelRequested()) {
         checkpoint();
@@ -233,7 +240,10 @@ export class AgentRuntimeRunner implements AgentRunner {
         temperature: 0,
       });
       modelCalls += 1;
-      if (response.toolCalls.length === 0) break;
+      if (response.toolCalls.length === 0) {
+        finalAnswer = response.text;
+        break;
+      }
 
       transcript = [
         ...transcript,
@@ -260,29 +270,55 @@ export class AgentRuntimeRunner implements AgentRunner {
       }
     }
 
-    // Finalization: the structured result document (ADR-0007 §4).
-    await manage();
-    const finalMessages: Message[] = [
-      ...base,
-      ...transcript,
-      { role: "user", content: `Produce the result document for artifact type "${def.output.type}" now.` },
-    ];
+    // Finalization: the structured result document (ADR-0007 §4). When the loop already ended with a
+    // valid document, that is the result: asking again cost the pilot two slow calls, and the second
+    // answer echoed the JSON Schema instead of filling it.
+    const early =
+      finalAnswer !== undefined && finalAnswer.trim() !== ""
+        ? parseStructured(finalAnswer, def.output.schema)
+        : undefined;
     try {
-      const result = await generateStructured(ctx.gateway, {
-        modelId: route.modelId,
-        mode: route.structuredMode,
-        name: def.output.type,
-        schema: def.output.schema,
-        messages: finalMessages,
-        request: { role: def.role, agentId: def.id, temperature: 0 },
-      });
+      let result: { value: unknown; repairs: number; calls: number };
+      if (early?.ok) {
+        result = { value: early.value, repairs: 0, calls: 0 };
+      } else {
+        await manage();
+        const produce = `Produce the result document for artifact type "${def.output.type}" now.`;
+        const finalMessages: Message[] = [
+          ...base,
+          ...transcript,
+          // keep the answer the loop ended with: the model fixes it instead of writing it from scratch
+          ...(early && finalAnswer !== undefined
+            ? [
+                { role: "assistant" as const, content: finalAnswer },
+                {
+                  role: "user" as const,
+                  // prose is just context; a document that misses the schema gets its issues
+                  content:
+                    extractJson(finalAnswer) === undefined
+                      ? produce
+                      : `${produce} Your answer above does not match the required schema:\n- ${early.issues.join("\n- ")}`,
+                },
+              ]
+            : [{ role: "user" as const, content: produce }]),
+        ];
+        const generated = await generateStructured(ctx.gateway, {
+          modelId: route.modelId,
+          mode: route.structuredMode,
+          name: def.output.type,
+          schema: def.output.schema,
+          messages: finalMessages,
+          request: { role: def.role, agentId: def.id, temperature: 0 },
+        });
+        result = { value: generated.value, repairs: generated.repairs, calls: 1 + generated.repairs };
+      }
       const doc = result.value as AgentResultDoc;
       const outcome = doc.outcome ?? "ok";
       if (outcome !== "ok" && !def.output.outcomes.includes(outcome)) {
         emit("agent.finish", {
           status: "failure",
           toolCalls,
-          modelCalls: modelCalls + 1 + result.repairs,
+          modelCalls: modelCalls + result.calls,
           reason: "undeclared outcome",
         });
         return { status: "failure", reason: `agent ${def.id} produced undeclared outcome "${outcome}"` };
@@ -306,8 +342,9 @@ export class AgentRuntimeRunner implements AgentRunner {
         outcome,
         context: { ...manager.stats, effective },
         toolCalls,
-        modelCalls: modelCalls + 1 + result.repairs,
+        modelCalls: modelCalls + result.calls,
         repairs: result.repairs,
+        finalizedFromLoop: result.calls === 0,
         artifact: `${artifact.artifactId}@${artifact.version}`,
       });
       return {
