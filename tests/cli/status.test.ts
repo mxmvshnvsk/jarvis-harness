@@ -146,6 +146,22 @@ describe("jarvis status", () => {
     expect(all.out).toContain("CANCELLED");
   });
 
+  it("shows a RUNNING run whose process is gone as such, and cancels it at once (pilot: Ctrl-C)", async () => {
+    const loaded = await loadConfig({ cwd: sb.project, homeDir: sb.home, env: {} });
+    const rt = createRuntime(loaded, { env: {} });
+    rt.runs.transition(runId, "RUNNING");
+    // the process took the lease and died: nobody renews it
+    rt.runs.acquireLease(runId, "cli:host:4242", -1000);
+    rt.close();
+    const short = runId.replace(/^run_/, "").slice(0, 8);
+    const list = await jarvis(["status"]);
+    expect(list.out).toContain(`no process → jarvis resume|cancel ${short}`);
+    const detail = await jarvis(["status", runId]);
+    expect(detail.out).toContain("no process holds it (interrupted or crashed)");
+    const c = await jarvis(["cancel", short]);
+    expect(c.out).toContain("cancelled");
+  });
+
   it("says a finished run has nothing to cancel instead of requesting a cancel (pilot)", async () => {
     expect((await jarvis(["cancel", runId])).code).toBe(0);
     const again = await jarvis(["cancel", runId]);

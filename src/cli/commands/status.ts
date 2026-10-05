@@ -97,11 +97,15 @@ function renderOverview(
       for (const r of overview.runs) {
         const step = r.currentStep ? `${r.currentStep}#${r.currentIteration}` : "-";
         const live = r.lease && Date.parse(r.lease.until) >= now.getTime();
+        // RUNNING without a live lease: the process that ran it is gone (Ctrl-C, crash, closed terminal)
+        const orphan = r.state === "RUNNING" && !live;
         const lease = live
           ? (r.lease as { owner: string }).owner
-          : r.cancelRequested
-            ? "cancel requested"
-            : "-";
+          : orphan
+            ? `no process${r.cancelRequested ? ", cancel requested" : ""} → jarvis resume|cancel ${shortRunId(r.id)}`
+            : r.cancelRequested
+              ? "cancel requested"
+              : "-";
         ctx.out.line(
           `${padEnd(shortRunId(r.id), 8)}  ${padEnd(r.task, w)}  ${padEnd(r.state, 15)}  ${padEnd(step, 22)}  ${padEnd(ago(r.updatedAt, now), 9)}  ${lease}`,
         );
@@ -142,6 +146,10 @@ export function renderDetail(ctx: CliContext, d: RunDetail, now: Date, eventLimi
   out.line(
     `  state      ${r.state}${r.stateReason ? ` — ${r.stateReason}` : ""}${r.cancelRequested ? "  (cancel requested)" : ""}`,
   );
+  if (r.state === "RUNNING" && !d.leaseLive)
+    out.line(
+      `             no process holds it (interrupted or crashed): jarvis resume ${shortRunId(r.id)} | jarvis cancel ${shortRunId(r.id)}`,
+    );
   out.line(`  step       ${r.currentStep ? `${r.currentStep} #${r.currentIteration}` : "-"}`);
   // ADR-0018: what the run does right now — the same line the foreground command draws
   if (d.activity && !d.activity.finished && r.state === "RUNNING")

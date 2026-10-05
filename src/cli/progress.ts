@@ -17,20 +17,50 @@ const FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "
 export function followRun(
   ctx: CliContext,
   runtime: Runtime,
-  options: { runId?: string; intervalMs?: number } = {},
+  options: { runId?: string; intervalMs?: number; signals?: boolean } = {},
 ): Progress {
-  if (!ctx.out.live) return { stop: () => undefined };
   let seq = runtime.events.lastSeq();
   let runId = options.runId;
   const events: StoredEvent[] = [];
   let frame = 0;
-  const draw = () => {
+  const poll = () => {
     for (const e of runtime.events.list({ afterSeq: seq, limit: 2000 })) {
       seq = e.seq;
       // a new run announces itself; a resumed one is known up front
       if (!runId && e.kind === "run.created" && e.runId) runId = e.runId;
       if (runId && e.runId === runId) events.push(e);
     }
+  };
+
+  // Ctrl-C: hand the run back at once (no 90 s wait for the lease to expire) and say how to go on.
+  // Pilot: an interrupted run stayed RUNNING in `status` and looked hung.
+  const onInterrupt = () => {
+    poll();
+    ctx.out.progress(undefined);
+    if (runId) {
+      const lease = runtime.runs.get(runId)?.lease;
+      if (lease?.owner.endsWith(`:${process.pid}`))
+        runtime.runs.releaseLease(runId, lease.owner, lease.epoch);
+      runtime.events.emit({
+        kind: "run.interrupted",
+        runId,
+        payload: { signal: "SIGINT", pid: process.pid },
+      });
+      const short = runId.replace(/^run_/, "").slice(0, 8);
+      ctx.out.error(
+        `interrupted; run ${short} keeps its checkpoint: jarvis resume ${short} | jarvis cancel ${short}`,
+      );
+    } else ctx.out.error("interrupted");
+    process.exit(130);
+  };
+  if (options.signals !== false) process.once("SIGINT", onInterrupt);
+  const detach = () => process.removeListener("SIGINT", onInterrupt);
+
+  if (!ctx.out.live) {
+    return { stop: detach };
+  }
+  const draw = () => {
+    poll();
     const spinner = FRAMES[frame++ % FRAMES.length] as string;
     const activity = activityOf(events);
     if (!activity) {
@@ -53,6 +83,7 @@ export function followRun(
   return {
     stop: () => {
       clearInterval(timer);
+      detach();
       ctx.out.progress(undefined);
     },
   };
