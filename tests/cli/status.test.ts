@@ -145,4 +145,12 @@ describe("jarvis status", () => {
     const all = await jarvis(["status", "--all"]);
     expect(all.out).toContain("CANCELLED");
   });
+
+  it("says a finished run has nothing to cancel instead of requesting a cancel (pilot)", async () => {
+    expect((await jarvis(["cancel", runId])).code).toBe(0);
+    const again = await jarvis(["cancel", runId]);
+    expect(again.code).toBe(0);
+    expect(again.out).toContain("is already CANCELLED; nothing to cancel");
+    expect(again.out).not.toContain("held by");
+  });
 });

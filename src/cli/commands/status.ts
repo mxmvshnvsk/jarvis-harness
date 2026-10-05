@@ -1,6 +1,7 @@
 import { formatActivity } from "../../app/activity.ts";
 import { createRuntime } from "../../app/runtime.ts";
 import { type PoolStatus, type RunDetail, runDetail, runsOverview } from "../../app/status.ts";
+import { isTerminal } from "../../core/domain/run.ts";
 import { shortRunId } from "../../storage/runStore.ts";
 import type { CliContext } from "../context.ts";
 import { CliExit, EXIT, padEnd } from "../output.ts";
@@ -258,6 +259,13 @@ export async function runCancel(ctx: CliContext, runRef: string): Promise<void> 
     if (!run) {
       ctx.out.error(`run "${runRef}" not found`);
       throw new CliExit(EXIT.error);
+    }
+    // pilot: cancelling a run that had already completed printed "held by undefined; cancel requested"
+    if (isTerminal(run.state)) {
+      ctx.out.result({ id: run.id, state: run.state, cancelRequested: false }, () =>
+        ctx.out.line(`run ${shortRunId(run.id)} is already ${run.state}; nothing to cancel`),
+      );
+      return;
     }
     const updated = runtime.runs.requestCancel(run.id);
     runtime.events.emit({
