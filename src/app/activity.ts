@@ -35,6 +35,8 @@ export interface Activity {
   readonly waitingSince?: string;
   readonly waitingMs?: number;
   readonly lastRetry?: string;
+  /** Retries of the call in flight: how many, and why the last attempt failed. */
+  readonly retrying?: { readonly attempt: number; readonly reason: string };
 }
 
 const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
@@ -69,6 +71,7 @@ export function activityOf(events: readonly StoredEvent[], now: Date = new Date(
   let agentActive = false;
   let waitingSince: string | undefined;
   let lastRetry: string | undefined;
+  let retrying: { attempt: number; reason: string } | undefined;
   for (const e of events) {
     if (e.runId !== runId) continue;
     const p = (e.payload ?? {}) as Record<string, unknown>;
@@ -113,10 +116,12 @@ export function activityOf(events: readonly StoredEvent[], now: Date = new Date(
         latency += num(p.latencyMs);
         if (step) step.modelCalls += 1;
         if (agentActive) waitingSince = e.ts;
+        retrying = undefined;
         break;
       case "model.retry":
+        // the wait keeps counting from the first attempt: the answer is still the same one
         lastRetry = str(p.message);
-        if (agentActive) waitingSince = e.ts;
+        retrying = { attempt: num(p.attempt) || (retrying?.attempt ?? 0) + 1, reason: reasonOf(lastRetry) };
         break;
       case "tool.call": {
         toolCalls += 1;
@@ -125,6 +130,7 @@ export function activityOf(events: readonly StoredEvent[], now: Date = new Date(
         const detail = detailOf(p.args);
         lastTool = { capability, ok: p.ok !== false, ...(detail ? { detail } : {}) };
         if (agentActive) waitingSince = e.ts;
+        retrying = undefined;
         break;
       }
       case "run.state": {
@@ -161,7 +167,15 @@ export function activityOf(events: readonly StoredEvent[], now: Date = new Date(
     ...(lastTool ? { lastTool } : {}),
     ...(waitingMs !== undefined && waitingSince ? { waitingSince, waitingMs } : {}),
     ...(lastRetry ? { lastRetry } : {}),
+    ...(retrying && waitingMs !== undefined ? { retrying } : {}),
   };
+}
+
+/** "model x: provider error (500): {…}" → "provider error (500)". */
+function reasonOf(message: string | undefined): string {
+  if (!message) return "an error";
+  const rest = message.replace(/^model [^:]+:\s*/, "");
+  return rest.split(/:\s/)[0]?.trim() || rest.slice(0, 40);
 }
 
 export function clock(ms: number): string {
@@ -210,13 +224,16 @@ export function formatActivity(a: Activity, options: FormatOptions = {}): string
     const avg = a.avgLatencyMs !== undefined ? `, avg ${clock(a.avgLatencyMs)}` : "";
     let wait = "";
     if (a.waitingMs !== undefined) {
-      const late =
-        options.timeoutMs !== undefined && a.waitingMs > options.timeoutMs
+      // with retries the wait spans several attempts; the retry reason says more than the clock
+      const late = a.retrying
+        ? ""
+        : options.timeoutMs !== undefined && a.waitingMs > options.timeoutMs
           ? " — past the model timeout, retrying or hung"
           : a.avgLatencyMs !== undefined && a.waitingMs > 3 * a.avgLatencyMs && a.waitingMs > 60_000
             ? " — slower than usual"
             : "";
-      wait = `, waiting ${clock(a.waitingMs)}${late}`;
+      const retry = a.retrying ? `, retry ${a.retrying.attempt} after ${a.retrying.reason}` : "";
+      wait = `, waiting ${clock(a.waitingMs)}${retry}${late}`;
     }
     // while waiting, name the call in flight: "0 calls, waiting 2:02" read as if nothing was asked (pilot)
     parts.push(

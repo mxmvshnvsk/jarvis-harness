@@ -73,6 +73,32 @@ describe("live activity of a run", () => {
     expect(formatActivity(first)).toContain("model call 1, waiting 2:01");
   });
 
+  it("keeps counting the wait across retries and says why the call is retried (pilot: HTTP 500 at 5:00)", () => {
+    const events = [
+      ...RUN.slice(0, 3),
+      ev(301, "model.retry", {
+        attempt: 1,
+        kind: "transient",
+        status: 500,
+        message: 'model flash: provider error (500): {"error":"Error processing request, traceId:0f1e"}',
+      }),
+      ev(602, "model.retry", {
+        attempt: 2,
+        kind: "transient",
+        status: 500,
+        message: "model flash: provider error (500): {}",
+      }),
+    ];
+    const a = activityOf(events, at(700)) as NonNullable<ReturnType<typeof activityOf>>;
+    expect(a.retrying).toEqual({ attempt: 2, reason: "provider error (500)" });
+    expect(formatActivity(a, { timeoutMs: 300_000 })).toContain(
+      "model call 1, waiting 11:39, retry 2 after provider error (500) · tools",
+    );
+    // an answer clears it
+    const answered = activityOf([...events, ev(650, "model.call", { latencyMs: 48000 })], at(700));
+    expect(answered?.retrying).toBeUndefined();
+  });
+
   it("tells a slow answer from one past the model timeout", () => {
     const slow = activityOf(RUN, at(123 + 200)) as NonNullable<ReturnType<typeof activityOf>>;
     expect(formatActivity(slow)).toContain("waiting 3:20 — slower than usual");
