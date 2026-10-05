@@ -91,6 +91,11 @@ interface Match {
   readonly matched: boolean;
   /** Number of scope constraints that applied (higher = more specific). */
   readonly specificity: number;
+  /**
+   * A path scope that could not be judged: the task's paths are unknown before impact analysis.
+   * Such an item may apply, but it ranks after everything that certainly applies.
+   */
+  readonly unsure?: boolean;
 }
 
 function matchScope(scope: Scope & { agents?: string[]; kinds?: string[] }, task: TaskScope): Match {
@@ -100,11 +105,17 @@ function matchScope(scope: Scope & { agents?: string[]; kinds?: string[] }, task
       return { matched: false, specificity };
     specificity += 1;
   }
+  let unsure = false;
   if (scope.paths.length > 0) {
-    if (task.affectedPaths.length > 0 && !task.affectedPaths.some((p) => globMatches(p, scope.paths))) {
-      return { matched: false, specificity };
+    if (task.affectedPaths.length === 0) {
+      // pilot: path-scoped skills from the team's documentation outranked sdd-implementation for every
+      // task before impact analysis — an unknown path is not a match
+      unsure = true;
+    } else {
+      if (!task.affectedPaths.some((p) => globMatches(p, scope.paths)))
+        return { matched: false, specificity };
+      specificity += 1;
     }
-    specificity += 1;
   }
   if (scope.kinds && scope.kinds.length > 0) {
     if (!scope.kinds.includes(task.kind)) return { matched: false, specificity };
@@ -114,7 +125,7 @@ function matchScope(scope: Scope & { agents?: string[]; kinds?: string[] }, task
     if (!scope.agents.includes(task.agentId)) return { matched: false, specificity };
     specificity += 1;
   }
-  return { matched: true, specificity };
+  return unsure ? { matched: true, specificity, unsure } : { matched: true, specificity };
 }
 
 export interface ResolveInput {
@@ -135,6 +146,7 @@ export function resolvePackage(input: ResolveInput): EngineeringContextPackage {
       .filter((x) => x.m.matched)
       .sort(
         (a, b) =>
+          Number(a.m.unsure === true) - Number(b.m.unsure === true) ||
           b.m.specificity - a.m.specificity ||
           (a.item.id ?? a.item.name ?? "").localeCompare(b.item.id ?? b.item.name ?? ""),
       )

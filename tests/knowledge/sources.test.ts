@@ -102,6 +102,30 @@ describe("knowledge.sources", () => {
     expect(pkg.provenance).toContain("skill:invoice-events@1");
   });
 
+  it("does not let a path-scoped skill displace the general ones while the task's paths are unknown (pilot)", () => {
+    const config = KnowledgeConfigSchema.parse({ sources: PILOT });
+    const before = resolvePackage({
+      roots: roots(PILOT),
+      config,
+      task: { kind: "change", affectedPaths: [], stacks: [], agentId: "implementation" },
+    });
+    // before impact analysis: the built-in procedure first, the documentation's skill on request
+    expect(before.skills.map((s) => s.id)).toEqual(["sdd-implementation", "unit-testing"]);
+    expect(before.deferredSkills.map((s) => s.id)).toContain("invoice-events");
+    const after = resolvePackage({
+      roots: roots(PILOT),
+      config,
+      task: {
+        kind: "change",
+        affectedPaths: ["packages/lib/src/billing/track.ts"],
+        stacks: [],
+        agentId: "implementation",
+      },
+    });
+    // once impact names the billing code, its skill is the most specific one
+    expect(after.skills.map((s) => s.id)[0]).toBe("invoice-events");
+  });
+
   it("serves a document by its path, with or without the knowledge: prefix", () => {
     const r = roots(PILOT);
     expect(readByRef(r, "documentation/billing/overview.md")).toContain("минорных единицах");
