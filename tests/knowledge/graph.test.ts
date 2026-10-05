@@ -227,6 +227,77 @@ describe("incremental graph (ADR-0008)", () => {
   });
 });
 
+describe("monorepo resolution (pilot: a yarn workspace)", () => {
+  it("resolves tsconfig path aliases per package and workspace packages back to their sources", async () => {
+    write(
+      "package.json",
+      JSON.stringify({ name: "mono", private: true, workspaces: ["apps/*", "packages/*"] }),
+    );
+    // the library: exports into its build output, an alias `#/*` in a tsconfig with comments and `extends`
+    write(
+      "packages/lib/package.json",
+      JSON.stringify({
+        name: "@acme/lib",
+        exports: { ".": "./.publish/index.js", "./*": "./.publish/*.js" },
+      }),
+    );
+    write("packages/lib/tsconfig.json", '{ "extends": "./tsconfig.lib.json", "include": ["src"] }');
+    write(
+      "packages/lib/tsconfig.lib.json",
+      '{\n  // build into .publish\n  "compilerOptions": { "outDir": ".publish", "baseUrl": "./", "paths": { "#/*": ["./*"] }, },\n}\n',
+    );
+    write("packages/lib/src/redux/state.ts", "export type State = { a: number };\n");
+    write(
+      "packages/lib/src/billing/index.ts",
+      "import type { State } from '#/src/redux/state';\nimport isEqual from 'lodash/isEqual';\nexport const track = (s: State) => isEqual(s, s);\n",
+    );
+    write("packages/lib/src/index.ts", "export * from './billing';\n");
+    // an app: a deep import of the library, its own alias, and the bare package
+    write(
+      "apps/web/tsconfig.json",
+      '{ "compilerOptions": { "baseUrl": "./", "paths": { "Components/*": ["src/components/*"] } } }',
+    );
+    write("apps/web/package.json", JSON.stringify({ name: "web" }));
+    write("apps/web/src/components/button.tsx", "export const Button = () => null;\n");
+    write(
+      "apps/web/src/page.tsx",
+      "import { track } from '@acme/lib/billing';\nimport { Button } from 'Components/button';\nimport * as lib from '@acme/lib';\nexport const page = () => [track, Button, lib];\n",
+    );
+    git(["add", "-A"]);
+    git(["commit", "-q", "-m", "monorepo"]);
+
+    rt = await testRuntime(sb);
+    const extractors = rt.capabilities
+      .list()
+      .map((a) => a.graphExtractor?.())
+      .filter((e) => e !== undefined);
+    const { snapshot } = await updateGraph({
+      workspace: sb.project,
+      repoId: repoIdOf(sb.project),
+      cacheRoot: rt.loaded.home.cacheDir,
+      extractors,
+      store: rt.graph,
+    });
+    expect(snapshot.edges).toEqual(
+      expect.arrayContaining([
+        {
+          from: "packages/lib/src/billing/index.ts",
+          to: "packages/lib/src/redux/state.ts",
+          relation: "DEPENDS_ON",
+        },
+        { from: "packages/lib/src/billing/index.ts", to: "pkg:lodash/isEqual", relation: "DEPENDS_ON" },
+        { from: "apps/web/src/page.tsx", to: "packages/lib/src/billing/index.ts", relation: "DEPENDS_ON" },
+        { from: "apps/web/src/page.tsx", to: "apps/web/src/components/button.tsx", relation: "DEPENDS_ON" },
+        { from: "apps/web/src/page.tsx", to: "packages/lib/src/index.ts", relation: "DEPENDS_ON" },
+      ]),
+    );
+    expect(snapshot.edges.some((e) => e.to.startsWith("pkg:#") || e.to.startsWith("pkg:@acme"))).toBe(false);
+    // a change in the library reaches the app
+    const impact = impactOf(snapshot, ["packages/lib/src/redux/state.ts"]);
+    expect(impact.dependents.map((d) => d.file)).toContain("apps/web/src/page.tsx");
+  });
+});
+
 describe("the discover step keeps the graph current", () => {
   it("builds the snapshot of the run's tree before any agent asks for impact", async () => {
     sb.write(

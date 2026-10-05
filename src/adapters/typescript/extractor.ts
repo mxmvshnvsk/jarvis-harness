@@ -4,7 +4,9 @@ import type {
   GraphEdge,
   GraphNode,
   ProjectGraphExtractor,
+  SpecifierResolver,
 } from "../../core/capabilities/contracts.ts";
+import { TS_RESOLVER_VERSION, TypeScriptResolver } from "./resolver.ts";
 
 /**
  * TypeScript facts extractor (ADR-0008 §1, ADR-0021 §6): a pure function of one file's content.
@@ -47,6 +49,11 @@ function symbolsOf(file: string, sf: SourceFile): GraphNode[] {
 export class TypeScriptExtractor implements ProjectGraphExtractor {
   readonly version = TS_EXTRACTOR_VERSION;
   readonly extensions = [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs"];
+  readonly resolverVersion = TS_RESOLVER_VERSION;
+
+  createResolver(workspace: string, files: ReadonlySet<string>): SpecifierResolver {
+    return new TypeScriptResolver(workspace, files);
+  }
   private readonly project = new Project({ useInMemoryFileSystem: true, skipAddingFilesFromTsConfig: true });
 
   async extract(file: string, content: string): Promise<FileFacts> {

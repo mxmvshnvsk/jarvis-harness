@@ -114,7 +114,9 @@ export async function updateGraph(options: UpdateOptions): Promise<UpdateResult>
   const treeSha = tree.code === 0 ? tree.stdout.trim() : "worktree";
   const branchResult = await git(["rev-parse", "--abbrev-ref", "HEAD"], options.workspace);
   const branch = branchResult.code === 0 ? branchResult.stdout.trim() : undefined;
-  const extractorsKey = options.extractors.map((e) => `${e.constructor.name}@${e.version}`).join(",");
+  const extractorsKey = options.extractors
+    .map((e) => `${e.constructor.name}@${e.version}${e.resolverVersion ? `+r${e.resolverVersion}` : ""}`)
+    .join(",");
 
   if (!options.force && !options.noCache) {
     const existing = options.store.byTree(options.repoId, treeSha);
@@ -162,13 +164,21 @@ export async function updateGraph(options: UpdateOptions): Promise<UpdateResult>
     }
   }
 
+  // the stack's own resolution first (aliases, workspace packages), then the generic one
+  const resolvers = new Map(
+    options.extractors.map((x) => [x, x.createResolver?.(options.workspace, known)] as const),
+  );
+  const resolverOf = (file: string) => {
+    const x = options.extractors.find((ex) => ex.extensions.some((ext) => file.endsWith(ext)));
+    return x ? resolvers.get(x) : undefined;
+  };
   const edges: GraphEdge[] = [];
   const seen = new Set<string>();
   for (const e of rawEdges) {
     const to =
       e.spec.startsWith("pkg:") || e.spec.startsWith("unresolved:")
         ? e.spec
-        : resolveSpecifier(e.from, e.spec, known);
+        : (resolverOf(e.from)?.resolve(e.from, e.spec) ?? resolveSpecifier(e.from, e.spec, known));
     // A test file's imports are the modules it tests: edge from the module to the test (TESTED_BY).
     const edge: GraphEdge =
       e.relation === "TESTED_BY"

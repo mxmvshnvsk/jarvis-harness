@@ -84,6 +84,21 @@ function rolOf(path: string, first: string): ModuleFacts["role"] {
   return path === "(root)" ? "other" : "source";
 }
 
+/** An external package by name — `pkg:react`, `pkg:@scope/name` — not a module of this tree. */
+function externalOf(target: string): string | undefined {
+  if (!target.startsWith("pkg:")) return undefined;
+  const name = target.slice(4);
+  return `pkg:${name
+    .split("/")
+    .slice(0, name.startsWith("@") ? 2 : 1)
+    .join("/")}`;
+}
+
+/** The module of a graph target: a file's module, or the external package it names. */
+function targetModuleOf(target: string): string {
+  return externalOf(target) ?? moduleOf(target);
+}
+
 export function moduleOf(file: string): string {
   const parts = file.split("/");
   if (parts.length === 1) return "(root)";
@@ -348,6 +363,8 @@ export async function scopeFacts(
   const depth = path.split("/").length;
   const inside = (f: string) => f.startsWith(`${path}/`);
   const keyOf = (f: string) => {
+    const external = externalOf(f);
+    if (external) return external;
     if (moduleOf(f) !== home) return moduleOf(f);
     const parts = f.split("/");
     return parts.length > depth ? parts.slice(0, depth).join("/") : parts.slice(0, -1).join("/") || f;
@@ -397,7 +414,8 @@ export async function scanProject(options: ScanOptions): Promise<ScanReport> {
     for (const e of options.graph.edges) {
       if (e.relation !== "DEPENDS_ON" || e.to.startsWith("unresolved:")) continue;
       const a = moduleOf(e.from);
-      const b = moduleOf(e.to);
+      // pilot: `pkg:react` has no slash and became the module "(root)"
+      const b = targetModuleOf(e.to);
       if (a === b) continue;
       const row = deps.get(a) ?? new Map<string, number>();
       row.set(b, (row.get(b) ?? 0) + 1);

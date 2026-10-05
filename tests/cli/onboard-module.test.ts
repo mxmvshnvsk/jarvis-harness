@@ -220,7 +220,7 @@ describe("jarvis onboard --module", () => {
     put("packages/lib/src/observability/log.ts", "export function log(m: string) { return m; }\n");
     put(
       "packages/lib/src/billing/track.ts",
-      "import { log } from '../observability/log';\nexport function track(e: string) { return log(e); }\n",
+      "import { log } from '../observability/log';\nimport react from 'react';\nexport function track(e: string) { return log(e) && react; }\n",
     );
     put("packages/lib/src/billing/track.test.ts", "import { track } from './track';\ntrack('x');\n");
     put(
@@ -240,7 +240,8 @@ describe("jarvis onboard --module", () => {
     };
     expect(out.module).toBe("packages/lib/src/billing");
     expect(out.facts.files).toBe(2);
-    expect(out.facts.dependsOn).toEqual(["packages/lib/src/observability"]);
+    // an external package is named as such, not as the module "(root)" (pilot)
+    expect(out.facts.dependsOn).toEqual(["packages/lib/src/observability", "pkg:react"]);
     expect(out.facts.usedBy).toEqual(["apps/web"]);
     expect(out.task).toContain("Stay inside `packages/lib/src/billing`");
 

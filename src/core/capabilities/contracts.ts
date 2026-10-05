@@ -116,10 +116,18 @@ export interface FileFacts {
   readonly error?: string;
 }
 
+/** Resolves a stack's import specifiers across the tree; undefined leaves the core's default. */
+export interface SpecifierResolver {
+  resolve(from: string, spec: string): string | undefined;
+}
+
 export interface ProjectGraphExtractor {
   readonly version: number;
   readonly extensions: readonly string[];
   extract(file: string, content: string): Promise<FileFacts>;
+  /** Tree-level resolution the per-file facts cannot do (aliases, workspace packages); part of the snapshot key. */
+  readonly resolverVersion?: number;
+  createResolver?(workspace: string, files: ReadonlySet<string>): SpecifierResolver;
 }
 
 export interface DetectionResult {

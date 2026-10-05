@@ -58,6 +58,11 @@ Remaining commands of ADR-0001 §15:
 - provider trouble on screen: `model.retry`/`model.error` carry `attemptMs` and `maxRetries`; foreground commands
   print every retry (reason, attempt time, `traceId`), the final failure and a failed or parked run as lines that
   stay on stderr; the progress line counts the wait across retries; Ctrl-C releases the lease and says how to go on
+- monorepo graph: `ProjectGraphExtractor.createResolver` (tree-level, part of the snapshot key); the TS resolver
+  (`src/adapters/typescript/resolver.ts`) follows the nearest tsconfig's `paths`/`baseUrl` and maps workspace
+  packages through `exports` back to their sources; onboarding names external packages `pkg:<name>` instead of
+  "(root)". On the pilot repo: `#/…` and `@acme/shared-lib/…` resolve, a change in the shared
+  library reaches the app files that import it
 
 ADR-0001 §20 stage 12 (git hooks) — `f11ca47`:
 
