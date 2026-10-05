@@ -59,12 +59,11 @@ function shannonEntropy(s: string): number {
   return h;
 }
 
-/** Hashes, commit shas and UUIDs are identifiers provenance depends on — never redact them. */
 /**
  * A repository path made of words: `packages/shared/eslint-config/base`. Its entropy passes the
  * threshold, and right after `"path":` it sits in an assignment context, so tool arguments in the
- * technical log lost their paths (pilot, 2026-10). Words are lowercase kebab/snake case or camelCase,
- * at most 20 characters; a random token cut by slashes has longer or mixed-case runs and stays a secret.
+ * technical log lost their paths (pilot, 2026-10). Words are lowercase kebab/snake case, camelCase or
+ * ALL CAPS (`documentation/billing/CURRENCY_CODES.md`), at most 20 characters; a random token cut by slashes has longer or mixed-case runs and stays a secret.
  */
 function looksLikePath(s: string): boolean {
   const segments = s.split("/").filter((seg) => seg.length > 0);
@@ -75,12 +74,13 @@ function looksLikePath(s: string): boolean {
       .every(
         (word) =>
           word.length === 0 ||
-          (word.length <= 20 && /^(?:[a-z]+|[a-z]*(?:[A-Z][a-z]+)+)[0-9]{0,4}$/.test(word)) ||
+          (word.length <= 20 && /^(?:[a-z]+|[A-Z]+|[a-z]*(?:[A-Z][a-z]+)+)[0-9]{0,4}$/.test(word)) ||
           /^[0-9]{1,4}$/.test(word),
       ),
   );
 }
 
+/** Hashes, commit shas, UUIDs and paths are identifiers provenance depends on — never redact them. */
 function looksLikeIdentifier(s: string): boolean {
   return (
     looksLikePath(s) ||

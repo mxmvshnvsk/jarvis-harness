@@ -61,6 +61,7 @@ describe("Redactor", () => {
     for (const text of [
       '{"path":"packages/shared/eslint-config/base.js"}',
       "file: packages/shared-lib/src/billing/invoice-rules/billingSettings.ts",
+      "knowledge: documentation/billing/CURRENCY_CODES.md",
     ]) {
       expect(redactor.redact(text)).toMatchObject({ text, count: 0 });
     }
