@@ -1,3 +1,4 @@
+import { formatActivity } from "../../app/activity.ts";
 import { createRuntime } from "../../app/runtime.ts";
 import { type PoolStatus, type RunDetail, runDetail, runsOverview } from "../../app/status.ts";
 import { shortRunId } from "../../storage/runStore.ts";
@@ -141,6 +142,9 @@ export function renderDetail(ctx: CliContext, d: RunDetail, now: Date, eventLimi
     `  state      ${r.state}${r.stateReason ? ` — ${r.stateReason}` : ""}${r.cancelRequested ? "  (cancel requested)" : ""}`,
   );
   out.line(`  step       ${r.currentStep ? `${r.currentStep} #${r.currentIteration}` : "-"}`);
+  // ADR-0018: what the run does right now — the same line the foreground command draws
+  if (d.activity && !d.activity.finished && r.state === "RUNNING")
+    out.line(`  now        ${formatActivity(d.activity, d.activityOptions ?? {})}`);
   const capsArtifact = d.artifacts.find((a) => a.type === "project-capabilities");
   if (capsArtifact && d.capabilities) {
     out.line(

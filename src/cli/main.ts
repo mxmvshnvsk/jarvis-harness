@@ -69,7 +69,8 @@ export function buildProgram(options: RunOptions = {}): Command {
 
   const ctxFor = (): CliContext => {
     const opts = program.opts<{ json: boolean; profile?: string; cwd?: string }>();
-    const out = createOutput(opts.json, streams);
+    const env = options.context?.env ?? process.env;
+    const out = createOutput(opts.json, streams, { progress: env.JARVIS_PROGRESS !== "off" });
     const overrides: Partial<CliContext> = {
       ...options.context,
       ...(opts.cwd ? { cwd: opts.cwd } : {}),

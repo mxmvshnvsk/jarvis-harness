@@ -14,23 +14,48 @@ export interface Output {
   error(text: string): void;
   /** Prints the JSON document in `--json` mode, otherwise calls `render`. */
   result(value: unknown, render: () => void): void;
+  /** Whether `progress` draws anything (a terminal on stderr, not `--json`, not JARVIS_PROGRESS=off). */
+  readonly live: boolean;
+  /** Redraws the one-line progress on stderr; `undefined` clears it. Other output clears it first. */
+  progress(text?: string): void;
 }
 
 export function createOutput(
   json: boolean,
   streams: { out: NodeJS.WritableStream; err: NodeJS.WritableStream },
+  options: { progress?: boolean } = {},
 ): Output {
+  const err = streams.err as NodeJS.WritableStream & { isTTY?: boolean; columns?: number };
+  const live = !json && options.progress !== false && err.isTTY === true;
+  let shown = false;
+  const clear = () => {
+    if (!shown) return;
+    streams.err.write("\r\u001b[2K");
+    shown = false;
+  };
   return {
     json,
+    live,
     line(text = "") {
+      clear();
       streams.out.write(`${text}\n`);
     },
     error(text) {
+      clear();
       streams.err.write(`${text}\n`);
     },
     result(value, render) {
+      clear();
       if (json) streams.out.write(`${JSON.stringify(value, null, 2)}\n`);
       else render();
+    },
+    progress(text) {
+      if (!live) return;
+      if (text === undefined) return clear();
+      const width = Math.max(20, (err.columns ?? 120) - 1);
+      const line = [...text].length > width ? `${[...text].slice(0, width - 1).join("")}…` : text;
+      streams.err.write(`\r\u001b[2K${line}`);
+      shown = true;
     },
   };
 }

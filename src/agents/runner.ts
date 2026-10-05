@@ -149,6 +149,8 @@ export class AgentRuntimeRunner implements AgentRunner {
     emit("agent.start", {
       modelId: route.modelId,
       tools: toolDefs.length,
+      maxToolCalls: def.limits.maxToolCalls,
+      maxModelCalls: def.limits.maxModelCalls,
       restoredToolCalls: toolCalls,
       knowledge: pkg.provenance,
     });

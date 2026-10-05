@@ -18,6 +18,7 @@ import { LeaseLostError, newRunId, shortRunId } from "../../storage/runStore.ts"
 import { git } from "../../tools/local/exec.ts";
 import type { CliContext } from "../context.ts";
 import { CliExit, EXIT } from "../output.ts";
+import { followRun } from "../progress.ts";
 import { loadForCli } from "./config.ts";
 import { renderDetail } from "./status.ts";
 
@@ -50,8 +51,9 @@ async function executeAndReport(
   extra: Record<string, unknown> = {},
 ): Promise<never> {
   const owner = leaseOwner(runtime.loaded.config.interactive ? "cli" : "ci");
+  const progress = followRun(ctx, runtime, { runId: run.id });
   try {
-    const result = await engine.execute(run.id, { owner, steal });
+    const result = await engine.execute(run.id, { owner, steal }).finally(() => progress.stop());
     const detail = runDetail(runtime, result.run);
     ctx.out.result({ ...extra, ...detail, exitCode: result.exitCode }, () =>
       renderDetail(ctx, detail, new Date(), 8),

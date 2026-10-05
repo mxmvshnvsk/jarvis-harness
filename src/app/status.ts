@@ -8,6 +8,7 @@ import type { Interaction } from "../interaction/store.ts";
 import type { Checkpoint, StepRecord } from "../storage/checkpoints.ts";
 import type { EffectRecord } from "../storage/effects.ts";
 import type { StoredEvent } from "../telemetry/events.ts";
+import { type Activity, activityOf, type FormatOptions } from "./activity.ts";
 import type { Runtime } from "./runtime.ts";
 
 /**
@@ -51,6 +52,9 @@ export interface RunDetail {
   readonly interactions: readonly Interaction[];
   /** ADR-0021 §7: the capability level the run works at. */
   readonly capabilities?: ProjectCapabilities;
+  /** What the run does right now, from its events (ADR-0018). */
+  readonly activity?: Activity;
+  readonly activityOptions?: FormatOptions;
 }
 
 /** Artifact types that pass through a human gate and therefore may be awaiting approval. */
@@ -142,5 +146,25 @@ export function runDetail(runtime: Runtime, run: Run, now: Date = new Date()): R
     events: events.slice(-15),
     tokens,
     leaseLive: run.lease !== undefined && Date.parse(run.lease.until) >= now.getTime(),
+    ...activityFields(runtime, events, now),
+  };
+}
+
+function activityFields(
+  runtime: Runtime,
+  events: readonly StoredEvent[],
+  now: Date,
+): { activity?: Activity; activityOptions?: FormatOptions } {
+  const activity = activityOf(events, now);
+  if (!activity) return {};
+  const modelId = activity.step?.modelId;
+  const timeoutMs = modelId ? runtime.loaded.config.models[modelId]?.timeoutMs : undefined;
+  const stepOutputTokens = runtime.loaded.config.budget.perStep.outputTokens;
+  return {
+    activity,
+    activityOptions: {
+      ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+      ...(stepOutputTokens !== undefined ? { stepOutputTokens } : {}),
+    },
   };
 }

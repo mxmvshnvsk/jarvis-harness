@@ -3,6 +3,7 @@ import { type AnswerResult, answerFromKnowledge, plan } from "../../knowledge/as
 import { knowledgeRootsOf } from "../../knowledge/sources.ts";
 import type { CliContext } from "../context.ts";
 import { CliExit, EXIT } from "../output.ts";
+import { followRun } from "../progress.ts";
 import { loadForCli } from "./config.ts";
 
 /**
@@ -34,6 +35,7 @@ export async function runAsk(ctx: CliContext, words: readonly string[], options:
     // The model is called only when it can add something: sources to read, or general knowledge asked for.
     const useModel = options.llm !== false && (sources.length > 0 || options.general === true);
     let answered: AnswerResult | undefined;
+    const progress = useModel ? followRun(ctx, runtime) : undefined;
     if (useModel)
       answered = await answerFromKnowledge(runtime, {
         root,
@@ -42,7 +44,7 @@ export async function runAsk(ctx: CliContext, words: readonly string[], options:
         evidence: sources,
         allowGeneral: options.general === true,
         env: ctx.env,
-      });
+      }).finally(() => progress?.stop());
     const verified = answered?.verified;
     const nothing = terms.length === 0 && sources.length === 0 && !verified?.general;
 

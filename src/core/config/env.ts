@@ -25,6 +25,8 @@ export const RESERVED_ENV = new Set([
   "JARVIS_LOG_DIR",
   "JARVIS_LOG_KEEP_DAYS",
   "JARVIS_LOG_MAX_FIELD",
+  // live progress line of foreground commands (src/cli/progress.ts): off disables it
+  "JARVIS_PROGRESS",
 ]);
 
 function normalizeKey(key: string): string {

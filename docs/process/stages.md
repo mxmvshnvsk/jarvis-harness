@@ -52,6 +52,9 @@ Remaining commands of ADR-0001 §15:
   documentation of its module only; `knowledge.read` takes a bare document name
 - agent context: the L3/L4 character budget comes from the window capped by `context.maxContext`, not the model's raw
   window (a 1M-token model with `maxContext: 200000` got a knowledge share sized for 1M)
+- live progress (`src/app/activity.ts`, `src/cli/progress.ts`): the activity of a run from its events — step and
+  agent, model calls and the current wait (slow vs past the timeout), tool budget bar, tokens, last tool — drawn on
+  stderr by `work`/`resume`/`onboard --module`/`ask` and shown as `now` by `status`; `JARVIS_PROGRESS=off`
 
 ADR-0001 §20 stage 12 (git hooks) — `f11ca47`:
 

@@ -55,6 +55,12 @@ export class SqliteEventStore implements EventSink {
     }
   }
 
+  /** The newest sequence number (0 for an empty journal): where a live view starts following. */
+  lastSeq(): number {
+    const row = this.db.prepare("SELECT MAX(seq) AS seq FROM events").get() as { seq: number | null };
+    return row.seq ?? 0;
+  }
+
   /** Events after `afterSeq`, oldest first (used by `status --watch` and the TUI). */
   list(options: { runId?: string; afterSeq?: number; kind?: string; limit?: number } = {}): StoredEvent[] {
     const clauses: string[] = ["seq > ?"];

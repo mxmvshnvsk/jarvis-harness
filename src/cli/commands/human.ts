@@ -19,6 +19,7 @@ import { LeaseHeldError } from "../../orchestration/types.ts";
 import { LeaseLostError, shortRunId } from "../../storage/runStore.ts";
 import type { CliContext } from "../context.ts";
 import { CliExit, EXIT, padEnd } from "../output.ts";
+import { followRun } from "../progress.ts";
 import { loadForCli } from "./config.ts";
 import { renderDetail } from "./status.ts";
 
@@ -165,8 +166,9 @@ export async function humanMove(
 async function resumeRun(ctx: CliContext, runtime: Runtime, run: Run): Promise<never> {
   const engine = createEngine(runtime);
   const owner = leaseOwner(runtime.loaded.config.interactive ? "cli" : "ci");
+  const progress = followRun(ctx, runtime, { runId: run.id });
   try {
-    const result = await engine.execute(run.id, { owner, steal: false });
+    const result = await engine.execute(run.id, { owner, steal: false }).finally(() => progress.stop());
     const detail = runDetail(runtime, result.run);
     ctx.out.result({ ...detail, exitCode: result.exitCode }, () => renderDetail(ctx, detail, new Date(), 8));
     throw new CliExit(result.exitCode);

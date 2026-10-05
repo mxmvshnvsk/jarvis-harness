@@ -14,6 +14,7 @@ import { type ScanReport, scanProject, scopeFacts } from "../../onboarding/scan.
 import { git } from "../../tools/local/exec.ts";
 import type { CliContext } from "../context.ts";
 import { CliExit, EXIT } from "../output.ts";
+import { followRun } from "../progress.ts";
 import { loadForCli } from "./config.ts";
 
 /**
@@ -181,7 +182,10 @@ async function runModuleMap(
   }
   const runtime = createRuntime(loaded, { env: ctx.env });
   try {
-    const result = await mapModule(runtime, { root, module, facts, env: ctx.env });
+    const progress = followRun(ctx, runtime);
+    const result = await mapModule(runtime, { root, module, facts, env: ctx.env }).finally(() =>
+      progress.stop(),
+    );
     ctx.out.result(result, () => {
       ctx.out.line(`run ${result.runId || "-"}: ${result.state}`);
       ctx.out.line(`claims confirmed against the code: ${result.claims.kept} of ${result.claims.proposed}`);
