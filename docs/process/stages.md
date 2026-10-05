@@ -50,6 +50,8 @@ Remaining commands of ADR-0001 §15:
   named by path, `SKILL_*`-style documents as skills, `scopes` from documentation to code paths, module memos scoped
   to their directory, denied paths skipped; `onboard --module` gives its run a `scope` artifact so the mapper gets the
   documentation of its module only; `knowledge.read` takes a bare document name
+- agent context: the L3/L4 character budget comes from the window capped by `context.maxContext`, not the model's raw
+  window (a 1M-token model with `maxContext: 200000` got a knowledge share sized for 1M)
 
 ADR-0001 §20 stage 12 (git hooks) — `f11ca47`:
 

@@ -113,7 +113,13 @@ export class AgentRuntimeRunner implements AgentRunner {
       .filter((a): a is ArtifactVersion => a !== undefined)
       .map((artifact) => ({ artifact, text: rt.artifacts.text(artifact) }));
     const pkg = await packageForStep(ctx, def.id);
-    const charBudget = Math.floor(route.model.contextWindow * 0.45 * 3.5);
+    // L3/L4 are sized from the window actually used: `context.maxContext` caps it (pilot: a model with a
+    // 1M window and maxContext 200k got a knowledge share sized for 1M)
+    const window = Math.min(
+      route.model.contextWindow,
+      config.context.maxContext ?? route.model.contextWindow,
+    );
+    const charBudget = Math.floor(window * 0.45 * 3.5);
     const buildBase = (chars: number) =>
       buildBaseMessages({
         def,

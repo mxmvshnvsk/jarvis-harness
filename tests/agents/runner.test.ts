@@ -229,6 +229,39 @@ describe("AgentRuntimeRunner", () => {
     expect(finish).toMatchObject({ status: "success", modelCalls: 2, finalizedFromLoop: false });
   });
 
+  it("sizes the knowledge layer from the window capped by context.maxContext (pilot)", async () => {
+    sb.write(
+      "home/.jarvis/config.yaml",
+      `version: 1
+models:
+  big:
+    provider: openai-compatible
+    baseUrl: ${server.baseUrl}
+    model: big
+    egress: private
+    contextWindow: 1000000
+    maxOutput: 2000
+    supports: { tools: true, jsonMode: true }
+roles:
+  research: { models: [big] }
+context: { maxContext: 8000 }
+`,
+    );
+    sb.write("project/.jarvis/knowledge/huge.md", `# Huge\n${"fact ".repeat(4000)}\n`);
+    sb.write("project/.jarvis/project.yaml", "version: 1\nworkspace: { mode: cwd }\n");
+    rt = await testRuntime(sb, { PATH: process.env.PATH ?? "" });
+    server.respond(() => completion(JSON.stringify(RESEARCH_DOC)));
+    const run = createRun(rt, "r");
+    expect((await engineWith(rt, researchOnly).execute(run.id, { owner: "cli:t" })).run.state).toBe(
+      "COMPLETED",
+    );
+    const first = server.requests[0] as CapturedRequest;
+    const task = (first.body.messages as Array<{ content: string }>)[1]?.content ?? "";
+    // 8000 tokens of window leave about a thousand characters for knowledge, not the whole 20k document
+    expect(task).toContain("huge.md");
+    expect(task).not.toContain("fact ".repeat(1000));
+  });
+
   it("feeds denied and malformed tool calls back to the model instead of failing", async () => {
     sb.write("project/.jarvis/project.yaml", "version: 1\nworkspace: { mode: cwd }\n");
     rt = await testRuntime(sb, { PATH: process.env.PATH ?? "" });
