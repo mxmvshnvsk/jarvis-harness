@@ -10,7 +10,7 @@ import {
   renderArchitecture,
   renderConventions,
 } from "../../onboarding/render.ts";
-import { type ScanReport, scanProject } from "../../onboarding/scan.ts";
+import { type ScanReport, scanProject, scopeFacts } from "../../onboarding/scan.ts";
 import { git } from "../../tools/local/exec.ts";
 import type { CliContext } from "../context.ts";
 import { CliExit, EXIT } from "../output.ts";
@@ -71,7 +71,7 @@ export async function runOnboard(ctx: CliContext, options: OnboardOptions): Prom
   const report = await scanProject({ root, graph, ...(graphReason ? { graphReason } : {}) });
 
   if (options.module !== undefined) {
-    await runModuleMap(ctx, loaded, root, report, options);
+    await runModuleMap(ctx, loaded, root, report, options, graph);
     return;
   }
 
@@ -153,16 +153,22 @@ async function runModuleMap(
   root: string,
   report: ScanReport,
   options: OnboardOptions,
+  graph?: { edges: readonly GraphEdge[] },
 ): Promise<void> {
   const module = (options.module ?? "").replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/+$/, "");
-  const facts = report.modules.find((m) => m.path === module);
+  // a module, or a directory inside one (a package of a monorepo is too big for one pass)
+  const facts =
+    report.modules.find((m) => m.path === module) ??
+    (module !== "" && report.modules.some((m) => m.role === "source" && module.startsWith(`${m.path}/`))
+      ? await scopeFacts(root, module, graph)
+      : undefined);
   if (!facts) {
     const known = report.modules
       .filter((m) => m.role === "source")
       .slice(0, 12)
       .map((m) => m.path);
     ctx.out.error(
-      `"${module}" is not a module of this repository${known.length > 0 ? `; modules: ${known.join(", ")}` : ""}`,
+      `"${module}" is not a module of this repository or a directory inside one${known.length > 0 ? `; modules: ${known.join(", ")}` : ""}`,
     );
     throw new CliExit(EXIT.error);
   }

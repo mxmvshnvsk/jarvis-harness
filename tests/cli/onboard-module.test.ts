@@ -215,4 +215,37 @@ describe("jarvis onboard --module", () => {
     expect(r.code).not.toBe(0);
     expect(r.err).toContain("not a module");
   });
+
+  it("maps a directory inside a module, with dependencies at its own depth (pilot: a monorepo package)", async () => {
+    put("packages/lib/src/observability/log.ts", "export function log(m: string) { return m; }\n");
+    put(
+      "packages/lib/src/billing/track.ts",
+      "import { log } from '../observability/log';\nexport function track(e: string) { return log(e); }\n",
+    );
+    put("packages/lib/src/billing/track.test.ts", "import { track } from './track';\ntrack('x');\n");
+    put(
+      "apps/web/src/page.ts",
+      "import { track } from '../../../packages/lib/src/billing/track';\ntrack('open');\n",
+    );
+    git(["add", "-A"]);
+    git(["commit", "-q", "-m", "monorepo"]);
+
+    const r = await jarvis(["--json", "onboard", "--module", "packages/lib/src/billing/", "--dry-run"]);
+    expect(r.code).toBe(0);
+    expect(server.requests.length).toBe(0);
+    const out = JSON.parse(r.out) as {
+      module: string;
+      task: string;
+      facts: { files: number; dependsOn: string[]; usedBy: string[] };
+    };
+    expect(out.module).toBe("packages/lib/src/billing");
+    expect(out.facts.files).toBe(2);
+    expect(out.facts.dependsOn).toEqual(["packages/lib/src/observability"]);
+    expect(out.facts.usedBy).toEqual(["apps/web"]);
+    expect(out.task).toContain("Stay inside `packages/lib/src/billing`");
+
+    const nowhere = await jarvis(["onboard", "--module", "packages/lib/src/nowhere", "--no-graph"]);
+    expect(nowhere.code).not.toBe(0);
+    expect(nowhere.err).toContain("not a module");
+  });
 });

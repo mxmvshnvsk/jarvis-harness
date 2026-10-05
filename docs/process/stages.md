@@ -44,6 +44,8 @@ Remaining commands of ADR-0001 §15:
   paid two extra slow calls per step, and the re-asked model echoed the JSON Schema instead of filling it
 - redaction: a repository path made of words (`packages/shared/eslint-config/base`) is not a high-entropy secret;
   the technical log no longer hides the paths in tool arguments
+- `onboard --module` takes a directory inside a module (a large monorepo package is too much for one pass):
+  facts are counted for that directory, dependencies named at its depth inside the package and by module outside
 
 ADR-0001 §20 stage 12 (git hooks) — `f11ca47`:
 

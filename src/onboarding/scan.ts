@@ -306,6 +306,70 @@ function sensitiveOf(root: string, files: readonly string[]): string[] {
   return [...out].sort();
 }
 
+/** Adds one tracked file to a module's counts; returns the lines it contributed. */
+function countFile(root: string, f: string, s: { files: number; lines: number; langs: Set<string> }): number {
+  s.files += 1;
+  const lang = CODE_EXT[extname(f)];
+  if (!lang) return 0;
+  s.langs.add(lang);
+  try {
+    const full = join(root, f);
+    if (statSync(full).size < 1_000_000) {
+      const n = readFileSync(full, "utf8").split("\n").length;
+      s.lines += n;
+      return n;
+    }
+  } catch {
+    // deleted in the working tree or unreadable: the file still counts
+  }
+  return 0;
+}
+
+/**
+ * Facts for a directory inside a module. In a monorepo a module is a whole package (the pilot's shared
+ * library is too large for one mapper pass), so `onboard --module` also takes a part of
+ * one. Dependencies are named at the same depth inside the same module (`…/src/observability`) and by
+ * module outside it. Undefined when no tracked file lives there.
+ */
+export async function scopeFacts(
+  root: string,
+  path: string,
+  graph?: { edges: readonly GraphEdge[] } | undefined,
+): Promise<ModuleFacts | undefined> {
+  const listed = await git(["ls-files", "-z", "--", path], root);
+  const files = (listed.code === 0 ? listed.stdout.split("\0").filter(Boolean) : []).filter(
+    (f) => f.startsWith(`${path}/`) && !SKIP_FILE.test(f) && !SKIP_DIR.test(f),
+  );
+  if (files.length === 0) return undefined;
+  const s = { files: 0, lines: 0, langs: new Set<string>() };
+  for (const f of files) countFile(root, f, s);
+
+  const home = moduleOf(`${path}/x`);
+  const depth = path.split("/").length;
+  const inside = (f: string) => f.startsWith(`${path}/`);
+  const keyOf = (f: string) => {
+    if (moduleOf(f) !== home) return moduleOf(f);
+    const parts = f.split("/");
+    return parts.length > depth ? parts.slice(0, depth).join("/") : parts.slice(0, -1).join("/") || f;
+  };
+  const dependsOn = new Set<string>();
+  const usedBy = new Set<string>();
+  for (const e of graph?.edges ?? []) {
+    if (e.relation !== "DEPENDS_ON" || e.to.startsWith("unresolved:")) continue;
+    if (inside(e.from) && !inside(e.to)) dependsOn.add(keyOf(e.to));
+    else if (inside(e.to) && !inside(e.from)) usedBy.add(keyOf(e.from));
+  }
+  return {
+    path,
+    role: rolOf(path, path.split("/")[0] as string),
+    files: s.files,
+    lines: s.lines,
+    languages: [...s.langs].sort(),
+    dependsOn: [...dependsOn].sort(),
+    usedBy: [...usedBy].sort(),
+  };
+}
+
 export interface ScanOptions {
   readonly root: string;
   /** Edges of the project graph, when one is available: module dependencies come from it. */
@@ -324,21 +388,7 @@ export async function scanProject(options: ScanOptions): Promise<ScanReport> {
   for (const f of files) {
     const m = moduleOf(f);
     const s = stats.get(m) ?? { files: 0, lines: 0, langs: new Set<string>() };
-    s.files += 1;
-    const lang = CODE_EXT[extname(f)];
-    if (lang) {
-      s.langs.add(lang);
-      try {
-        const full = join(root, f);
-        if (statSync(full).size < 1_000_000) {
-          const n = readFileSync(full, "utf8").split("\n").length;
-          s.lines += n;
-          totalLines += n;
-        }
-      } catch {
-        // deleted in the working tree or unreadable: the file still counts
-      }
-    }
+    totalLines += countFile(root, f, s);
     stats.set(m, s);
   }
 
