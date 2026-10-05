@@ -1,6 +1,7 @@
 import { detectStackScopes, effectiveStacks, stacksForPaths } from "../capabilities/detector.ts";
 import { type EngineeringContextPackage, resolvePackage } from "../knowledge/resolver.ts";
 import { rankKnowledge, refreshIndex } from "../knowledge/retrieval/service.ts";
+import { knowledgeRootsOf } from "../knowledge/sources.ts";
 import type { StepContext } from "../orchestration/types.ts";
 
 /** Task kind from the task id/title: ABC-42 says nothing, so "change" unless the run says otherwise. */
@@ -9,13 +10,28 @@ export function taskKindOf(ctx: StepContext): string {
   return hint || "change";
 }
 
-/** Affected paths from the latest impact artifact of the run (empty before impact analysis). */
+/**
+ * Affected paths from the latest impact artifact of the run; before impact analysis, the `scope`
+ * artifact a run may start with (`onboard --module` writes the module there); otherwise empty.
+ */
 export function affectedPathsOf(ctx: StepContext): string[] {
   const impact = ctx.runtime.artifacts.listLatest(ctx.run.id, "impact")[0];
-  if (!impact) return [];
+  if (!impact) return scopePathsOf(ctx);
   try {
     const doc = JSON.parse(ctx.runtime.artifacts.text(impact)) as { affected?: Array<{ path?: string }> };
     return (doc.affected ?? []).map((a) => a.path).filter((p): p is string => typeof p === "string");
+  } catch {
+    return [];
+  }
+}
+
+/** Paths of the run's `scope` artifact — a directory as `dir/`, so `dir/**` scopes match it. */
+function scopePathsOf(ctx: StepContext): string[] {
+  const scope = ctx.runtime.artifacts.listLatest(ctx.run.id, "scope")[0];
+  if (!scope) return [];
+  try {
+    const doc = JSON.parse(ctx.runtime.artifacts.text(scope)) as { paths?: unknown };
+    return Array.isArray(doc.paths) ? doc.paths.filter((p): p is string => typeof p === "string") : [];
   } catch {
     return [];
   }
@@ -49,8 +65,7 @@ export function queryOf(ctx: StepContext): string {
 
 export async function packageForStep(ctx: StepContext, agentId: string): Promise<EngineeringContextPackage> {
   const workspace = ctx.workspace.ref.path;
-  const home = ctx.runtime.loaded.home.root;
-  const roots = { projectRoot: workspace, userRoot: home };
+  const roots = knowledgeRootsOf(ctx.runtime.loaded, workspace);
   const affectedPaths = affectedPathsOf(ctx);
   const config = ctx.runtime.loaded.config;
   // ADR-0021 §9: in a polyglot repository the affected scope decides which stack packs apply.

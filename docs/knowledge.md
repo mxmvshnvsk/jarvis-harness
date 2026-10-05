@@ -103,6 +103,20 @@ agents: [research, specification]
 описывает один модуль с evidence, проверка сверяет цитаты с кодом, результат — кандидат со `paths` на `promote`. Подробности —
 [cli.md](cli.md#jarvis-onboard---dry-run---refresh---apply-config---no-graph).
 
+### Документация команды на месте: `knowledge.sources`
+
+Если команда уже держит документацию и инструкции агентам в репозитории (`documentation/`, `AGENTS.md`),
+их не нужно копировать в `.jarvis/`: `knowledge.sources` в `project.yaml` читает их на месте, один источник
+правды остаётся у команды. Markdown под `path` становится знанием с именем-путём
+(`knowledge:documentation/billing/overview.md`), документы по `skills` — скиллами, `scopes` привязывает часть
+документации к путям кода (документ вне `scopes` относится ко всему), `AGENTS.md` ниже корня относится к своему
+каталогу. Пути из `security.deniedPaths` не читаются. Индекс, `knowledge.read`/`knowledge.search`, `jarvis ask`
+и `jarvis mcp serve` видят источники так же, как `.jarvis/knowledge`. `onboard --module` задаёт run область
+(артефакт `scope`), поэтому агент получает документацию своего модуля, а не всю.
+
+Зачем: в пилоте агент онбординга по одному коду нашёл механику одного модуля, но почти ни одного правила
+использования и ловушки — они были только в документации команды.
+
 ## Пакет контекста (EngineeringContextPackage)
 
 На каждый вызов агента резолвер (`src/knowledge/resolver.ts`) собирает пакет по области задачи — стеки

@@ -1,6 +1,7 @@
 import { createRuntime } from "../../app/runtime.ts";
 import { repoIdOf, updateGraph, verifyGraph } from "../../knowledge/graph/update.ts";
 import { refreshIndex, search } from "../../knowledge/retrieval/service.ts";
+import { knowledgeRootsOf } from "../../knowledge/sources.ts";
 import type { CliContext } from "../context.ts";
 import { CliExit, EXIT } from "../output.ts";
 import { loadForCli } from "./config.ts";
@@ -108,7 +109,7 @@ export async function runKnowledgeIndex(ctx: CliContext): Promise<void> {
   const loaded = await loadForCli(ctx);
   const runtime = createRuntime(loaded, { env: ctx.env });
   try {
-    const roots = { projectRoot: loaded.project?.root ?? ctx.cwd, userRoot: loaded.home.root };
+    const roots = knowledgeRootsOf(loaded, loaded.project?.root ?? ctx.cwd);
     const report = await refreshIndex(runtime, roots);
     const counts = runtime.index.count();
     ctx.out.result({ ...report, ...counts, embedder: runtime.embedder?.id ?? null }, () =>
@@ -130,7 +131,7 @@ export async function runKnowledgeSearch(
   const loaded = await loadForCli(ctx);
   const runtime = createRuntime(loaded, { env: ctx.env });
   try {
-    const roots = { projectRoot: loaded.project?.root ?? ctx.cwd, userRoot: loaded.home.root };
+    const roots = knowledgeRootsOf(loaded, loaded.project?.root ?? ctx.cwd);
     await refreshIndex(runtime, roots);
     const result = await search(runtime, roots, query, { limit: options.limit ?? 10 });
     ctx.out.result(result, () => {

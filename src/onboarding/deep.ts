@@ -74,6 +74,15 @@ export async function mapModule(runtime: Runtime, options: MapModuleOptions): Pr
     dataClass: runtime.loaded.config.dataClass,
     ...(runtime.loaded.config.profile ? { profile: runtime.loaded.config.profile } : {}),
   });
+  // the module is the run's scope: knowledge and skills scoped to other paths stay out of its context
+  runtime.artifacts.put({
+    runId: run.id,
+    type: "scope",
+    name: "scope.json",
+    content: JSON.stringify({ paths: [`${options.module}/`] }),
+    mediaType: "application/json",
+    provenance: { kind: "tool", capability: "onboard.module" },
+  });
   runtime.events.emit({
     kind: "run.created",
     runId: run.id,

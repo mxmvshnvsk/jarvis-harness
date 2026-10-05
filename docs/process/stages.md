@@ -46,6 +46,10 @@ Remaining commands of ADR-0001 §15:
   the technical log no longer hides the paths in tool arguments
 - `onboard --module` takes a directory inside a module (a large monorepo package is too much for one pass):
   facts are counted for that directory, dependencies named at its depth inside the package and by module outside
+- `knowledge.sources` (`src/knowledge/sources.ts`): the team's documentation and `AGENTS.md` read in place — knowledge
+  named by path, `SKILL_*`-style documents as skills, `scopes` from documentation to code paths, module memos scoped
+  to their directory, denied paths skipped; `onboard --module` gives its run a `scope` artifact so the mapper gets the
+  documentation of its module only; `knowledge.read` takes a bare document name
 
 ADR-0001 §20 stage 12 (git hooks) — `f11ca47`:
 

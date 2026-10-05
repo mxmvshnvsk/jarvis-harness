@@ -126,7 +126,14 @@ knowledge:                     # ADR-0020 §3, §5; ADR-0015
   retrieval:
     rankAbove: 4               # ранжировать документы знания индексом, если подошло больше этого числа
     embeddings: embed          # id модели с /embeddings; выключено по умолчанию (ADR-0015 §6)
-  sources: []                  # зарезервировано
+  sources:                     # документация команды на месте, без копий в .jarvis/ (см. knowledge.md)
+    - path: documentation      # каталог или файл от корня репозитория
+      include: ["**/*.md"]     # по умолчанию
+      skills: ["SKILL_*.md"]   # эти документы — скиллы (id: SKILL_foo-bar.md → foo-bar)
+      scopes:                  # документ (glob от path) → пути кода, к которым он относится
+        "billing/**": ["packages/lib/src/billing/**"]
+      agents: [implementation] # для кого скиллы источника; пусто = implementation
+    - AGENTS.md                # строка = { path }; AGENTS.md ниже корня — только для своего каталога
 
 context:                       # ADR-0013
   thresholds:                  # доли эффективного окна; по умолчанию как ниже

@@ -6,6 +6,7 @@ import type { KnowledgeConfig } from "../core/config/schema.ts";
 import { capabilityMatches } from "../tools/registry.ts";
 import { globMatches, parseFrontMatter } from "./frontmatter.ts";
 import { loadSkills, type Skill, skillRef } from "./skills.ts";
+import { loadSourceDocuments } from "./sources.ts";
 import { type KnowledgeRoots, loadStandards, type Scope, type Standard, standardRef } from "./standards.ts";
 
 /**
@@ -51,6 +52,17 @@ export function loadKnowledgeDocs(roots: KnowledgeRoots): KnowledgeDoc[] {
         tags: meta.tags,
       });
     }
+  }
+  // knowledge.sources: the team's documentation in place; its skills are loaded as skills instead
+  for (const d of loadSourceDocuments(roots)) {
+    if (d.skill) continue;
+    out.push({
+      name: d.path,
+      text: d.text,
+      sha: d.sha,
+      scope: { stacks: d.stacks, paths: d.paths, agents: d.agents },
+      tags: d.tags,
+    });
   }
   return out;
 }
@@ -180,7 +192,8 @@ function stableBySeverity(items: Standard[]): Standard[] {
 /** Reads one item by its provenance ref for the `knowledge.read` tool. */
 export function readByRef(roots: KnowledgeRoots, ref: string): string | undefined {
   const [kind, rest] = ref.split(":", 2) as [string, string | undefined];
-  if (!rest) return undefined;
+  // a bare name (`conventions.md`, `documentation/billing/overview.md`) is a knowledge document
+  if (!rest) return readByRef(roots, `knowledge:${ref}`);
   const id = rest.split("@")[0]?.split("#")[0] as string;
   if (kind === "standard") {
     const s = loadStandards(roots).find((x) => x.id === id);

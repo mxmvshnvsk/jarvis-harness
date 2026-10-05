@@ -7,6 +7,7 @@ import { effectiveStacks } from "../capabilities/detector.ts";
 import { renderPackage } from "../knowledge/package.ts";
 import { resolvePackage } from "../knowledge/resolver.ts";
 import { refreshIndex, search } from "../knowledge/retrieval/service.ts";
+import { knowledgeRootsOf } from "../knowledge/sources.ts";
 import { shortRunId } from "../storage/runStore.ts";
 
 /**
@@ -23,7 +24,7 @@ export function buildMcpServer(
   version: string,
 ): McpServer {
   const server = new McpServer({ name: "jarvis", version });
-  const roots = { projectRoot, userRoot: runtime.loaded.home.root };
+  const roots = knowledgeRootsOf(runtime.loaded, projectRoot);
 
   server.registerTool(
     "knowledge.search",

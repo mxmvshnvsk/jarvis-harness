@@ -248,4 +248,33 @@ describe("jarvis onboard --module", () => {
     expect(nowhere.code).not.toBe(0);
     expect(nowhere.err).toContain("not a module");
   });
+
+  it("gives the mapper the team's documentation scoped to the module (knowledge.sources)", async () => {
+    put("documentation/orders/overview.md", "# Orders\nTotals are formatted by util/money only.\n");
+    put("documentation/orders/SKILL_orders.md", "# Changing orders\n1. Never round before tax.\n");
+    put("documentation/billing/overview.md", "# Billing\nInvoices are monthly.\n");
+    put(
+      ".jarvis/project.yaml",
+      [
+        "version: 1",
+        "workspace: { mode: cwd }",
+        "knowledge:",
+        "  sources:",
+        "    - path: documentation",
+        '      skills: ["SKILL_*.md"]',
+        '      scopes: { "orders/**": ["src/orders/**"], "billing/**": ["src/billing/**"] }',
+        "      agents: [onboard-mapper]",
+        "",
+      ].join("\n"),
+    );
+    mapper(GOOD);
+    const r = await jarvis(["--json", "onboard", "--module", "src/orders", "--no-graph"]);
+    expect(r.code).toBe(0);
+    const first = server.requests[0] as CapturedRequest;
+    const task = (first.body.messages as Array<{ role: string; content: string }>)[1]?.content ?? "";
+    expect(task).toContain("## Skill orders@1 — Changing orders");
+    expect(task).toContain("Never round before tax.");
+    expect(task).toContain("## Knowledge documentation/orders/overview.md");
+    expect(task).not.toContain("Invoices are monthly.");
+  });
 });

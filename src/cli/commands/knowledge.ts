@@ -8,6 +8,7 @@ import type { ArtifactVersion } from "../../core/domain/artifact.ts";
 import { changedFiles, checkStandards } from "../../knowledge/check.ts";
 import { resolvePackage } from "../../knowledge/resolver.ts";
 import { loadSkills } from "../../knowledge/skills.ts";
+import { knowledgeRootsOf } from "../../knowledge/sources.ts";
 import { loadStandards } from "../../knowledge/standards.ts";
 import { shortRunId } from "../../storage/runStore.ts";
 import type { CliContext } from "../context.ts";
@@ -15,7 +16,7 @@ import { CliExit, EXIT, padEnd } from "../output.ts";
 import { loadForCli } from "./config.ts";
 
 function rootsOf(loaded: Awaited<ReturnType<typeof loadForCli>>, cwd: string) {
-  return { projectRoot: loaded.project?.root ?? cwd, userRoot: loaded.home.root };
+  return knowledgeRootsOf(loaded, loaded.project?.root ?? cwd);
 }
 
 /** `jarvis standards list` */

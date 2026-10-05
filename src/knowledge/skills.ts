@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { parse } from "yaml";
 import { z } from "zod";
+import { loadSourceDocuments, skillIdOf } from "./sources.ts";
 import type { KnowledgeRoots } from "./standards.ts";
 
 /**
@@ -37,6 +38,8 @@ export interface Skill extends SkillManifest {
   readonly instructions: string;
   readonly level: "builtin" | "project" | "user";
   readonly dir?: string;
+  /** Repository path of a skill read from `knowledge.sources`. */
+  readonly source?: string;
 }
 
 export class SkillLoadError extends Error {
@@ -134,12 +137,35 @@ export function loadSkills(roots: KnowledgeRoots): Skill[] {
     ? readSkillsDir(join(roots.projectRoot, ".jarvis", "skills"), "project")
     : [];
   const projectIds = new Set(project.map((s) => s.id));
-  const builtin = BUILTIN_SKILLS.filter((s) => !projectIds.has(s.id));
-  const taken = new Set([...projectIds, ...builtin.map((s) => s.id)]);
+  // knowledge.sources: skills kept in the team's documentation; `.jarvis/skills` wins by id
+  const fromSources: Skill[] = [];
+  for (const d of loadSourceDocuments(roots)) {
+    if (!d.skill) continue;
+    const id = skillIdOf(d.path, new Set([...projectIds, ...fromSources.map((s) => s.id)]));
+    fromSources.push({
+      id,
+      version: 1,
+      ...(d.title ? { title: d.title } : {}),
+      appliesTo: { stacks: d.stacks, kinds: [], paths: d.paths, agents: d.agents },
+      inputs: [],
+      outputs: [],
+      requiredCapabilities: [],
+      requiredStandards: [],
+      verification: [],
+      evals: [],
+      level: "project",
+      source: d.path,
+      instructions: d.text,
+    });
+  }
+  const local = [...project, ...fromSources];
+  const localIds = new Set(local.map((s) => s.id));
+  const builtin = BUILTIN_SKILLS.filter((s) => !localIds.has(s.id));
+  const taken = new Set([...localIds, ...builtin.map((s) => s.id)]);
   const user = roots.userRoot
     ? readSkillsDir(join(roots.userRoot, "skills"), "user").filter((s) => !taken.has(s.id))
     : [];
-  return [...project, ...builtin, ...user];
+  return [...local, ...builtin, ...user];
 }
 
 export function skillRef(s: Pick<Skill, "id" | "version">): string {

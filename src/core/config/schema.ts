@@ -233,10 +233,33 @@ export const ContextConfigSchema = z.strictObject({
   maxContext: z.int().positive().optional(),
 });
 
+/**
+ * Documentation the team already keeps in the repository, read in place (no copies in `.jarvis/`):
+ * markdown under `path` becomes knowledge, files matching `skills` become skills, `scopes` ties a
+ * part of the documentation to the code paths it is about. A bare string is `{ path }`.
+ */
+export const KnowledgeSourceSchema = z.preprocess(
+  (v) => (typeof v === "string" ? { path: v } : v),
+  z.strictObject({
+    /** Repository-relative directory or file. */
+    path: z.string().min(1),
+    /** Globs relative to `path`; a file source ignores them. */
+    include: z.array(z.string().min(1)).default(["**/*.md"]),
+    exclude: z.array(z.string().min(1)).default([]),
+    /** Globs (relative to `path`, or a file name) of documents that are skills, e.g. `SKILL_*.md`. */
+    skills: z.array(z.string().min(1)).default([]),
+    /** Glob of documents (relative to `path`) → code paths they apply to; unmatched documents apply everywhere. */
+    scopes: z.record(z.string(), z.array(z.string().min(1))).prefault({}),
+    /** Agents the skills of this source are for; empty = implementation (ADR-0020 §1). */
+    agents: z.array(z.string().min(1)).default([]),
+  }),
+);
+export type KnowledgeSource = z.infer<typeof KnowledgeSourceSchema>;
+
 /** ADR-0020 §3, §5 — how standards, skills and knowledge are selected and budgeted. */
 export const KnowledgeConfigSchema = z.strictObject({
-  /** Semantic retrieval sources (ADR-0015); unused until the retrieval stage. */
-  sources: z.array(z.string().min(1)).default([]),
+  /** Documentation read in place (see KnowledgeSourceSchema); `AGENTS.md` below the root is scoped to its directory. */
+  sources: z.array(KnowledgeSourceSchema).default([]),
   /** Skills per agent call; the rest are listed as available on request. */
   maxSkills: z.int().positive().default(2),
   /** ADR-0015: how knowledge documents are chosen when more match than fit. */

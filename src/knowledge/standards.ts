@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { z } from "zod";
+import type { KnowledgeSource } from "../core/config/schema.ts";
 import { parseFrontMatter } from "./frontmatter.ts";
 
 /**
@@ -109,6 +110,10 @@ export interface KnowledgeRoots {
   readonly projectRoot?: string | undefined;
   /** `~/.jarvis` */
   readonly userRoot?: string | undefined;
+  /** `knowledge.sources`: documentation read in place from the project root. */
+  readonly sources?: readonly KnowledgeSource[] | undefined;
+  /** `security.deniedPaths`: a denied document is never read. */
+  readonly isDenied?: ((relative: string) => boolean) | undefined;
 }
 
 /** Project standards first; user-level ones only when the id is not taken by the project. */

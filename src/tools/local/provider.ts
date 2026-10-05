@@ -3,6 +3,7 @@ import { dirname, join, relative } from "node:path";
 import type { ResolvedConfig } from "../../core/config/schema.ts";
 import { readByRef } from "../../knowledge/resolver.ts";
 import { refreshIndex, search } from "../../knowledge/retrieval/service.ts";
+import { knowledgeRootsOf } from "../../knowledge/sources.ts";
 import { gitIdentityEnv } from "../../orchestration/worktree.ts";
 import { effectMarker } from "../../storage/effects.ts";
 import type { Capability, ToolContext, ToolOutput, ToolProvider } from "../types.ts";
@@ -133,10 +134,7 @@ export class LocalToolProvider implements ToolProvider {
             if (artifact && artifact.runId === ctx.run.id)
               return { ok: true, text: ctx.runtime.artifacts.text(artifact) };
           }
-          const text = readByRef(
-            { projectRoot: ctx.workspacePath, userRoot: ctx.runtime.loaded.home.root },
-            ref,
-          );
+          const text = readByRef(knowledgeRootsOf(ctx.runtime.loaded, ctx.workspacePath), ref);
           return text === undefined ? { ok: false, error: `unknown ref "${ref}"` } : { ok: true, text };
         },
       },
@@ -153,7 +151,7 @@ export class LocalToolProvider implements ToolProvider {
           required: ["query"],
         },
         handler: async (args, ctx) => {
-          const roots = { projectRoot: ctx.workspacePath, userRoot: ctx.runtime.loaded.home.root };
+          const roots = knowledgeRootsOf(ctx.runtime.loaded, ctx.workspacePath);
           await refreshIndex(ctx.runtime, roots, ctx.run.id);
           const result = await search(ctx.runtime, roots, str(args, "query"), {
             limit: num(args, "limit", 10),

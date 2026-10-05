@@ -1,5 +1,6 @@
 import { createRuntime } from "../../app/runtime.ts";
 import { type AnswerResult, answerFromKnowledge, plan } from "../../knowledge/ask.ts";
+import { knowledgeRootsOf } from "../../knowledge/sources.ts";
 import type { CliContext } from "../context.ts";
 import { CliExit, EXIT } from "../output.ts";
 import { loadForCli } from "./config.ts";
@@ -24,7 +25,7 @@ export async function runAsk(ctx: CliContext, words: readonly string[], options:
   }
   const loaded = await loadForCli(ctx);
   const root = loaded.project?.root ?? ctx.cwd;
-  const roots = { projectRoot: root, userRoot: loaded.home.root };
+  const roots = knowledgeRootsOf(loaded, root);
   const runtime = createRuntime(loaded, { env: ctx.env });
   try {
     const { terms, retrieval } = await plan(runtime, roots, question, options.limit ?? 8);
