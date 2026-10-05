@@ -153,7 +153,7 @@ checkpoint `human edit`, см. [human.md](human.md#ручные-правки-в-
 `approve --resume`, `onboard --module` и `ask` в терминале (stderr, раз в секунду):
 
 ```
-⠼ 6:12 · map#1 onboard-mapper · model 7 calls, avg 0:42, waiting 1:24 · tools 21/40 [█████░░░░░] · tokens in 98k out 4.1k/60k · last repo.read …/senders/invoice-mailer.ts
+⠼ 6:12 · map#1 onboard-mapper · model call 8, avg 0:42, waiting 1:24 · tools 21/40 [█████░░░░░] · tokens in 98k out 4.1k/60k · last repo.read …/senders/invoice-mailer.ts
 ```
 
 Прошло с начала, шаг и агент, вызовы модели и сколько ждём текущий ответ (дольше трёх средних — «slower than

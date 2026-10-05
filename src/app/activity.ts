@@ -218,7 +218,12 @@ export function formatActivity(a: Activity, options: FormatOptions = {}): string
             : "";
       wait = `, waiting ${clock(a.waitingMs)}${late}`;
     }
-    parts.push(`model ${a.step.modelCalls} call${a.step.modelCalls === 1 ? "" : "s"}${avg}${wait}`);
+    // while waiting, name the call in flight: "0 calls, waiting 2:02" read as if nothing was asked (pilot)
+    parts.push(
+      a.waitingMs !== undefined
+        ? `model call ${a.step.modelCalls + 1}${avg}${wait}`
+        : `model ${a.step.modelCalls} call${a.step.modelCalls === 1 ? "" : "s"}${avg}`,
+    );
     parts.push(
       a.step.maxToolCalls
         ? `tools ${a.step.toolCalls}/${a.step.maxToolCalls} ${bar(a.step.toolCalls, a.step.maxToolCalls)}`
