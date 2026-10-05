@@ -127,4 +127,47 @@ describe("verifyModuleMap", () => {
     ]);
     expect(out.dropped.map((d) => d.what).sort()).toEqual(["Ghost", "phantom"]);
   });
+
+  it("finds symbols that start or end with punctuation — package names and export paths (pilot)", () => {
+    sb.write(
+      "project/packages/shared/package.json",
+      [
+        "{",
+        '    "name": "@repo/shared",',
+        '    "exports": {',
+        '        "./eslint-config/*": "./eslint-config/*"',
+        "    }",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    const out = verifyModuleMap(
+      doc({
+        module: "packages/shared",
+        publicApi: [
+          { symbol: "./eslint-config/*", file: "packages/shared/package.json", description: "eslint" },
+          { symbol: "./jest-config/*", file: "packages/shared/package.json", description: "absent" },
+        ],
+        terms: [{ term: "shared config package", synonyms: [], symbols: ["@repo/shared"] }],
+      }),
+      { root: sb.project },
+    );
+    expect(out.publicApi.map((a) => [a.symbol, a.line])).toEqual([["./eslint-config/*", 4]]);
+    expect(out.terms.map((t) => t.term)).toEqual(["shared config package"]);
+    expect(out.dropped.map((d) => d.what)).toEqual(["./jest-config/*"]);
+  });
+
+  it("still matches a plain identifier only as a whole word", () => {
+    const out = verifyModuleMap(
+      doc({
+        publicApi: [
+          { symbol: "Order", file: "src/orders/order.ts", description: "the order" },
+          { symbol: "Ord", file: "src/orders/order.ts", description: "a prefix only" },
+        ],
+      }),
+      { root: sb.project },
+    );
+    expect(out.publicApi.map((a) => a.symbol)).toEqual(["Order"]);
+    expect(out.dropped.map((d) => d.what)).toEqual(["Ord"]);
+  });
 });

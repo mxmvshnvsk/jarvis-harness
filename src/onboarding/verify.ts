@@ -150,7 +150,8 @@ export function verifyModuleMap(doc: ModuleMapDoc, options: VerifyOptions): Veri
       });
       continue;
     }
-    const at = lines.findIndex((l) => new RegExp(`\\b${escapeRegExp(api.symbol)}\\b`).test(l));
+    const re = symbolPattern(api.symbol);
+    const at = lines.findIndex((l) => re.test(l));
     if (at < 0) {
       dropped.push({
         section: "publicApi",
@@ -196,7 +197,7 @@ export function verifyModuleMap(doc: ModuleMapDoc, options: VerifyOptions): Veri
 }
 
 function symbolInModule(files: Files, doc: ModuleMapDoc, symbol: string): boolean {
-  const re = new RegExp(`\\b${escapeRegExp(symbol)}\\b`);
+  const re = symbolPattern(symbol);
   const seen = new Set<string>();
   const candidates = [
     ...doc.publicApi.map((a) => a.file),
@@ -209,6 +210,19 @@ function symbolInModule(files: Files, doc: ModuleMapDoc, symbol: string): boolea
     if (files.lines(file)?.some((l) => re.test(l))) return true;
   }
   return false;
+}
+
+/**
+ * A symbol as a whole token. `\b` only works between a word and a non-word character, so a symbol
+ * that starts or ends with punctuation — a package name `@repo/shared`, an export path
+ * `./eslint-config/*` — never matched inside quotes (pilot, 2026-10). The edge is guarded only where
+ * the symbol itself has a word character there.
+ */
+export function symbolPattern(symbol: string): RegExp {
+  const word = /[\w$]/;
+  const head = word.test(symbol.charAt(0)) ? "(?<![\\w$])" : "";
+  const tail = word.test(symbol.charAt(symbol.length - 1)) ? "(?![\\w$])" : "";
+  return new RegExp(`${head}${escapeRegExp(symbol)}${tail}`);
 }
 
 function escapeRegExp(s: string): string {

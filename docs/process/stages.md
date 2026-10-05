@@ -37,6 +37,8 @@ Remaining commands of ADR-0001 §15:
   `cause` chain with a hint for an untrusted CA / DNS / refused connection (`src/core/errorCause.ts`), the technical log
   writes the whole chain; `models probe` fails on an unreachable model instead of saving "supports nothing", gives every
   canary 512 output tokens for a reasoning model, and reports a cut-off answer as inconclusive, not as drift
+- onboard --module: the evidence check finds symbols that start or end with punctuation (`@repo/shared`,
+  `./eslint-config/*`); `\b` never matched them inside quotes
 
 ADR-0001 §20 stage 12 (git hooks) — `f11ca47`:
 
