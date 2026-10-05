@@ -42,6 +42,8 @@ Remaining commands of ADR-0001 §15:
 - agent finalization: when the tool loop ends with an answer that already is a valid result document (fenced or bare
   JSON), that is the result; otherwise the answer stays in the finalization request with its schema issues. The pilot
   paid two extra slow calls per step, and the re-asked model echoed the JSON Schema instead of filling it
+- redaction: a repository path made of words (`packages/shared/eslint-config/base`) is not a high-entropy secret;
+  the technical log no longer hides the paths in tool arguments
 
 ADR-0001 §20 stage 12 (git hooks) — `f11ca47`:
 

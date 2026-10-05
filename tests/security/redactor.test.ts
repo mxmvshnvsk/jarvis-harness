@@ -57,6 +57,17 @@ const SECRET_CORPUS: Array<{ type: string; value: string; context: string }> = [
 describe("Redactor", () => {
   const redactor = new Redactor({ literals: ["corp-llm-token-9f8e7d6c5b4a"], salt: "test" });
 
+  it("keeps repository paths in tool arguments, but not a token cut by slashes (pilot)", () => {
+    for (const text of [
+      '{"path":"packages/shared/eslint-config/base.js"}',
+      "file: packages/shared-lib/src/billing/invoice-rules/billingSettings.ts",
+    ]) {
+      expect(redactor.redact(text)).toMatchObject({ text, count: 0 });
+    }
+    const secret = "token: Ab3kX9fK2mP8q/L4vN7bR1tY6wE3zA5cH0jD";
+    expect(redactor.redact(secret).text).not.toContain("L4vN7bR1tY6wE3zA5cH0jD");
+  });
+
   it("removes every corpus secret and keeps the surrounding text", () => {
     for (const item of SECRET_CORPUS) {
       const r = redactor.redact(item.context);
