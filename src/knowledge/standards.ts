@@ -22,6 +22,12 @@ export const CheckSchema = z.strictObject({
       must: z.string().min(1).optional(),
       /** Regex that must not appear on any line of a matching file. */
       mustNot: z.string().min(1).optional(),
+      /**
+       * Which lines `mustNot` judges: `added` — only lines the change adds (a rule for new code in a
+       * legacy codebase; touching an old file does not make its old lines violations), `all` — every
+       * line of a changed file. Without a base to compare with, every line is judged.
+       */
+      lines: z.enum(["added", "all"]).default("added"),
     })
     .optional(),
   /** A capability (`project.lint`, `project.format`, `code.diagnostics`) whose success is the check. */

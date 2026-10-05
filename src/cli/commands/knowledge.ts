@@ -50,8 +50,9 @@ export async function runStandardsCheck(ctx: CliContext, options: { base?: strin
   const loaded = await loadForCli(ctx);
   const root = loaded.project?.root ?? ctx.cwd;
   const standards = loadStandards(rootsOf(loaded, ctx.cwd));
-  const files = await changedFiles(root, options.base ?? "HEAD");
-  const report = await checkStandards({ standards, workspace: root, files });
+  const base = options.base ?? "HEAD";
+  const files = await changedFiles(root, base);
+  const report = await checkStandards({ standards, workspace: root, files, baseRef: base });
   const required = report.violations.filter((v) => v.severity === "required");
   ctx.out.result(report, () => {
     ctx.out.line(

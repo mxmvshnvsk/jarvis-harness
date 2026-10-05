@@ -1,8 +1,9 @@
+import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { detectStacks } from "../../src/capabilities/detector.ts";
-import { checkStandards } from "../../src/knowledge/check.ts";
+import { changedFiles, checkStandards } from "../../src/knowledge/check.ts";
 import { globMatches, parseFrontMatter } from "../../src/knowledge/frontmatter.ts";
 import { renderPackage } from "../../src/knowledge/package.ts";
 import { readByRef, resolvePackage } from "../../src/knowledge/resolver.ts";
@@ -135,6 +136,51 @@ describe("standards", () => {
     expect(noTools.skipped).toEqual([
       { standard: "standard:lint@1", reason: "tool checks need a run context" },
     ]);
+  });
+
+  it("judges a forbidden pattern on the lines a change adds, not the legacy lines of a touched file (pilot)", async () => {
+    const env = {
+      ...process.env,
+      GIT_AUTHOR_NAME: "t",
+      GIT_AUTHOR_EMAIL: "t@t",
+      GIT_COMMITTER_NAME: "t",
+      GIT_COMMITTER_EMAIL: "t@t",
+    };
+    const git = (args: string[]) => execFileSync("git", args, { cwd: sb.project, env, encoding: "utf8" });
+    std(
+      "no-truthy",
+      "verification:\n  kind: deterministic\n  check: { pattern: { glob: '**/*.test.ts', mustNot: '\\.toBeTruthy\\(' } }",
+    );
+    std(
+      "no-truthy-anywhere",
+      "severity: recommended\nverification:\n  kind: deterministic\n  check: { pattern: { glob: '**/*.test.ts', mustNot: '\\.toBeTruthy\\(', lines: all } }",
+    );
+    mkdirSync(join(sb.project, "src"), { recursive: true });
+    writeFileSync(join(sb.project, "src", "old.test.ts"), "expect(a).toBeTruthy();\nexpect(b).toBe(true);\n");
+    git(["init", "-q", "-b", "main"]);
+    git(["add", "-A"]);
+    git(["commit", "-q", "-m", "legacy"]);
+    const base = git(["rev-parse", "HEAD"]).trim();
+    // the change touches the legacy test file and adds one bad line, plus a new untracked file
+    writeFileSync(
+      join(sb.project, "src", "old.test.ts"),
+      "expect(a).toBeTruthy();\nexpect(b).toBe(true);\nexpect(c).toBeTruthy();\n",
+    );
+    writeFileSync(join(sb.project, "src", "new.test.ts"), "expect(d).toBeTruthy();\n");
+    const standards = loadStandards({ projectRoot: sb.project });
+    const files = await changedFiles(sb.project, base);
+    expect(files).toEqual(expect.arrayContaining(["src/old.test.ts", "src/new.test.ts"]));
+    const report = await checkStandards({ standards, workspace: sb.project, files, baseRef: base });
+    const at = (id: string) =>
+      report.violations
+        .filter((v) => v.standardId === id)
+        .map((v) => `${v.file}:${v.line}`)
+        .sort();
+    expect(at("no-truthy")).toEqual(["src/new.test.ts:1", "src/old.test.ts:3"]);
+    expect(at("no-truthy-anywhere")).toEqual(["src/new.test.ts:1", "src/old.test.ts:1", "src/old.test.ts:3"]);
+    // without a base every line is judged, as before
+    const whole = await checkStandards({ standards, workspace: sb.project, files });
+    expect(whole.violations.filter((v) => v.standardId === "no-truthy")).toHaveLength(3);
   });
 });
 

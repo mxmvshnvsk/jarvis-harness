@@ -162,6 +162,7 @@ export async function analyseRange(
         standards,
         workspace: workspace.path,
         files,
+        baseRef: range.base,
         runTool: async (capability, args) => {
           const name = capability.startsWith("project.") ? capability.slice(8) : undefined;
           const command = name ? config.tools.local[name] : undefined;

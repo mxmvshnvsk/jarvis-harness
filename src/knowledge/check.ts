@@ -46,6 +46,43 @@ export async function changedFiles(workspace: string, baseRef: string): Promise<
   return [...set].sort();
 }
 
+/**
+ * Line numbers (1-based, in the new version) each file adds against `baseRef`; an untracked or new
+ * file adds all of its lines (`"all"`).
+ */
+export async function addedLines(
+  workspace: string,
+  baseRef: string,
+  files: readonly string[],
+): Promise<Map<string, Set<number> | "all">> {
+  const out = new Map<string, Set<number> | "all">();
+  if (files.length === 0) return out;
+  const tracked = await git(["ls-files", "--", ...files], workspace);
+  const known = new Set(tracked.code === 0 ? tracked.stdout.split("\n").filter(Boolean) : []);
+  const diff = await git(["diff", "-U0", "--no-color", "--no-ext-diff", baseRef, "--", ...files], workspace);
+  let current: string | undefined;
+  if (diff.code === 0) {
+    for (const line of diff.stdout.split("\n")) {
+      if (line.startsWith("+++ ")) {
+        const path = line.slice(4).trim();
+        current = path === "/dev/null" ? undefined : path.replace(/^b\//, "");
+        if (current) out.set(current, out.get(current) ?? new Set<number>());
+        continue;
+      }
+      const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/.exec(line);
+      if (hunk && current) {
+        const start = Number(hunk[1]);
+        const count = hunk[2] === undefined ? 1 : Number(hunk[2]);
+        const set = out.get(current);
+        if (set instanceof Set) for (let n = start; n < start + count; n += 1) set.add(n);
+      }
+    }
+    // a file new since the base shows up with a "--- /dev/null" header and all lines added: same thing
+  }
+  for (const f of files) if (!known.has(f) || (diff.code !== 0 && !out.has(f))) out.set(f, "all");
+  return out;
+}
+
 function regex(source: string): RegExp {
   return new RegExp(source);
 }
@@ -55,7 +92,22 @@ export async function checkStandards(input: {
   readonly workspace: string;
   readonly files: readonly string[];
   readonly runTool?: ToolRunner;
+  /** The base of the change: `mustNot` with `lines: added` then judges only the lines it adds. */
+  readonly baseRef?: string;
 }): Promise<CheckReport> {
+  // pilot: rules from the team's AGENTS.md are for new code; the legacy lines of a touched file are not
+  // the change's violations, and sending the implementation back over them could never succeed
+  const needsAdded =
+    input.baseRef !== undefined &&
+    input.standards.some(
+      (s) =>
+        s.verification.kind !== "semantic" &&
+        s.verification.check?.pattern?.mustNot &&
+        s.verification.check.pattern.lines === "added",
+    );
+  const added = needsAdded
+    ? await addedLines(input.workspace, input.baseRef as string, input.files)
+    : undefined;
   const checked: string[] = [];
   const skipped: CheckReport["skipped"] = [];
   const violations: Violation[] = [];
@@ -81,7 +133,10 @@ export async function checkStandards(input: {
         }
         if (check.pattern.mustNot) {
           const re = regex(check.pattern.mustNot);
+          const only =
+            check.pattern.lines === "added" && added ? (added.get(file) ?? new Set<number>()) : "all";
           text.split("\n").forEach((lineText, i) => {
+            if (only !== "all" && !only.has(i + 1)) return;
             if (re.test(lineText))
               violations.push({
                 standardId: s.id,

@@ -114,11 +114,13 @@ export const BUILTIN_TOOLS: Record<string, DeterministicTool> = {
     const workspace = ctx.workspace.ref.path;
     const standards = loadStandards({ projectRoot: workspace, userRoot: ctx.runtime.loaded.home.root });
     // The base commit, not the ref: in a worktree HEAD moves with every checkpoint (ADR-0003 §3).
-    const files = await changedFiles(workspace, ctx.workspace.ref.baseCommit ?? ctx.workspace.ref.baseRef);
+    const base = ctx.workspace.ref.baseCommit ?? ctx.workspace.ref.baseRef;
+    const files = await changedFiles(workspace, base);
     const report = await checkStandards({
       standards,
       workspace,
       files,
+      baseRef: base,
       runTool: async (capability, args) => {
         const r = await ctx.tools.invoke(capability, args);
         return { ok: r.ok, text: r.text, ...(r.denied ? { denied: r.denied } : {}) };

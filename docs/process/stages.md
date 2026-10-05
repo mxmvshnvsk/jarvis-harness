@@ -63,6 +63,10 @@ Remaining commands of ADR-0001 §15:
   packages through `exports` back to their sources; onboarding names external packages `pkg:<name>` instead of
   "(root)". On the pilot repo: `#/…` and `@acme/shared-lib/…` resolve, a change in the shared
   library reaches the app files that import it
+- resolver: before impact analysis a path scope is "unsure", not a match — path-scoped skills and documents rank after
+  everything that certainly applies, so the documentation's skills no longer displace `sdd-implementation`
+- standards: `mustNot` judges the lines a change adds (`lines: added`, the default; `all` for every line of a changed
+  file) — rules for new code in a legacy codebase no longer send the implementation back over old lines
 
 ADR-0001 §20 stage 12 (git hooks) — `f11ca47`:
 
