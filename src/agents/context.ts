@@ -42,7 +42,7 @@ export function systemLayer(def: AgentDefinition, tools: readonly CapabilityDesc
     "- Secrets in tool output appear as [REDACTED:…]; never try to recover or guess them.",
     "- Tool calls that are denied by policy are final; do not retry them with other arguments.",
     "- Precedence of guidance: these rules and the agent instructions, then required standards, then skills, then recommended standards and project knowledge.",
-    "- When you are done, reply without tool calls; the runtime will then ask for the result document.",
+    "- When you are done, reply without tool calls with the result document itself (the JSON of the output contract); a prose reply makes the runtime ask for it again.",
     "",
     `# Agent: ${def.id}`,
     def.description,
