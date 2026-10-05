@@ -9,6 +9,7 @@ import {
   unlinkSync,
 } from "node:fs";
 import { join } from "node:path";
+import { describeCauses } from "../core/errorCause.ts";
 
 /**
  * Technical log (ADR-0018): NDJSON files, one per day, in `<home>/logs`. It mirrors the event journal
@@ -66,15 +67,14 @@ export function logSettingsFrom(env: NodeJS.ProcessEnv): { keepDays: number; max
 /** Error → plain fields (message and stack are the point of a technical log). */
 export function errorFields(error: unknown): Record<string, unknown> {
   if (error instanceof Error) {
-    const extra = error as unknown as { cause?: unknown; status?: unknown };
-    const cause = extra.cause;
+    const extra = error as unknown as { status?: unknown; code?: unknown };
+    const causes = describeCauses(error);
     return {
       name: error.name,
       message: error.message,
       ...(error.stack ? { stack: error.stack } : {}),
-      ...(cause !== undefined
-        ? { cause: cause instanceof Error ? `${cause.name}: ${cause.message}` : String(cause) }
-        : {}),
+      ...(typeof extra.code === "string" ? { code: extra.code } : {}),
+      ...(causes !== undefined ? { cause: causes } : {}),
       ...(typeof extra.status === "number" ? { status: extra.status } : {}),
     };
   }

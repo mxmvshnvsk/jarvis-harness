@@ -1,3 +1,5 @@
+import { formatLink, rootCause } from "../core/errorCause.ts";
+
 /**
  * Error classification for model calls (ADR-0011 §1, ADR-0001 §19).
  *
@@ -90,6 +92,26 @@ export function classifyHttpError(
   return new ModelError("invalid", `model ${modelId}: request rejected (${status}): ${snippet}`, base);
 }
 
+/** TLS failures Node reports when the endpoint's certificate chain ends in a CA it does not trust. */
+const UNTRUSTED_CA_CODES = new Set([
+  "SELF_SIGNED_CERT_IN_CHAIN",
+  "DEPTH_ZERO_SELF_SIGNED_CERT",
+  "UNABLE_TO_GET_ISSUER_CERT",
+  "UNABLE_TO_GET_ISSUER_CERT_LOCALLY",
+  "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+]);
+
+/** What to do about a network failure, when the root cause says it plainly. */
+export function networkHint(code: string | undefined): string | undefined {
+  if (code === undefined) return undefined;
+  if (UNTRUSTED_CA_CODES.has(code)) {
+    return "Node does not trust the endpoint's CA (a corporate CA?): set NODE_OPTIONS=--use-system-ca or NODE_EXTRA_CA_CERTS=<ca.pem>";
+  }
+  if (code === "ENOTFOUND" || code === "EAI_AGAIN") return "the host name does not resolve: VPN or DNS";
+  if (code === "ECONNREFUSED") return "nothing listens at that address: check baseUrl";
+  return undefined;
+}
+
 export function classifyNetworkError(error: unknown, modelId: string): ModelError {
   if (error instanceof ModelError) return error;
   const message = error instanceof Error ? error.message : String(error);
@@ -97,8 +119,13 @@ export function classifyNetworkError(error: unknown, modelId: string): ModelErro
   if (name === "AbortError" || name === "TimeoutError" || /timed? ?out/i.test(message)) {
     return new ModelError("transient", `model ${modelId}: timeout: ${message}`, { cause: error, modelId });
   }
-  return new ModelError("transient", `model ${modelId}: network error: ${message}`, {
-    cause: error,
-    modelId,
-  });
+  // `fetch failed` alone says nothing: the reason is the innermost cause (ADR-0018 — debug by logs)
+  const root = rootCause(error);
+  const reason = root ? ` (${formatLink(root)})` : "";
+  const hint = networkHint(root?.code);
+  return new ModelError(
+    "transient",
+    `model ${modelId}: network error: ${message}${reason}${hint ? ` — ${hint}` : ""}`,
+    { cause: error, modelId },
+  );
 }

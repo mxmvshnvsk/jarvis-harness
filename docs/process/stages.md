@@ -33,6 +33,11 @@ Remaining commands of ADR-0001 §15:
   deltas), redaction, retention; `step.error` with stack, provider message in `model.error`, `args` in `tool.call`;
   `jarvis logs` and a `doctor` line. The `JARVIS_LOG*` variables are reserved (they used to be read as configuration paths)
 
+- Pilot fixes, first real model (DeepSeek-V4-Flash behind a corporate gateway): a network error names the root of the
+  `cause` chain with a hint for an untrusted CA / DNS / refused connection (`src/core/errorCause.ts`), the technical log
+  writes the whole chain; `models probe` fails on an unreachable model instead of saving "supports nothing", gives every
+  canary 512 output tokens for a reasoning model, and reports a cut-off answer as inconclusive, not as drift
+
 ADR-0001 §20 stage 12 (git hooks) — `f11ca47`:
 
 - `jarvis hooks install|uninstall|status` — a thin `pre-push` shim honouring `core.hooksPath` and linked

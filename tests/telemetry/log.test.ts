@@ -85,6 +85,23 @@ describe("Logger", () => {
     expect(String(boom?.stack)).toContain("kaput");
   });
 
+  it("writes the whole cause chain of an error, down to the code that names the problem", () => {
+    const log = make("debug");
+    const tls = Object.assign(new Error("self-signed certificate in certificate chain"), {
+      code: "SELF_SIGNED_CERT_IN_CHAIN",
+    });
+    const refused = Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:1"), { code: "ECONNREFUSED" });
+    log.error("tls", errorFields(new TypeError("fetch failed", { cause: tls })));
+    log.error(
+      "refused",
+      errorFields(new TypeError("fetch failed", { cause: new AggregateError([refused]) })),
+    );
+    const [first, second] = readLogs(dir, { level: "debug" });
+    expect(first?.cause).toBe("SELF_SIGNED_CERT_IN_CHAIN: self-signed certificate in certificate chain");
+    // the code is already in the message: not repeated
+    expect(second?.cause).toBe("connect ECONNREFUSED 127.0.0.1:1");
+  });
+
   it("logs a prompt as a delta and notes when context management rewrote it", () => {
     const log = make("debug");
     const a = { role: "system", content: "s" };

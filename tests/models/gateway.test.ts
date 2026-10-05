@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { MemoryUsageStore } from "../../src/budget/usage.ts";
 import { EnvSecretResolver } from "../../src/core/config/secrets.ts";
+import { classifyNetworkError } from "../../src/models/errors.ts";
 import { defaultAdapters, MemoryCassetteStore, ModelError, ModelGateway } from "../../src/models/index.ts";
 import { MemoryEventStore } from "../../src/telemetry/events.ts";
 import { completion, type FakeOpenAi, startFakeOpenAi, toolCallCompletion } from "../helpers/fakeOpenAi.ts";
@@ -198,5 +199,25 @@ describe("ModelGateway", () => {
     await g.call({ ...ask, messages: [{ role: "user", content: "x".repeat(360) }] });
     const after = g.estimator.estimateText("private", "deepseek", "x".repeat(360));
     expect(after).toBeGreaterThan(before);
+  });
+});
+
+describe("classifyNetworkError", () => {
+  it("names the root cause of a bare `fetch failed` and says what to do about an untrusted CA", () => {
+    const tls = Object.assign(new Error("self-signed certificate in certificate chain"), {
+      code: "SELF_SIGNED_CERT_IN_CHAIN",
+    });
+    const error = classifyNetworkError(new TypeError("fetch failed", { cause: tls }), "corp");
+    expect(error.kind).toBe("transient");
+    expect(error.message).toBe(
+      "model corp: network error: fetch failed (SELF_SIGNED_CERT_IN_CHAIN: self-signed certificate in certificate chain)" +
+        " — Node does not trust the endpoint's CA (a corporate CA?): set NODE_OPTIONS=--use-system-ca or NODE_EXTRA_CA_CERTS=<ca.pem>",
+    );
+  });
+
+  it("keeps the plain message when there is no cause", () => {
+    expect(classifyNetworkError(new Error("socket hang up"), "corp").message).toBe(
+      "model corp: network error: socket hang up",
+    );
   });
 });

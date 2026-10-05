@@ -14,6 +14,11 @@ export interface ProbeResult {
   readonly latencyMs: number;
   readonly supports: Pick<ModelSupports, "tools" | "jsonMode" | "jsonSchema" | "systemRole">;
   readonly errors: Record<string, string>;
+  /**
+   * Capabilities the canary could not decide: the answer was cut off before any content (a reasoning
+   * model spends its output budget on thinking first). Never reported as drift. Absent in old files.
+   */
+  readonly inconclusive?: ReadonlyArray<keyof ProbeResult["supports"]>;
   readonly outputTokens: number;
 }
 
@@ -23,6 +28,12 @@ export interface ProbeDrift {
   readonly probed: boolean;
 }
 
+/**
+ * Output budget of every canary. Reasoning models think before they answer, and the thinking counts
+ * against `max_tokens`: a budget of 16 left DeepSeek-V4-Flash with an empty answer (pilot, 2026-10).
+ */
+export const PROBE_MAX_OUTPUT = 512;
+
 const PING_TOOL = {
   name: "ping",
   description: "Call this tool to acknowledge the request.",
@@ -31,18 +42,46 @@ const PING_TOOL = {
 
 export async function probeModel(gateway: ModelGateway, modelId: string): Promise<ProbeResult> {
   const errors: Record<string, string> = {};
+  const inconclusive: Array<keyof ProbeResult["supports"]> = [];
   const started = Date.now();
   let outputTokens = 0;
+  /** Whether any canary got an answer: until then a network failure means "unreachable", not "unsupported". */
+  let reached = false;
+  /** Judges one canary answer; an empty answer cut at the limit decides nothing. */
+  const judge = (
+    name: keyof ProbeResult["supports"],
+    r: { text: string; toolCalls: readonly unknown[]; finishReason: string; usage: { outputTokens: number } },
+    ok: () => boolean,
+  ): boolean => {
+    outputTokens += r.usage.outputTokens;
+    if (r.finishReason === "length" && r.text.trim() === "" && r.toolCalls.length === 0) {
+      inconclusive.push(name);
+      errors[name] =
+        `inconclusive: the answer was cut at ${r.usage.outputTokens} output tokens before any content (a reasoning model?)`;
+      return false;
+    }
+    if (ok()) return true;
+    errors[name] = `unexpected answer: ${JSON.stringify(r.text.slice(0, 120))}`;
+    return false;
+  };
+
   const attempt = async (name: string, fn: () => Promise<boolean>): Promise<boolean> => {
     try {
-      return await fn();
+      const supported = await fn();
+      reached = true;
+      return supported;
     } catch (error) {
       if (
         error instanceof ModelError &&
-        (error.kind === "auth" || error.kind === "quota_exhausted" || error.kind === "policy")
+        (error.kind === "auth" ||
+          error.kind === "quota_exhausted" ||
+          error.kind === "policy" ||
+          (error.kind === "transient" && !reached))
       ) {
         throw error;
       }
+      // an HTTP status or an unparsable answer still means the endpoint answered
+      if (!(error instanceof ModelError) || error.status !== undefined) reached = true;
       errors[name] = error instanceof Error ? error.message : String(error);
       return false;
     }
@@ -52,35 +91,33 @@ export async function probeModel(gateway: ModelGateway, modelId: string): Promis
     const r = await gateway.call({
       modelId,
       role: "probe",
-      maxOutput: 16,
+      maxOutput: PROBE_MAX_OUTPUT,
       temperature: 0,
       messages: [
         { role: "system", content: "You answer with exactly the word PONG and nothing else." },
         { role: "user", content: "Say the word." },
       ],
     });
-    outputTokens += r.usage.outputTokens;
-    return /pong/i.test(r.text);
+    return judge("systemRole", r, () => /pong/i.test(r.text));
   });
 
   const jsonMode = await attempt("jsonMode", async () => {
     const r = await gateway.call({
       modelId,
       role: "probe",
-      maxOutput: 32,
+      maxOutput: PROBE_MAX_OUTPUT,
       temperature: 0,
       responseFormat: { kind: "json" },
       messages: [{ role: "user", content: 'Return a JSON object {"ok": true}.' }],
     });
-    outputTokens += r.usage.outputTokens;
-    return (JSON.parse(r.text) as { ok?: unknown }).ok === true;
+    return judge("jsonMode", r, () => parsesOk(r.text));
   });
 
   const jsonSchema = await attempt("jsonSchema", async () => {
     const r = await gateway.call({
       modelId,
       role: "probe",
-      maxOutput: 32,
+      maxOutput: PROBE_MAX_OUTPUT,
       temperature: 0,
       responseFormat: {
         kind: "schema",
@@ -94,21 +131,19 @@ export async function probeModel(gateway: ModelGateway, modelId: string): Promis
       },
       messages: [{ role: "user", content: "Set ok to true." }],
     });
-    outputTokens += r.usage.outputTokens;
-    return (JSON.parse(r.text) as { ok?: unknown }).ok === true;
+    return judge("jsonSchema", r, () => parsesOk(r.text));
   });
 
   const tools = await attempt("tools", async () => {
     const r = await gateway.call({
       modelId,
       role: "probe",
-      maxOutput: 64,
+      maxOutput: PROBE_MAX_OUTPUT,
       temperature: 0,
       tools: [PING_TOOL],
       messages: [{ role: "user", content: 'Call the ping tool with echo "hi".' }],
     });
-    outputTokens += r.usage.outputTokens;
-    return r.toolCalls.some((c) => c.name === "ping");
+    return judge("tools", r, () => r.toolCalls.some((c) => c.name === "ping"));
   });
 
   return {
@@ -117,14 +152,24 @@ export async function probeModel(gateway: ModelGateway, modelId: string): Promis
     latencyMs: Date.now() - started,
     supports: { tools, jsonMode, jsonSchema, systemRole },
     errors,
+    ...(inconclusive.length > 0 ? { inconclusive } : {}),
     outputTokens,
   };
 }
 
+function parsesOk(text: string): boolean {
+  try {
+    return (JSON.parse(text) as { ok?: unknown }).ok === true;
+  } catch {
+    return false;
+  }
+}
+
 export function probeDrift(model: ModelConfig, probe: ProbeResult): ProbeDrift[] {
   const keys: Array<keyof ProbeResult["supports"]> = ["tools", "jsonMode", "jsonSchema", "systemRole"];
+  const undecided = new Set(probe.inconclusive ?? []);
   return keys
-    .filter((k) => model.supports[k] !== probe.supports[k])
+    .filter((k) => !undecided.has(k) && model.supports[k] !== probe.supports[k])
     .map((k) => ({ capability: k, configured: model.supports[k], probed: probe.supports[k] }));
 }
 

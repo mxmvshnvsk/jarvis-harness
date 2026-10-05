@@ -1,3 +1,4 @@
+import { createServer } from "node:net";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { EnvSecretResolver } from "../../src/core/config/secrets.ts";
 import {
@@ -61,5 +62,72 @@ describe("probeModel", () => {
     });
     await expect(probeModel(gateway, "private")).rejects.toMatchObject({ kind: "auth" });
     expect(server.requests).toHaveLength(1);
+  });
+
+  it("fails on an unreachable endpoint instead of recording every capability as unsupported", async () => {
+    const port = await new Promise<number>((resolve) => {
+      const probe = createServer().listen(0, "127.0.0.1", () => {
+        const address = probe.address();
+        probe.close(() => resolve(typeof address === "object" && address ? address.port : 0));
+      });
+    });
+    const gateway = new ModelGateway({
+      config: testConfig(`http://127.0.0.1:${port}/v1`),
+      adapters: defaultAdapters(),
+      secrets: new EnvSecretResolver({ FAKE_TOKEN: "t" }),
+      sleep: async () => {},
+    });
+    const failure = probeModel(gateway, "private");
+    await expect(failure).rejects.toMatchObject({ kind: "transient" });
+    // the reason is named, not just "fetch failed"
+    await expect(failure).rejects.toThrow(/ECONNREFUSED/);
+  });
+
+  it("gives a reasoning model room to think and never reads a cut-off answer as unsupported", async () => {
+    // like DeepSeek-V4-Flash in the pilot: the thinking eats the budget, `content` stays empty
+    const thinking = 200;
+    const cutOff = (maxTokens: number) => ({
+      body: {
+        choices: [{ finish_reason: "length", message: { role: "assistant", content: "" } }],
+        usage: { prompt_tokens: 80, completion_tokens: maxTokens },
+      },
+    });
+    server.respond((req) => {
+      const body = req.body as { max_tokens: number; response_format?: { type: string }; tools?: unknown[] };
+      if (body.response_format?.type === "json_schema") return cutOff(body.max_tokens);
+      if (body.max_tokens < thinking) return cutOff(body.max_tokens);
+      if (body.tools) return toolCallCompletion("ping", { echo: "hi" });
+      if (body.response_format?.type === "json_object") return completion('{"ok": true}');
+      return completion("Sure: PING");
+    });
+    const config = testConfig(server.baseUrl, {
+      models: {
+        big: {
+          provider: "openai-compatible",
+          baseUrl: server.baseUrl,
+          model: "thinker",
+          egress: "private",
+          contextWindow: 32000,
+          maxOutput: 4000,
+          supports: { tools: true, jsonMode: true, jsonSchema: true, systemRole: true },
+        },
+      },
+      roles: {},
+    });
+    const gateway = new ModelGateway({
+      config,
+      adapters: defaultAdapters(),
+      secrets: new EnvSecretResolver({}),
+    });
+    const result = await probeModel(gateway, "big");
+    const first = server.requests[0]?.body as { max_tokens?: number } | undefined;
+    expect(first?.max_tokens).toBeGreaterThanOrEqual(thinking);
+    expect(result.supports).toEqual({ tools: true, jsonMode: true, jsonSchema: false, systemRole: false });
+    expect(result.inconclusive).toEqual(["jsonSchema"]);
+    expect(result.errors.jsonSchema).toContain("inconclusive");
+    // a wrong answer is named, not a silent "no"
+    expect(result.errors.systemRole).toBe('unexpected answer: "Sure: PING"');
+    const drift = probeDrift(config.models.big as NonNullable<typeof config.models.big>, result);
+    expect(drift).toEqual([{ capability: "systemRole", configured: true, probed: false }]);
   });
 });

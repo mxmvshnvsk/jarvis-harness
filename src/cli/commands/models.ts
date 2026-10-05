@@ -159,9 +159,10 @@ export async function runModelsProbe(ctx: CliContext, modelId: string): Promise<
       ctx.out.line(
         `model ${modelId} (${model.model}) probed in ${result.latencyMs} ms, ${result.outputTokens} output tokens`,
       );
+      const undecided = new Set<string>(result.inconclusive ?? []);
       for (const [k, v] of Object.entries(result.supports)) {
         const err = result.errors[k] ? `  — ${result.errors[k]}` : "";
-        ctx.out.line(`  ${padEnd(k, 11)} ${v ? "yes" : "no "}${err}`);
+        ctx.out.line(`  ${padEnd(k, 11)} ${undecided.has(k) ? "?  " : v ? "yes" : "no "}${err}`);
       }
       if (drift.length > 0) {
         ctx.out.line();
