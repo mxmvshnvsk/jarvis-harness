@@ -61,6 +61,54 @@ export interface Output {
 
 export type ProgressMode = "live" | "plain" | "json";
 
+/**
+ * Whether the terminal can show only ASCII: JARVIS_ASCII decides; otherwise the Linux console, or a
+ * locale set to something other than UTF-8 (C and POSIX are left alone: they say nothing of the font).
+ */
+export function asciiOnly(env: NodeJS.ProcessEnv): boolean {
+  const set = env.JARVIS_ASCII;
+  if (set !== undefined) return /^(1|on|true|yes)$/i.test(set);
+  if (env.TERM === "linux") return true;
+  const locale = env.LC_ALL || env.LC_CTYPE || env.LANG || "";
+  return locale !== "" && !/utf-?8/i.test(locale) && !/^(C|POSIX)$/i.test(locale);
+}
+
+const ASCII: Record<string, string> = {
+  "✓": "v",
+  "✗": "x",
+  "⚠": "!",
+  "⏸": "||",
+  "↻": "<>",
+  "▶": ">",
+  "◌": "o",
+  "→": "->",
+  "↳": "\\_",
+  "–": "-",
+  "—": "--",
+  "…": "...",
+  "·": ".",
+  "×": "x",
+  "−": "-",
+  "─": "-",
+  "█": "#",
+  "░": "-",
+  "⠋": "|",
+  "⠙": "/",
+  "⠹": "-",
+  "⠸": "\\",
+  "⠼": "|",
+  "⠴": "/",
+  "⠦": "-",
+  "⠧": "\\",
+  "⠇": "|",
+  "⠏": "/",
+};
+const ASCII_RE = new RegExp(`[${Object.keys(ASCII).join("")}]`, "gu");
+
+export function toAscii(text: string): string {
+  return text.replace(ASCII_RE, (ch) => ASCII[ch] ?? ch);
+}
+
 /** What a leading glyph says, for a screen reader (accessible mode). */
 const WORDS: Record<string, string> = {
   "✓": "done",
@@ -132,6 +180,10 @@ export function createOutput(
     streams.err.write(erase());
     shown = 0;
   };
+  // a terminal without Unicode (the Linux console, a non-UTF-8 locale, JARVIS_ASCII=1) gets ASCII glyphs
+  const ascii = asciiOnly(env);
+  const outWrite = (text: string) => streams.out.write(ascii ? toAscii(text) : text);
+  const errWrite = (text: string) => streams.err.write(ascii ? toAscii(text) : text);
   return {
     json,
     live,
@@ -144,15 +196,15 @@ export function createOutput(
     errStyle,
     line(text = "") {
       clear();
-      streams.out.write(`${accessible ? glyph(style.inline(text)) : style.inline(text)}\n`);
+      outWrite(`${accessible ? glyph(style.inline(text)) : style.inline(text)}\n`);
     },
     raw(text) {
       clear();
-      streams.out.write(`${text}\n`);
+      outWrite(`${text}\n`);
     },
     ask(text) {
       clear();
-      streams.out.write(text);
+      outWrite(text);
     },
     error(text) {
       clear();
@@ -160,16 +212,16 @@ export function createOutput(
       const d = diagnose(text);
       const label = d ? `error[${d.code}]:` : "error:";
       const prefix = errStyle.enabled ? `\u001b[1m${errStyle.bad(label)}\u001b[22m` : label;
-      streams.err.write(`${prefix} ${errStyle.inline(text)}\n`);
-      if (d) streams.err.write(`  ${errStyle.muted("help:")} ${errStyle.inline(d.help)}\n`);
+      errWrite(`${prefix} ${errStyle.inline(text)}\n`);
+      if (d) errWrite(`  ${errStyle.muted("help:")} ${errStyle.inline(d.help)}\n`);
     },
     note(text) {
       clear();
-      streams.err.write(`${glyph(errStyle.inline(text))}\n`);
+      errWrite(`${glyph(errStyle.inline(text))}\n`);
     },
     result(value, render) {
       clear();
-      if (json) streams.out.write(`${JSON.stringify(value, null, 2)}\n`);
+      if (json) outWrite(`${JSON.stringify(value, null, 2)}\n`);
       else render();
     },
     progress(text) {
@@ -177,9 +229,12 @@ export function createOutput(
       if (text === undefined) return clear();
       const lines = typeof text === "string" ? [text] : [...text];
       const columns = Math.max(20, (err.columns ?? 120) - 1);
-      const body = lines.map((l) => cutStyled(l, columns)).join("\n");
+      // ASCII first: its glyphs are wider, and the cut must see the final width
+      const body = lines
+        .map((l) => (ascii ? cutStyled(toAscii(l), columns, "...") : cutStyled(l, columns)))
+        .join("\n");
       // DEC 2026 synchronized output: terminals that know it paint the frame at once; others ignore it
-      streams.err.write(`\u001b[?2026h${erase()}${body}\u001b[?2026l`);
+      errWrite(`\u001b[?2026h${erase()}${body}\u001b[?2026l`);
       shown = lines.length;
     },
     bell() {

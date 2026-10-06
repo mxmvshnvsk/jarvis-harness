@@ -37,6 +37,7 @@ export const RESERVED_ENV = new Set([
   "JARVIS_MARKS",
   "JARVIS_PAGER",
   "JARVIS_ACCESSIBLE",
+  "JARVIS_ASCII",
 ]);
 
 function normalizeKey(key: string): string {

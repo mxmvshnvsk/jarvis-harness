@@ -185,7 +185,7 @@ const TOKEN = /\u001b\[[0-9;]*m|\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)|[\s\
  * A styled line cut to `width` columns without breaking an escape: colours and links stay, the cut
  * ends with `…` and a reset. A live line wider than the terminal would wrap and break the redraw.
  */
-export function cutStyled(text: string, width: number): string {
+export function cutStyled(text: string, width: number, ellipsis = "…"): string {
   if (visibleLength(text) <= width) return text;
   let out = "";
   let used = 0;
@@ -195,12 +195,12 @@ export function cutStyled(text: string, width: number): string {
       continue;
     }
     const w = charColumns(token);
-    if (used + w > width - 1) break;
+    if (used + w > width - visibleLength(ellipsis)) break;
     out += token;
     used += w;
   }
   // close what the cut left open: colours, a link
-  return text.includes("\u001b") ? `${out}…\u001b[0m\u001b]8;;\u0007` : `${out}…`;
+  return text.includes("\u001b") ? `${out}${ellipsis}\u001b[0m\u001b]8;;\u0007` : `${out}${ellipsis}`;
 }
 
 export function stripAnsi(text: string): string {
