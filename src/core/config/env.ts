@@ -29,6 +29,10 @@ export const RESERVED_ENV = new Set([
   "JARVIS_PROGRESS",
   // questions at a human gate inside a foreground run (src/cli/prompt.ts): on forces, off disables
   "JARVIS_INTERACTIVE",
+  // terminal title and desktop notifications of a foreground run (src/cli/notify.ts)
+  "JARVIS_NOTIFY",
+  "JARVIS_NOTIFY_AFTER",
+  "JARVIS_TITLE",
 ]);
 
 function normalizeKey(key: string): string {

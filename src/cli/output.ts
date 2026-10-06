@@ -32,6 +32,8 @@ export interface Output {
   readonly live: boolean;
   /** Redraws the one-line progress on stderr; `undefined` clears it. Other output clears it first. */
   progress(text?: string): void;
+  /** A control sequence for the terminal itself (title, notification), on stderr when it is one. */
+  terminal(sequence: string): void;
 }
 
 export function createOutput(
@@ -100,6 +102,9 @@ export function createOutput(
       const line = [...plain].length > width ? `${[...plain].slice(0, width - 1).join("")}…` : text;
       streams.err.write(`\r\u001b[2K${line}`);
       shown = true;
+    },
+    terminal(sequence) {
+      if (live) streams.err.write(sequence);
     },
   };
 }

@@ -5,6 +5,7 @@ import type { ArtifactVersion } from "../core/domain/artifact.ts";
 import type { Run } from "../core/domain/run.ts";
 import type { StoredEvent } from "../telemetry/events.ts";
 import type { CliContext } from "./context.ts";
+import { terminalSignals } from "./notify.ts";
 import type { Style } from "./style.ts";
 
 /**
@@ -138,6 +139,8 @@ export function followRun(ctx: CliContext, runtime: Runtime, options: FollowOpti
   const width = Math.max(0, ...plan.map((s) => s.length));
   const journey = new Journey(plan);
   const events: StoredEvent[] = [];
+  const signals = terminalSignals(ctx);
+  const short = () => (runId ? shortId(runId) : "");
   let headed = options.header === false;
   let frame = 0;
 
@@ -163,6 +166,11 @@ export function followRun(ctx: CliContext, runtime: Runtime, options: FollowOpti
       if (!runId || e.runId !== runId) continue;
       header();
       events.push(e);
+      if (e.kind === "step.start") {
+        const stepId = (e.payload as { stepId?: string } | undefined)?.stepId ?? e.stepId ?? "";
+        const at = plan.indexOf(stepId);
+        signals.title(`▶ jarvis ${at >= 0 ? `${at + 1}/${plan.length} ` : ""}${stepId}`);
+      }
       for (const line of journey.push(e)) {
         if (line.kind === "step")
           for (const l of formatStepReport(line.report, producedBy(line.report), st, width)) ctx.out.note(l);
@@ -174,6 +182,19 @@ export function followRun(ctx: CliContext, runtime: Runtime, options: FollowOpti
         const run = state.startsWith("WAITING") || state === "FAILED" ? runtime.runs.get(runId) : undefined;
         const parked = run ? formatParked({ ...run, state: state as Run["state"] }, st, plan) : undefined;
         if (parked) ctx.out.note(parked);
+        const step = run?.currentStep ? ` at ${run.currentStep}` : "";
+        if (state === "WAITING_HUMAN") {
+          signals.title(`⏸ jarvis needs you${step}`);
+          signals.notify("jarvis", `run ${short()} waits for you${step}`);
+        } else if (state === "WAITING_BUDGET") {
+          signals.title(`⏸ jarvis waits for ${run?.waitingFor?.kind === "model" ? "the model" : "quota"}`);
+        } else if (state === "FAILED") {
+          signals.title("✗ jarvis failed");
+          signals.notify("jarvis", `run ${short()} failed${step}`);
+        } else if (state === "COMPLETED") {
+          signals.title("✓ jarvis done");
+          signals.notify("jarvis", `run ${short()} is done`);
+        }
         continue;
       }
       // retries and provider failures: lines that stay, also in a pipe

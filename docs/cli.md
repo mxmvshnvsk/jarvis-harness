@@ -186,6 +186,16 @@ jest — только связанные тесты (`--findRelatedTests`). Уп
 Это встроенные workflow `research` и `spec`; их можно заменить файлами `.jarvis/workflows/research.yaml` и
 `spec.yaml`. Остальное — как у `work`.
 
+### Сигналы терминала
+
+Пока прогон идёт на переднем плане, заголовок вкладки показывает, где он сейчас: `▶ jarvis 6/14 implementation`,
+`⏸ jarvis needs you at approve-spec`, `⏸ jarvis waits for the model`, `✓ jarvis done`, `✗ jarvis failed`. Когда
+прогон, который шёл дольше 30 с, остановился ради человека, завершился или упал, терминал получает уведомление:
+в iTerm2, WezTerm и Ghostty это OSC 9 (уведомление на рабочем столе), в остальных — звонок (`BEL`, в macOS
+Terminal — значок в Dock). `JARVIS_NOTIFY=auto|osc9|osc777|bel|off`, `JARVIS_NOTIFY_AFTER=<секунды>`,
+`JARVIS_TITLE=off`. Только в терминале (не в pipe, CI или `--json`). Внутри tmux уведомления проходят при
+`set -g allow-passthrough on`.
+
 ### Решения по ходу прогона и `jarvis continue [run]` (`jarvis c`)
 
 Когда `work`, `spec`, `research`, `resume`, `approve --resume` или `continue` в терминале доходят до
