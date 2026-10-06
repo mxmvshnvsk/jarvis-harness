@@ -314,15 +314,14 @@ export function nextCommands(d: RunDetail): Array<{ cmd: string; why: string }> 
   const id = shortRunId(r.id);
   const out: Array<{ cmd: string; why: string }> = [];
   const pending = d.pendingApprovals[0];
-  if (r.state === "WAITING_HUMAN" && r.waitingFor?.kind === "clarification") {
-    out.push({ cmd: `jarvis attach ${id}`, why: "read the questions and answer them" });
-  } else if (r.state === "WAITING_HUMAN" || pending) {
-    if (pending) out.push({ cmd: `jarvis show ${id} ${pending.type}`, why: `read the ${pending.type}` });
-    out.push({ cmd: `jarvis approve ${id} --resume`, why: "accept and go on" });
+  if (r.state === "WAITING_HUMAN") {
+    // one command, no flags: it asks right there (questions, accept, send back) and goes on
     out.push({
-      cmd: `jarvis approve ${id} --request-changes --comment "…" --resume`,
-      why: "send it back with what to change",
+      cmd: "jarvis continue",
+      why:
+        r.waitingFor?.kind === "clarification" ? "answer the questions and go on" : "read, decide and go on",
     });
+    if (pending) out.push({ cmd: `jarvis show ${id} ${pending.type}`, why: `just read the ${pending.type}` });
   } else if (r.state === "WAITING_BUDGET") {
     out.push({ cmd: `jarvis resume ${id}`, why: "when the quota window frees up" });
   } else if (r.state === "FAILED") {

@@ -27,6 +27,8 @@ export const RESERVED_ENV = new Set([
   "JARVIS_LOG_MAX_FIELD",
   // live progress line of foreground commands (src/cli/progress.ts): off disables it
   "JARVIS_PROGRESS",
+  // questions at a human gate inside a foreground run (src/cli/prompt.ts): on forces, off disables
+  "JARVIS_INTERACTIVE",
 ]);
 
 function normalizeKey(key: string): string {

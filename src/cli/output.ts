@@ -20,6 +20,8 @@ export interface Output {
   line(text?: string): void;
   /** Text written as is (a diff, a document already rendered): no backtick handling. */
   raw(text: string): void;
+  /** A prompt: written without a line break, the answer is typed after it. */
+  ask(text: string): void;
   /** A failure on stderr, `error: …` (the prefix red when coloured). */
   error(text: string): void;
   /** Informational stderr: progress notices (⚠ retry, ✗ gave up), "skipped", "written to". */
@@ -70,6 +72,10 @@ export function createOutput(
     raw(text) {
       clear();
       streams.out.write(`${text}\n`);
+    },
+    ask(text) {
+      clear();
+      streams.out.write(text);
     },
     error(text) {
       clear();

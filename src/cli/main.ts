@@ -35,6 +35,7 @@ import { runOnboard } from "./commands/onboard.ts";
 import {
   runApply,
   runApprove,
+  runContinue,
   runDaemon,
   runDiff,
   runGc,
@@ -86,6 +87,7 @@ export function buildProgram(options: RunOptions = {}): Command {
       ...(opts.color !== undefined ? { color: opts.color } : {}),
     });
     const overrides: Partial<CliContext> = {
+      stdin: options.stdin ?? process.stdin,
       ...options.context,
       ...(opts.cwd ? { cwd: opts.cwd } : {}),
       ...(opts.profile ? { profile: opts.profile } : {}),
@@ -247,6 +249,13 @@ export function buildProgram(options: RunOptions = {}): Command {
       await runGc(ctxFor(), opts);
     });
 
+  program
+    .command("continue [run]")
+    .alias("c")
+    .description("back to the run that waits for you (no id needed): decide right here and go on")
+    .action(async (run: string | undefined) => {
+      await runContinue(ctxFor(), run);
+    });
   program
     .command("resume <run>")
     .description("continue a parked, failed or crashed run from its last checkpoint")

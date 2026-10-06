@@ -1,4 +1,3 @@
-import { createInterface } from "node:readline";
 import { createEngine } from "../../app/engine.ts";
 import { createRuntime, type Runtime } from "../../app/runtime.ts";
 import { runDetail } from "../../app/status.ts";
@@ -20,6 +19,7 @@ import { LeaseLostError, shortRunId } from "../../storage/runStore.ts";
 import type { CliContext } from "../context.ts";
 import { CliExit, EXIT, padEnd } from "../output.ts";
 import { followRun } from "../progress.ts";
+import { createPrompt, type Prompt } from "../prompt.ts";
 import { loadForCli } from "./config.ts";
 import { renderDetail } from "./status.ts";
 
@@ -237,6 +237,56 @@ export async function runAnswer(
 }
 
 /**
+ * The clarification mini-chat over a prompt: the thread so far, then answers until the thread is
+ * resolved (`a`, `e <rule>`), rejected (`r`) or the person leaves (`q`, empty line, end of input).
+ * Used by `jarvis attach` and by the gate inside a foreground run.
+ */
+export async function clarifyLoop(
+  ctx: CliContext,
+  runtime: Runtime,
+  run: Run,
+  start: Interaction,
+  actor: Actor,
+  prompt: Prompt,
+): Promise<"resolved" | "rejected" | "detached"> {
+  let thread = start;
+  renderThread(ctx, thread, runtime.interactions.messages(thread.id));
+  for (;;) {
+    ctx.out.line("");
+    ctx.out.line("> (answer | a = accept | e <rule> | r = reject | q = detach)");
+    const input = await prompt.ask("");
+    if (input === undefined || input === "q" || input.length === 0) return "detached";
+    const move =
+      input === "a"
+        ? { accept: true }
+        : input === "r"
+          ? { reject: true }
+          : input.startsWith("e ")
+            ? { accept: true, rule: input.slice(2).trim() }
+            : { text: input };
+    const result = await humanMove(runtime, run, thread, actor, move);
+    thread = result.thread;
+    if (result.resolved) {
+      ctx.out.line(`resolved → ${result.resolved}`);
+      return "resolved";
+    }
+    if (result.rejected) {
+      ctx.out.line("rejected; the run keeps waiting for a human decision");
+      return "rejected";
+    }
+    if (result.exhausted) {
+      ctx.out.line("turn budget used up; accept with `a` / `e <rule>` or reject with `r`");
+      continue;
+    }
+    if (result.reply) {
+      ctx.out.line("");
+      ctx.out.line("Jarvis:");
+      for (const line of result.reply.text.split("\n")) ctx.out.line(`  ${line}`);
+    }
+  }
+}
+
+/**
  * `jarvis attach <run>` — the live mode (ADR-0019 §4): shows the open thread and runs the
  * mini-chat in the terminal; `a` accepts the proposal, `e <rule>` accepts an edited rule, `r`
  * rejects, `q` detaches. After a resolution the run resumes in the foreground.
@@ -255,7 +305,7 @@ export async function runAttach(
       ctx.out.error(`run "${ref}" not found`);
       throw new CliExit(EXIT.error);
     }
-    let thread = runtime.interactions.openFor(run.id, "clarification");
+    const thread = runtime.interactions.openFor(run.id, "clarification");
     if (!thread) {
       const detail = runDetail(runtime, run);
       ctx.out.result(detail, () => renderDetail(ctx, detail, new Date(), 8));
@@ -265,47 +315,10 @@ export async function runAttach(
       return;
     }
     const actor = await actorFor(ctx, runtime);
-    renderThread(ctx, thread, runtime.interactions.messages(thread.id));
-    const rl = createInterface({ input: stdin, terminal: false });
-    const lines = rl[Symbol.asyncIterator]();
-    let resolvedRef: string | undefined;
-    for (;;) {
-      ctx.out.line("");
-      ctx.out.line("> (answer | a = accept | e <rule> | r = reject | q = detach)");
-      const next = await lines.next();
-      if (next.done) break;
-      const input = String(next.value).trim();
-      if (input === "q" || input.length === 0) break;
-      const move =
-        input === "a"
-          ? { accept: true }
-          : input === "r"
-            ? { reject: true }
-            : input.startsWith("e ")
-              ? { accept: true, rule: input.slice(2).trim() }
-              : { text: input };
-      const result = await humanMove(runtime, run, thread, actor, move);
-      thread = result.thread;
-      if (result.resolved) {
-        resolvedRef = result.resolved;
-        ctx.out.line(`resolved → ${result.resolved}`);
-        break;
-      }
-      if (result.rejected) {
-        ctx.out.line("rejected; the run keeps waiting for a human decision");
-        break;
-      }
-      if (result.exhausted) {
-        ctx.out.line("turn budget used up; accept with `a` / `e <rule>` or reject with `r`");
-        continue;
-      }
-      if (result.reply) {
-        ctx.out.line("");
-        ctx.out.line("Jarvis:");
-        for (const line of result.reply.text.split("\n")) ctx.out.line(`  ${line}`);
-      }
-    }
-    rl.close();
+    const prompt = createPrompt(stdin, ctx.out);
+    const outcome = await clarifyLoop(ctx, runtime, run, thread, actor, prompt);
+    prompt.close();
+    const resolvedRef = outcome === "resolved";
     if (resolvedRef && !options.noResume) await resumeRun(ctx, runtime, run);
   } finally {
     await runtime.close();

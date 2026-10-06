@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
+import { awaitedArtifact, recordDecision } from "../../app/decide.ts";
 import { createEngine } from "../../app/engine.ts";
 import { preflightMcp } from "../../app/preflight.ts";
 import { createRuntime, type Runtime } from "../../app/runtime.ts";
@@ -17,8 +18,10 @@ import { gitIdentityEnv, WorktreeError, WorktreeWorkspace } from "../../orchestr
 import { LeaseLostError, newRunId, shortRunId } from "../../storage/runStore.ts";
 import { git } from "../../tools/local/exec.ts";
 import type { CliContext } from "../context.ts";
+import { humanGate } from "../gate.ts";
 import { CliExit, EXIT } from "../output.ts";
-import { followRun } from "../progress.ts";
+import { followRun, formatRunHeader, oneLine } from "../progress.ts";
+import { createPrompt, isInteractive, type Prompt } from "../prompt.ts";
 import { documentToMarkdown, renderDiff, renderMarkdown } from "../render.ts";
 import { incompleteOf, padStyled } from "../style.ts";
 import { loadForCli } from "./config.ts";
@@ -51,20 +54,36 @@ async function executeAndReport(
   run: Run,
   steal: boolean,
   extra: Record<string, unknown> = {},
+  /** The caller's prompt (`continue` asked already); otherwise one is opened for a person at a TTY. */
+  shared?: Prompt,
+  /** false when the caller has shown the run already. */
+  showHeader = true,
 ): Promise<never> {
   const owner = leaseOwner(runtime.loaded.config.interactive ? "cli" : "ci");
-  let plan: string[] = [];
+  const plan = planOf(engine, run);
+  // a person at a terminal decides where the run stops and it goes on; otherwise exit 10 + commands
+  const prompt = shared ?? promptFor(ctx, runtime);
   try {
-    plan = engine.workflow(run.workflow).steps.map((s) => s.id);
-  } catch {
-    // an unknown workflow fails in execute with its own message
-  }
-  const progress = followRun(ctx, runtime, { runId: run.id, plan });
-  try {
-    const result = await engine.execute(run.id, { owner, steal }).finally(() => progress.stop());
-    const detail = runDetail(runtime, result.run);
-    ctx.out.result({ ...extra, ...detail, exitCode: result.exitCode }, () => renderSummary(ctx, detail));
-    throw new CliExit(result.exitCode);
+    let header = showHeader;
+    let stealLease = steal;
+    for (;;) {
+      const progress = followRun(ctx, runtime, { runId: run.id, plan, header });
+      const result = await engine
+        .execute(run.id, { owner, steal: stealLease })
+        .finally(() => progress.stop());
+      header = false;
+      stealLease = false;
+      if (prompt && result.exitCode === EXIT.waitingHuman) {
+        const actor = await actorFor(ctx, runtime);
+        if ((await humanGate(ctx, runtime, result.run, actor, prompt)) === "decided") continue;
+        ctx.out.line(
+          `${ctx.out.style.muted("left waiting; come back with")} ${ctx.out.style.cmd("jarvis continue")}`,
+        );
+      }
+      const detail = runDetail(runtime, result.run);
+      ctx.out.result({ ...extra, ...detail, exitCode: result.exitCode }, () => renderSummary(ctx, detail));
+      throw new CliExit(result.exitCode);
+    }
   } catch (error) {
     if (error instanceof LeaseHeldError) {
       ctx.out.error(error.message);
@@ -75,6 +94,95 @@ async function executeAndReport(
       throw new CliExit(EXIT.leaseLost);
     }
     throw error;
+  } finally {
+    if (!shared) prompt?.close();
+  }
+}
+
+/** The workflow's step ids, for `[k/N]` and the plan under the header. */
+function planOf(engine: LocalWorkflowEngine, run: Run): string[] {
+  try {
+    return engine.workflow(run.workflow).steps.map((s) => s.id);
+  } catch {
+    return []; // an unknown workflow fails in execute with its own message
+  }
+}
+
+/** A prompt when a person is at the terminal (src/cli/prompt.ts); undefined in CI, pipes, --json. */
+function promptFor(ctx: CliContext, runtime: Runtime): Prompt | undefined {
+  const stdin = ctx.stdin as (NodeJS.ReadableStream & { isTTY?: boolean }) | undefined;
+  if (!stdin) return undefined;
+  const interactive = isInteractive({
+    json: ctx.out.json,
+    env: ctx.env,
+    stdin,
+    stdout: process.stdout,
+    configInteractive: runtime.loaded.config.interactive,
+  });
+  return interactive ? createPrompt(stdin, ctx.out) : undefined;
+}
+
+/**
+ * `jarvis continue [run]` (alias `c`) — back to the run that waits for you, without its id: the one
+ * waiting for a person in this repository (a list to choose from when there are several), or the
+ * given one. At a terminal it asks right there and goes on; a parked, failed or crashed run resumes.
+ */
+export async function runContinue(ctx: CliContext, ref: string | undefined): Promise<void> {
+  const loaded = await loadForCli(ctx);
+  const runtime = createRuntime(loaded, { env: ctx.env });
+  const prompt = promptFor(ctx, runtime);
+  try {
+    const st = ctx.out.style;
+    const engine = createEngine(runtime);
+    let run: Run | undefined;
+    if (ref) run = requireRun(ctx, runtime, ref);
+    else {
+      const root = loaded.project?.root ?? ctx.cwd;
+      const waiting = runtime.runs
+        .list({ state: ["WAITING_HUMAN"], limit: 50 })
+        .filter((r) => r.workspace.repoRoot === root || r.workspace.path === root);
+      if (waiting.length === 0) {
+        ctx.out.line(`nothing waits for you here ${st.muted("(`jarvis status --all` lists every run)")}`);
+        return;
+      }
+      if (waiting.length === 1 || !prompt) {
+        if (waiting.length > 1) {
+          ctx.out.error(
+            `${waiting.length} runs wait for you: ${waiting.map((r) => shortRunId(r.id)).join(", ")} — \`jarvis continue <run>\``,
+          );
+          throw new CliExit(EXIT.error);
+        }
+        run = waiting[0];
+      } else {
+        ctx.out.line(st.heading(`${waiting.length} runs wait for you`));
+        waiting.forEach((r, i) => {
+          ctx.out.line(
+            `  ${st.cmd(String(i + 1))}  ${st.name(shortRunId(r.id))}  ${r.workflow} ${st.muted("·")} ${oneLine(r.task, 60)} ${st.muted(`· ${r.currentStep ?? "-"}`)}`,
+          );
+        });
+        const pick = Number(await prompt.ask(`${st.cmd(">")} `));
+        run = waiting[pick - 1];
+        if (!run) return;
+      }
+    }
+    if (!run) return;
+    if (run.state === "WAITING_HUMAN") {
+      for (const line of formatRunHeader(run, planOf(engine, run), st)) ctx.out.line(line);
+      if (!prompt) {
+        const detail = runDetail(runtime, run);
+        ctx.out.result(detail, () => renderSummary(ctx, detail));
+        throw new CliExit(EXIT.waitingHuman);
+      }
+      const actor = await actorFor(ctx, runtime);
+      if ((await humanGate(ctx, runtime, run, actor, prompt)) !== "decided") {
+        ctx.out.line(`${st.muted("left waiting; come back with")} ${st.cmd("jarvis continue")}`);
+        throw new CliExit(EXIT.waitingHuman);
+      }
+    }
+    await executeAndReport(ctx, runtime, engine, run, false, {}, prompt, run.state !== "WAITING_HUMAN");
+  } finally {
+    prompt?.close();
+    await runtime.close();
   }
 }
 
@@ -205,9 +313,8 @@ export async function runApprove(ctx: CliContext, ref: string, options: ApproveO
   try {
     const run = requireRun(ctx, runtime, ref);
     const actor = await actorFor(ctx, runtime);
-    const checkpoint = runtime.checkpoints.latest(run.id);
-    const awaiting = checkpoint?.state.awaitingApproval as { artifactId?: string; type?: string } | undefined;
-    const type = options.type ?? awaiting?.type;
+    const awaited = awaitedArtifact(runtime, run);
+    const type = options.type ?? awaited?.type;
     if (!type) {
       ctx.out.error("nothing awaits approval on this run; pass --type <artifactType> to approve explicitly");
       throw new CliExit(EXIT.error);
@@ -218,21 +325,12 @@ export async function runApprove(ctx: CliContext, ref: string, options: ApproveO
       throw new CliExit(EXIT.error);
     }
     const decision = options.decision ?? "approve";
-    const approval = runtime.artifacts.approve({
-      runId: run.id,
-      stepId: checkpoint?.stepId ?? run.currentStep ?? "approve",
-      artifactId: latest.artifactId,
-      version: latest.version,
+    const approval = recordDecision(runtime, run, {
       actor,
+      artifact: latest,
+      type,
       decision,
       ...(options.comment ? { comment: options.comment } : {}),
-    });
-    runtime.events.emit({
-      kind: "approval.recorded",
-      runId: run.id,
-      stepId: approval.stepId,
-      actor: `${actor.kind}:${actor.id}`,
-      payload: { artifactId: latest.artifactId, version: latest.version, type, decision },
     });
     let committed: string | undefined;
     if (options.commit) {

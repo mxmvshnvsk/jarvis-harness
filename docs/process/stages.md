@@ -95,6 +95,11 @@ Remaining commands of ADR-0001 §15:
   agents read, and the agent then searched for the placeholder — `looksLikeCodeName`; `repo.search` with a file as
   `path` failed with spawn ENOTDIR; several tool calls in one answer overran the limit (41/40) — the rest are
   answered "skipped"; `jarvis show` renders result documents as markdown; long tasks are cut in the header
+- decisions in place (`src/cli/gate.ts`, `src/cli/prompt.ts`): a foreground run that stops for a person asks at the
+  terminal — the document in brief, read it whole, accept, send back (its open questions are asked one by one and
+  the answers become the comment), or leave it — and goes on in the same process; clarifications use the attach
+  mini-chat; `jarvis continue` (`c`) finds the waiting run without its id. Pilot: the way on was
+  `jarvis approve 1a2b3c4d --request-changes --resume --comment "…"`
 
 ADR-0001 §20 stage 12 (git hooks) — `f11ca47`:
 

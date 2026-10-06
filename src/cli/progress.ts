@@ -30,6 +30,8 @@ export interface FollowOptions {
   readonly runId?: string;
   /** The workflow's step ids in order: `[2/5]` positions and the plan under the header. */
   readonly plan?: readonly string[];
+  /** false: the run goes on after a decision in the same command, its header is already shown. */
+  readonly header?: boolean;
   readonly intervalMs?: number;
   readonly signals?: boolean;
 }
@@ -129,7 +131,7 @@ export function followRun(ctx: CliContext, runtime: Runtime, options: FollowOpti
   const width = Math.max(0, ...plan.map((s) => s.length));
   const journey = new Journey(plan);
   const events: StoredEvent[] = [];
-  let headed = false;
+  let headed = options.header === false;
   let frame = 0;
 
   const header = () => {

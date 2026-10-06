@@ -148,6 +148,40 @@ Preflight (все MCP-серверы, до которых могут дотян�
 Это встроенные workflow `research` и `spec`; их можно заменить файлами `.jarvis/workflows/research.yaml` и
 `spec.yaml`. Остальное — как у `work`.
 
+### Решения по ходу прогона и `jarvis continue [run]` (`jarvis c`)
+
+Когда `work`, `spec`, `research`, `resume`, `approve --resume` или `continue` в терминале доходят до
+человека, команда не выходит, а спрашивает на месте и идёт дальше в том же процессе:
+
+```
+⏸ [5/5] approve-spec  waiting for approval — approve spec (spec.json@1)
+
+  Баг: в компактном режиме показываются поля доставки
+  Причина: order-form.tsx:89 — условие не учитывает isCompact
+  5 requirements · 3 risks · 3 open questions
+
+  enter read it whole    a accept    c send back with changes    q decide later
+> c
+  answer the open questions (empty line skips one):
+  1/3 Должны ли поля доставки показываться в компактном режиме хоть когда-нибудь?
+  > нет, никогда
+  …
+  what else to change? (empty line sends)
+  >
+↻ sent back spec/spec.json@1 with your changes
+```
+
+`enter` — документ целиком (как `jarvis show`), `a` — принять, `c` — вернуть: открытые вопросы документа
+задаются по одному, ответы и всё, что дописано после, становятся комментарием к возврату (`request_changes`),
+`q` — оставить ждать. Уточняющие вопросы агента (`waitingFor: clarification`) идут тем же мини-чатом, что
+`jarvis attach`. Спрашивает только человека у терминала: stdin и stdout — TTY, не `--json`,
+`interactive: true` (профиль `ci` выключает); `JARVIS_INTERACTIVE=off` отключает, `on` включает
+принудительно. Иначе — как раньше: выход 10 и команды в итоге.
+
+`jarvis continue` без аргументов находит прогон, который ждёт человека в этом репозитории (несколько —
+список на выбор), и открывает тот же диалог; с id — этот прогон. Прогон, остановленный на квоте, упавший
+или прерванный, продолжается как `resume`. `approve`, `answer` и флаги остаются для скриптов и CI.
+
 ### `jarvis resume <run> [--steal]`
 
 Продолжить парковавшийся, упавший или оборванный run с последнего checkpoint: транскрипт агента

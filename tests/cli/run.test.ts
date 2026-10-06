@@ -1,4 +1,4 @@
-import { Writable } from "node:stream";
+import { Readable, Writable } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createRuntime } from "../../src/app/runtime.ts";
 import { run } from "../../src/cli/main.ts";
@@ -33,10 +33,11 @@ steps:
 });
 afterEach(() => sb.cleanup());
 
-async function jarvis(args: string[], env: NodeJS.ProcessEnv = {}) {
+async function jarvis(args: string[], env: NodeJS.ProcessEnv = {}, input?: string[]) {
   let out = "";
   let err = "";
   const code = await run(["node", "jarvis", ...args], {
+    ...(input ? { stdin: Readable.from([`${input.join("\n")}\n`]) } : {}),
     streams: {
       out: new Writable({
         write(c, _e, cb) {
@@ -74,8 +75,8 @@ describe("jarvis work / resume / approve / daemon", () => {
     expect(r.err).toContain("⏸ [2/2] approve  waiting for approval — approve spec (spec.md@1)");
     expect(r.out).toContain(`run ${id}  WAITING_HUMAN`);
     expect(r.out).toContain("spec/spec.md@1  write  awaiting approval");
+    expect(r.out).toContain("jarvis continue");
     expect(r.out).toContain(`jarvis show ${id} spec`);
-    expect(r.out).toContain(`jarvis approve ${id} --resume`);
 
     const list = await jarvis(["show", id]);
     expect(list.code).toBe(0);
@@ -151,5 +152,92 @@ describe("jarvis work / resume / approve / daemon", () => {
     expect(r.code).toBe(1);
     expect(r.err).toContain('unknown workflow "nope"');
     expect((await jarvis(["resume", "zzz"])).code).toBe(1);
+  });
+});
+
+describe("a person at the terminal decides where the run stops", () => {
+  const REVIEWED = `name: reviewed
+entry: write
+steps:
+  - id: write
+    kind: deterministic
+    tool: artifact.write
+    args:
+      type: spec
+      name: spec.json
+      content: '{"title":"Fix the form","summary":"Hide the fields.","requirements":[{"id":"R1","text":"Hide"}],"openQuestions":["Ever show them?","Which way?"]}'
+    outputs: [spec]
+    transitions: { onSuccess: approve }
+  - id: approve
+    kind: approval
+    artifactType: spec
+    transitions:
+      onSuccess: DONE
+      onOutcome:
+        request_changes: { to: write, maxIterations: 2 }
+`;
+  const ON = { JARVIS_INTERACTIVE: "on" };
+
+  it("reads, sends back with answers to the open questions, then accepts — in one command", async () => {
+    sb.write("project/.jarvis/workflows/reviewed.yaml", REVIEWED);
+    const r = await jarvis(["work", "ABC-5", "--workflow", "reviewed"], ON, [
+      "", // read it whole
+      "c",
+      "never", // 1/2
+      "", // 2/2 skipped
+      "keep it small",
+      "", // send
+      "a", // the second version
+    ]);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("Fix the form");
+    expect(r.out).toContain("1 requirement · 2 open questions");
+    expect(r.out).toContain("enter read it whole    a accept    c send back with changes    q decide later");
+    expect(r.out).toContain("## Requirements");
+    expect(r.out).toContain("1/2 Ever show them?");
+    expect(r.out).toContain("↻ sent back spec/spec.json@1 with your changes");
+    expect(r.out).toContain("✓ accepted spec/spec.json@2");
+    expect(r.out).toContain("COMPLETED");
+    expect(r.err).toContain("↻ approve → write request_changes, round 1/2");
+    // one header: the run goes on in the same command
+    expect(r.err.match(/▶ reviewed/g)).toHaveLength(1);
+
+    const loaded = await loadConfig({ cwd: sb.project, homeDir: sb.home, env: {} });
+    const rt = createRuntime(loaded, { env: {} });
+    const runId = rt.runs.list({ includeTerminal: true })[0]?.id as string;
+    const spec = rt.artifacts.listLatest(runId, "spec")[0];
+    const sentBack = rt.artifacts.approvalsFor(spec?.artifactId as string, 1)[0];
+    rt.close();
+    expect(sentBack?.decision).toBe("request_changes");
+    expect(sentBack?.comment).toBe(
+      "Answers to the open questions:\n1) Ever show them?\n   → never\n\nkeep it small",
+    );
+  });
+
+  it("`jarvis continue` finds the waiting run without its id; q leaves it waiting", async () => {
+    const parked = await jarvis(["work", "ABC-6", "--workflow", "gated"]);
+    expect(parked.code).toBe(10);
+    expect(parked.out).toContain("jarvis continue");
+
+    const later = await jarvis(["continue"], ON, ["q"]);
+    expect(later.code).toBe(10);
+    expect(later.out).toContain("left waiting; come back with jarvis continue");
+
+    const done = await jarvis(["c"], ON, ["a"]);
+    expect(done.code).toBe(0);
+    expect(done.out).toContain("✓ accepted spec/spec.md@1");
+    expect(done.out).toContain("COMPLETED");
+    expect(done.err).toContain("✓ [2/2] approve");
+    expect(`${done.out}${done.err}`.match(/▶ gated/g)).toHaveLength(1);
+
+    const none = await jarvis(["continue"], ON, []);
+    expect(none.code).toBe(0);
+    expect(none.out).toContain("nothing waits for you here");
+  });
+
+  it("without a person at the terminal nothing is asked", async () => {
+    const r = await jarvis(["work", "ABC-7", "--workflow", "gated"], { JARVIS_INTERACTIVE: "off" }, ["a"]);
+    expect(r.code).toBe(10);
+    expect(r.out).not.toContain("decide later");
   });
 });

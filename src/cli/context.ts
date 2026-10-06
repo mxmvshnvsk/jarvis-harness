@@ -8,6 +8,8 @@ export interface CliContext {
   readonly homeDir: string;
   readonly out: Output;
   readonly profile?: string;
+  /** Where answers come from when a run stops for a person (src/cli/prompt.ts). */
+  readonly stdin?: NodeJS.ReadableStream;
 }
 
 export function defaultContext(out: Output, overrides: Partial<CliContext> = {}): CliContext {
