@@ -36,6 +36,24 @@ export interface VerifiedEvidence {
 export interface VerifiedClaim {
   readonly statement: string;
   readonly evidence: VerifiedEvidence[];
+  /**
+   * The statement speaks for every case ("every handler…", "the only place…", "never…") while its
+   * evidence shows some. The excerpt exists, but it cannot prove the generalisation: a human reads
+   * these first. Pilot: "every handler catch reports its error the same way" passed the check with one
+   * excerpt, yet most handler files with a catch did not — it was the team's rule, not the code.
+   */
+  readonly sweeping?: true;
+}
+
+// `\b` knows ASCII letters only: the Russian words need Unicode letter boundaries
+const SWEEPING_EN =
+  /\b(only|always|never|every|each|all|none|nothing|exclusively|solely|sole|any)\b|\bno\s+(?!longer\b)\w+/i;
+const SWEEPING_RU =
+  /(?<!\p{L})(единствен\p{L}*|всегда|никогда|только|кажд\p{L}*|все|всех|любо\p{L}*|ни\s+од\p{L}*)(?!\p{L})/iu;
+
+/** A statement that generalises beyond what excerpts can show. */
+export function isSweeping(statement: string): boolean {
+  return SWEEPING_EN.test(statement) || SWEEPING_RU.test(statement);
 }
 
 export interface Dropped {
@@ -129,7 +147,12 @@ function checkClaims(
       if (typeof result === "string") bad.push(result);
       else good.push(result);
     }
-    if (good.length > 0) kept.push({ statement: claim.statement, evidence: good });
+    if (good.length > 0)
+      kept.push({
+        statement: claim.statement,
+        evidence: good,
+        ...(isSweeping(claim.statement) ? { sweeping: true as const } : {}),
+      });
     else dropped.push({ section, what: claim.statement, why: bad.join("; ") || "no evidence" });
   }
   return kept;

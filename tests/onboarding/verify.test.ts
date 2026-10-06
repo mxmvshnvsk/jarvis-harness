@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { type ModuleMapDoc, verifyModuleMap } from "../../src/onboarding/verify.ts";
+import { isSweeping, type ModuleMapDoc, verifyModuleMap } from "../../src/onboarding/verify.ts";
 import { type Sandbox, sandbox } from "../helpers/tmp.ts";
 
 let sb: Sandbox;
@@ -169,5 +169,23 @@ describe("verifyModuleMap", () => {
     );
     expect(out.publicApi.map((a) => a.symbol)).toEqual(["Order"]);
     expect(out.dropped.map((d) => d.what)).toEqual(["Ord"]);
+  });
+
+  it("tells a generalisation from a statement about what the excerpt shows", () => {
+    for (const sweeping of [
+      "Every handler catch reports the error through reportFailure.",
+      "log.ts is the only place where console is kept.",
+      "The module has no barrel index.ts.",
+      "Сервисы берутся только из ServiceRegistry.",
+      "Каждый шаг пишет событие.",
+    ])
+      expect(isSweeping(sweeping)).toBe(true);
+    for (const specific of [
+      "Discounts are applied before tax.",
+      "The client treats status 401 as an auth error.",
+      "The session cookie is kept for 90 days.",
+      "Лейбл пишется в snake_case.",
+    ])
+      expect(isSweeping(specific)).toBe(false);
   });
 });

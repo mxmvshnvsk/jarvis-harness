@@ -158,7 +158,7 @@ describe("jarvis onboard --module", () => {
       dropped: Array<{ what: string }>;
     };
     expect(result.state).toBe("COMPLETED");
-    expect(result.claims).toEqual({ proposed: 5, kept: 3 });
+    expect(result.claims).toEqual({ proposed: 5, kept: 3, sweeping: 0 });
     expect(result.dropped.map((d) => d.what).sort()).toEqual(["Ghost", "Orders are cached per customer."]);
     // nothing is written into the project by the agent
     expect(existsSync(join(sb.project, ".jarvis/knowledge/module-src-orders.md"))).toBe(false);
@@ -183,6 +183,35 @@ describe("jarvis onboard --module", () => {
     const found = await jarvis(["--json", "knowledge", "search", "discounts before tax"]);
     expect(found.code).toBe(0);
     expect(found.out).toContain("module-src-orders");
+  });
+
+  it("marks a generalisation its excerpt cannot prove, for the reviewer to read first (pilot)", async () => {
+    mapper({
+      ...GOOD,
+      publicApi: [],
+      terms: [],
+      rules: [
+        {
+          statement: "Every order applies discounts before tax, never after.",
+          evidence: [{ file: "src/orders/order.ts", line: 3, quote: "// discounts are applied before tax" }],
+        },
+        {
+          statement: "Discounts are applied before tax.",
+          evidence: [{ file: "src/orders/order.ts", line: 3, quote: "// discounts are applied before tax" }],
+        },
+      ],
+    });
+    const r = await jarvis(["onboard", "--module", "src/orders", "--no-graph"]);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("check before promoting — generalisations the excerpts cannot prove (1):");
+    expect(r.out).toContain("  ? Every order applies discounts before tax, never after.");
+    const id = /candidate (art_\w+)/.exec(r.out)?.[1] as string;
+    expect((await jarvis(["candidates", "promote", id, "--id", "module-src-orders"])).code).toBe(0);
+    const text = readFileSync(join(sb.project, ".jarvis/knowledge/module-src-orders.md"), "utf8");
+    expect(text).toContain(
+      "- Every order applies discounts before tax, never after. **[check: a generalisation; the excerpt shows one place]**",
+    );
+    expect(text).toContain("- Discounts are applied before tax.\n");
   });
 
   it("fails and creates no candidate when nothing survives verification", async () => {

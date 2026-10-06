@@ -189,6 +189,13 @@ async function runModuleMap(
     ctx.out.result(result, () => {
       ctx.out.line(`run ${result.runId || "-"}: ${result.state}`);
       ctx.out.line(`claims confirmed against the code: ${result.claims.kept} of ${result.claims.proposed}`);
+      // the excerpt check proves that a quote exists, not that it supports a generalisation
+      if (result.sweeping && result.sweeping.length > 0) {
+        ctx.out.line(
+          `check before promoting — generalisations the excerpts cannot prove (${result.sweeping.length}):`,
+        );
+        for (const s of result.sweeping) ctx.out.line(`  ? ${s}`);
+      }
       for (const d of result.dropped) ctx.out.line(`  dropped ${d.section} "${d.what}": ${d.why}`);
       if (result.problem) ctx.out.line(result.problem);
       if (result.candidateId) {

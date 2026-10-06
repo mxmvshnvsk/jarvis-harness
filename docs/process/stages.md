@@ -67,6 +67,9 @@ Remaining commands of ADR-0001 §15:
   everything that certainly applies, so the documentation's skills no longer displace `sdd-implementation`
 - standards: `mustNot` judges the lines a change adds (`lines: added`, the default; `all` for every line of a changed
   file) — rules for new code in a legacy codebase no longer send the implementation back over old lines
+- onboarding: a kept claim that generalises beyond its excerpts ("every…", "the only…", "no…", "каждый/только…") is
+  marked in the candidate and listed by `onboard --module` for review first — the excerpt check proves a quote exists,
+  not that it supports "every" (pilot: "every handler catch reports its error the same way" passed; most handler files did not)
 
 ADR-0001 §20 stage 12 (git hooks) — `f11ca47`:
 

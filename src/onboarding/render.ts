@@ -154,7 +154,9 @@ export function renderModuleDoc(map: VerifiedModuleMap, facts?: ModuleFacts): st
     if (items.length === 0) return;
     lines.push("", `## ${title}`, "");
     for (const c of items) {
-      lines.push(`- ${oneLine(c.statement)}`);
+      // a generalisation the excerpts cannot prove: the reviewer checks it before promoting
+      const review = c.sweeping ? " **[check: a generalisation; the excerpt shows one place]**" : "";
+      lines.push(`- ${oneLine(c.statement)}${review}`);
       for (const e of c.evidence) lines.push(`  - ${code(`${e.file}:${e.line}`)}: ${code(e.quote)}`);
     }
   };

@@ -19,8 +19,10 @@ export interface MapModuleResult {
   readonly state: string;
   readonly module: string;
   readonly candidateId?: string;
-  readonly claims: { readonly proposed: number; readonly kept: number };
+  readonly claims: { readonly proposed: number; readonly kept: number; readonly sweeping?: number };
   readonly dropped: readonly Dropped[];
+  /** Kept claims that generalise beyond their excerpts — what the reviewer reads first. */
+  readonly sweeping?: readonly string[];
   readonly doc?: string;
   readonly problem?: string;
 }
@@ -112,7 +114,10 @@ export async function mapModule(runtime: Runtime, options: MapModuleOptions): Pr
     verified.responsibilities.length +
     verified.rules.length +
     verified.terms.length;
-  const claims = { proposed, kept };
+  const sweeping = [...verified.responsibilities, ...verified.rules]
+    .filter((c) => c.sweeping)
+    .map((c) => c.statement);
+  const claims = { proposed, kept, sweeping: sweeping.length };
   const survived = verified.responsibilities.length + verified.rules.length + verified.publicApi.length;
   if (survived === 0)
     return {
@@ -140,7 +145,7 @@ export async function mapModule(runtime: Runtime, options: MapModuleOptions): Pr
       {
         kind: "knowledge",
         title: `module ${options.module}`,
-        rationale: `Mapped by the onboarding agent; ${kept} of ${proposed} claims were confirmed against the code, ${verified.dropped.length} dropped.`,
+        rationale: `Mapped by the onboarding agent; ${kept} of ${proposed} claims were confirmed against the code, ${verified.dropped.length} dropped${sweeping.length > 0 ? `; ${sweeping.length} generalise beyond their excerpts — check those (marked) before promoting` : ""}.`,
         evidence,
         proposal: markdown,
         paths: [`${options.module}/**`],
@@ -163,6 +168,7 @@ export async function mapModule(runtime: Runtime, options: MapModuleOptions): Pr
     candidateId: candidate.artifactId,
     claims,
     dropped: verified.dropped,
+    ...(sweeping.length > 0 ? { sweeping } : {}),
     doc: markdown,
   };
 }
