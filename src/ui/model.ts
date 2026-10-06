@@ -1,6 +1,6 @@
 import { basename } from "node:path";
 import { type Activity, activityOf, noticeOf } from "../app/activity.ts";
-import { awaitedArtifact, type Decision, decisionOn, waitingCard } from "../app/decide.ts";
+import { awaitedArtifact, type Decision, decisionOn, rerunRequested, waitingCard } from "../app/decide.ts";
 import { Journey, type LoopReport, type StepReport } from "../app/journey.ts";
 import type { Runtime } from "../app/runtime.ts";
 import type { RunTokens } from "../app/status.ts";
@@ -38,6 +38,8 @@ export interface LoopCard {
   readonly checkout: string;
   readonly checkoutShown: string;
   readonly changes?: readonly Change[];
+  /** "Run again" asked since the run stopped (the page, the card's `r`): it goes on, or waits for `jarvis continue`. */
+  readonly rerun?: ReturnType<typeof rerunRequested>;
 }
 
 export interface ApprovalCard {
@@ -124,6 +126,7 @@ export async function waitCardOf(runtime: Runtime, run: Run, homeDir: string): P
     const route = /^(.+)->(.+)#(.+)$/.exec(edge);
     const reasonText = typeof doc?.reason === "string" ? doc.reason : "";
     const changes = changesIn(run.workspace.path);
+    const rerun = rerunRequested(runtime, run.id);
     return {
       kind: "loop",
       step: run.currentStep ?? "the step",
@@ -135,6 +138,7 @@ export async function waitCardOf(runtime: Runtime, run: Run, homeDir: string): P
       checkout: run.workspace.path,
       checkoutShown: homePath(run.workspace.path, homeDir),
       ...(changes ? { changes } : {}),
+      ...(rerun ? { rerun } : {}),
     };
   }
   const awaited = kind === "approval" || !kind ? awaitedArtifact(runtime, run) : undefined;
@@ -463,8 +467,10 @@ export interface ArtifactPage {
   readonly facts?: DocFacts;
   readonly state: string;
   readonly decision?: Decision;
-  /** This version is what the run waits on now: it can be decided here. */
+  /** This version is what the run waits on now and is not decided yet: it can be decided here. */
   readonly awaited: boolean;
+  /** The run still stands at this version's gate (decided or not): it goes on with `jarvis continue`. */
+  readonly atGate: boolean;
   readonly terminal: boolean;
 }
 
@@ -508,6 +514,7 @@ export function artifactPage(
     state,
     ...(decision ? { decision } : {}),
     awaited: isAwaited && !decision,
+    atGate: isAwaited,
     terminal: waitingCard(runtime, run.id) !== undefined,
   };
 }

@@ -129,7 +129,7 @@ describe("jarvis ui: the session token", () => {
     const page = await get("/", authed());
     expect(page.status).toBe(200);
     expect(page.headers["content-security-policy"]).toContain("script-src 'self'");
-    expect(page.headers["referrer-policy"]).toBe("no-referrer");
+    expect(page.headers["referrer-policy"]).toBe("same-origin");
   });
 
   it("refuses another host name (DNS rebinding), even with the token", async () => {

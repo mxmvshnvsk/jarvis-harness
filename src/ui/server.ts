@@ -2,16 +2,25 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import { existsSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
+import {
+  awaitedArtifact,
+  DecisionTakenError,
+  recordDecision,
+  requestRerun,
+  rerunRequested,
+} from "../app/decide.ts";
 import type { Runtime } from "../app/runtime.ts";
+import { type OpenIn, reviewFiles } from "../cli/checkout.ts";
 import type { Actor } from "../core/domain/actor.ts";
 import type { Run } from "../core/domain/run.ts";
 import type { LocalWorkflowEngine } from "../orchestration/runtime.ts";
 import { shortRunId } from "../storage/runStore.ts";
 import { git } from "../tools/local/exec.ts";
 import { SCRIPT, STYLE } from "./assets.ts";
-import { type DiffFile, html, parseDiff } from "./html.ts";
+import { type DiffFile, type Html, html, parseDiff } from "./html.ts";
 import { artifactPage, runPage, runsPage } from "./model.ts";
 import {
+  type Actions,
   type ArtifactExtras,
   artifactContent,
   type Chrome,
@@ -43,6 +52,10 @@ export interface UiServerOptions {
   readonly actor?: () => Promise<Actor | undefined>;
   /** How often the journal is looked at for live updates (ms). */
   readonly pollMs?: number;
+  /** "Open in editor": the run's checkout in the person's editor (the card's `o`). */
+  readonly open?: OpenIn;
+  /** Pages only: no forms, no POST. */
+  readonly readOnly?: boolean;
 }
 
 export interface UiServer {
@@ -59,7 +72,8 @@ const SECURITY_HEADERS: Record<string, string> = {
     "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
   "X-Content-Type-Options": "nosniff",
   "X-Frame-Options": "DENY",
-  "Referrer-Policy": "no-referrer",
+  // same-origin: no referrer for the fonts, and a form post keeps its Origin (no-referrer makes it "null")
+  "Referrer-Policy": "same-origin",
   "Cache-Control": "no-store",
 };
 
@@ -168,9 +182,153 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
     return { files: parseDiff(r.stdout) };
   };
 
+  const actions: Actions | undefined = options.readOnly ? undefined : { token };
+
+  /** What a POST came back with, as a fixed message: nothing from the address is shown as markup. */
+  const noticeOf = (r: Request): Html | undefined => {
+    const n = r.url.searchParams.get("notice");
+    const editor = r.url.searchParams.get("editor") ?? "your editor";
+    const notices: Record<string, Html> = {
+      opened: html`<div class="banner ok">↗ opened in ${editor} — the page watches the checkout: save there, then run the step again</div>`,
+      "no-editor": html`<div class="banner bad">No editor found — set JARVIS_EDITOR (code, idea, webstorm…) where you start <code>jarvis ui</code></div>`,
+      "no-checkout": html`<div class="banner bad">The run's checkout is gone</div>`,
+      actor: html`<div class="banner bad">Cannot determine who decides: set JARVIS_ACTOR, actor.id or git config user.email (ADR-0006)</div>`,
+      taken: html`<div class="banner bad">This version was decided meanwhile (in a terminal or another window): yours is not recorded</div>`,
+      stale: html`<div class="banner bad">The run no longer waits for this version: nothing recorded</div>`,
+      empty: html`<div class="banner bad">Say what to change — a comment, or comments on lines of the diff</div>`,
+      "not-waiting": html`<div class="banner bad">The run no longer waits at this loop: nothing recorded</div>`,
+    };
+    return n ? notices[n] : undefined;
+  };
+
+  const redirect = (r: Request, location: string) => {
+    r.res.writeHead(303, { ...SECURITY_HEADERS, Location: location });
+    r.res.end();
+  };
+
+  /** A form posted by the page: url-encoded, small. */
+  const formOf = (req: IncomingMessage): Promise<URLSearchParams> =>
+    new Promise((resolve, reject) => {
+      let body = "";
+      req.setEncoding("utf8");
+      req.on("data", (c: string) => {
+        body += c;
+        if (body.length > 512 * 1024) {
+          reject(new Error("form too large"));
+          req.destroy();
+        }
+      });
+      req.on("end", () => resolve(new URLSearchParams(body)));
+      req.on("error", reject);
+    });
+
+  /** Line comments from the diff, `path:line — text` one a line (ADR-0019 §5). */
+  const linesOf = (raw: string | null): string[] => {
+    try {
+      const v: unknown = JSON.parse(raw || "[]");
+      if (!Array.isArray(v)) return [];
+      return v
+        .slice(0, 500)
+        .filter(
+          (c): c is { where: string; text: string } =>
+            !!c && typeof c.where === "string" && typeof c.text === "string" && c.text.trim().length > 0,
+        )
+        .map((c) => `${c.where.slice(0, 300)} — ${c.text.trim().slice(0, 4000)}`);
+    } catch {
+      return [];
+    }
+  };
+
+  /** Accept / Send back / Run again / Open in editor: the same functions as the terminal's keys. */
+  const post = async (r: Request): Promise<void> => {
+    const m = /^\/runs\/([^/]+)\/(decide|rerun|open)$/.exec(r.url.pathname);
+    const run = m ? resolveRun(m[1] as string) : undefined;
+    if (!m || !run || !actions) return notFound(r, `Nothing to do at ${r.url.pathname}.`);
+    const form = await formOf(r.req);
+    const sent = form.get("t");
+    if (!sent || !same(sent, token)) return send(r, 403, forbiddenPage());
+    const short = shortRunId(run.id);
+    const actor = async () => (options.actor ? await options.actor() : undefined);
+    if (m[2] === "open") {
+      if (!existsSync(run.workspace.path)) return redirect(r, `/runs/${short}?notice=no-checkout`);
+      // the files the loop's reasons name first, at their lines, then what the run changed (as `o`)
+      const record =
+        run.waitingFor?.kind === "loop"
+          ? runtime.artifacts.listLatest(run.id, "loop-exhausted")[0]
+          : undefined;
+      let reasons = "";
+      try {
+        const doc = record ? (JSON.parse(runtime.artifacts.text(record)) as { reason?: unknown }) : undefined;
+        reasons = typeof doc?.reason === "string" ? doc.reason : "";
+      } catch {
+        reasons = "";
+      }
+      const files = reviewFiles(
+        run.workspace.path,
+        run.workspace.baseCommit ?? run.workspace.baseRef,
+        reasons,
+      );
+      const editor = options.open?.(run.workspace.path, files);
+      return redirect(
+        r,
+        editor
+          ? `/runs/${short}?notice=opened&editor=${encodeURIComponent(editor)}`
+          : `/runs/${short}?notice=no-editor`,
+      );
+    }
+    if (m[2] === "rerun") {
+      if (run.state !== "WAITING_HUMAN" || run.waitingFor?.kind !== "loop")
+        return redirect(r, `/runs/${short}?notice=not-waiting`);
+      if (!rerunRequested(runtime, run.id)) {
+        const who = await actor();
+        if (!who) return redirect(r, `/runs/${short}?notice=actor`);
+        requestRerun(runtime, run, who, "ui");
+      }
+      return redirect(r, `/runs/${short}`);
+    }
+    // decide: only the version the run waits on now, once
+    const awaited = run.state === "WAITING_HUMAN" ? awaitedArtifact(runtime, run) : undefined;
+    const version = Number(form.get("version"));
+    const back = (notice?: string, v = version) =>
+      `/runs/${short}/artifacts/${encodeURIComponent(awaited?.type ?? "artifact")}/${encodeURIComponent(awaited?.artifact.name ?? "")}?v=${v}${notice ? `&notice=${notice}` : ""}`;
+    if (
+      !awaited ||
+      awaited.artifact.artifactId !== form.get("artifact") ||
+      awaited.artifact.version !== version
+    )
+      return awaited ? redirect(r, back("stale")) : redirect(r, `/runs/${short}?notice=not-waiting`);
+    const decision = form.get("decision");
+    if (decision !== "approve" && decision !== "request_changes") return redirect(r, back());
+    const lines = linesOf(form.get("lines"));
+    const comment = [
+      (form.get("comment") ?? "").trim().slice(0, 20_000),
+      lines.length > 0 ? `Comments on lines:\n${lines.join("\n")}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+    if (decision === "request_changes" && !comment) return redirect(r, back("empty"));
+    const who = await actor();
+    if (!who) return redirect(r, back("actor"));
+    try {
+      recordDecision(runtime, run, {
+        actor: who,
+        artifact: awaited.artifact,
+        type: awaited.type,
+        decision,
+        ...(comment ? { comment } : {}),
+        channel: "ui",
+      });
+    } catch (error) {
+      if (!(error instanceof DecisionTakenError)) throw error;
+      return redirect(r, back("taken"));
+    }
+    return redirect(r, back());
+  };
+
   const routes = async (r: Request): Promise<void> => {
     const path = r.url.pathname;
     const now = Date.now();
+    if (r.req.method === "POST") return post(r);
     if (path === "/") {
       const repoParam = r.url.searchParams.get("repo");
       const all = runtime.runs.list({ includeTerminal: true, limit: 500 });
@@ -190,7 +348,7 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
           repos: repoPicker(model),
           ...(model.running.length > 0 ? { tick: 5000 } : {}),
         },
-        runsContent(model, now),
+        runsContent(model, now, actions),
       );
     }
     const runMatch = /^\/runs\/([^/]+)$/.exec(path);
@@ -209,7 +367,7 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
           back: { href: "/", label: "Runs" },
           ...(ticking ? { tick: 3000 } : {}),
         },
-        runContent(model, now),
+        runContent(model, now, actions, noticeOf(r)),
       );
     }
     const artMatch = /^\/runs\/([^/]+)\/artifacts\/([^/]+)\/([^/]+)$/.exec(path);
@@ -221,7 +379,11 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
       const name = decodeURIComponent(artMatch[3] as string);
       const model = artifactPage(runtime, run, type, name, Number.isInteger(v) && v > 0 ? v : undefined);
       if (!model) return notFound(r, `Run ${shortRunId(run.id)} has no ${type}/${name}.`);
-      const extras: ArtifactExtras = {};
+      const notice = noticeOf(r);
+      const extras: ArtifactExtras = {
+        ...(actions ? { actions, comments: true } : {}),
+        ...(notice ? { banner: notice } : {}),
+      };
       if (type === "implementation") {
         const d = await diffOf(run);
         Object.assign(extras, d.files ? { diff: d.files } : {}, d.note ? { diffNote: d.note } : {});
@@ -279,7 +441,13 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
       res.end();
       return;
     }
-    if (req.method !== "GET") return send(r, 405, "405 — method not allowed", "text/plain; charset=utf-8");
+    if (req.method === "POST") {
+      // a page of another origin in the same browser cannot post here: its Origin is not ours
+      const origin = req.headers.origin;
+      if (origin !== `http://127.0.0.1:${port}` && origin !== `http://localhost:${port}`)
+        return send(r, 403, "403 — unexpected origin", "text/plain; charset=utf-8");
+    } else if (req.method !== "GET")
+      return send(r, 405, "405 — method not allowed", "text/plain; charset=utf-8");
     routes(r).catch((error: unknown) => {
       runtime.log.error("ui.error", {
         path: url.pathname,

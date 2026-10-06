@@ -25,6 +25,27 @@ import type {
  * marked `data-live` are re-rendered by the page's script when the journal moves.
  */
 
+/**
+ * What the page may do (ADR-0023 §3, §6 p.4): decide, run a used-up loop's step again, open the
+ * checkout in the editor. Forms carry the session token; without it the pages only read.
+ */
+export interface Actions {
+  readonly token: string;
+}
+
+/** A POST form with the session token: a foreign page cannot make one (ADR-0023 §5). */
+function form(actions: Actions, action: string, body: Part, attrs: Part = ""): Html {
+  return html`<form method="post" action="${action}"${attrs}><input type="hidden" name="t" value="${actions.token}">${body}</form>`;
+}
+
+/** After a decision on the page: who goes on with it. */
+function goesOn(terminal: boolean, run: Run): Html {
+  const cmd = `jarvis continue ${shortRunId(run.id)}`;
+  return terminal
+    ? html`<span class="hint">The terminal waiting at the card goes on with it.</span>`
+    : html`<span class="hint">No terminal waits at this run: it goes on with <code>${cmd}</code></span><button type="button" class="btn" data-copy="${cmd}">Copy command</button>`;
+}
+
 export interface Chrome {
   readonly title: string;
   readonly page: "runs" | "run" | "artifact" | "error";
@@ -42,7 +63,7 @@ export function layout(chrome: Chrome, content: Html): string {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="referrer" content="no-referrer">
+<meta name="referrer" content="same-origin">
 <title>${chrome.title} · jarvis</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
@@ -136,7 +157,7 @@ function terminalHint(card: WaitCard, terminal: boolean, run: Run): Html {
 
 /* ---- runs ---- */
 
-function waitingCardHtml(w: WaitingRun, now: number): Html {
+function waitingCardHtml(w: WaitingRun, now: number, actions?: Actions): Html {
   const { run, card } = w;
   const meta = html`<span class="meta">${run.workflow} · ${shortRunId(run.id)} · waiting ${ago(run.updatedAt, now)}${w.terminal ? " · a terminal waits" : ""}</span>`;
   if (card.kind === "loop") {
@@ -151,7 +172,7 @@ function waitingCardHtml(w: WaitingRun, now: number): Html {
 <div class="row"><span class="pill wait">⏸ loop used up · ${card.step}</span>${meta}</div>
 <h3>${firstLine(run.task)}</h3>
 <p>${card.step} sent the work back ${card.iterations ? `${card.iterations} times` : "too often"}${card.reasons.length > 0 ? html`: ${reasons}${more}` : "."}</p>
-<div class="actions"><a class="btn primary" href="${runHref(run)}">Open the run</a></div>
+<div class="actions"><a class="btn primary" href="${runHref(run)}">Open the run</a>${actions ? form(actions, `${runHref(run)}/open`, html`<button type="submit" class="btn">Open in editor</button>`) : ""}</div>
 </article>`;
   }
   if (card.kind === "approval") {
@@ -165,7 +186,7 @@ function waitingCardHtml(w: WaitingRun, now: number): Html {
 <div class="row"><span class="pill info">⏸ approval · ${card.type}</span>${meta}</div>
 <h3>${firstLine(run.task)}</h3>
 ${gist ? html`<p>${gist}</p>` : ""}
-${card.decision ? html`<p class="ok">${decisionText(card)} — the run waits for <code>jarvis continue</code></p>` : ""}
+${card.decision ? html`<p class="ok">${decisionText(card)}${w.terminal ? " — the terminal goes on" : html` — the run waits for <code>jarvis continue</code>`}</p>` : ""}
 <div class="actions"><a class="btn primary" href="${artifactHref(run, card.artifact)}">Review the ${card.type}</a><a class="btn" href="${runHref(run)}">Open the run</a></div>
 </article>`;
   }
@@ -248,7 +269,7 @@ ${page.repos.map((r) => html`<option value="${r.root}"${r.root === page.repo ? h
 </select><button type="submit" class="btn sr">Show</button></form>`;
 }
 
-export function runsContent(page: RunsPage, now: number): Html {
+export function runsContent(page: RunsPage, now: number, actions?: Actions): Html {
   const sum = [
     `${page.waiting.length} wait${page.waiting.length === 1 ? "s" : ""} for you`,
     `${page.running.length} running`,
@@ -260,7 +281,7 @@ export function runsContent(page: RunsPage, now: number): Html {
 <h2 id="waits">Waits for you</h2>
 ${
   page.waiting.length > 0
-    ? html`<div class="cards">${page.waiting.map((w) => waitingCardHtml(w, now))}</div>`
+    ? html`<div class="cards">${page.waiting.map((w) => waitingCardHtml(w, now, actions))}</div>`
     : html`<div class="panel empty">Nothing waits for you.</div>`
 }
 </section>
@@ -340,7 +361,7 @@ function stepRow(s: StepRow, now: number): Html {
 </li>`;
 }
 
-function loopCardHtml(card: LoopCard, page: RunPage): Html {
+function loopCardHtml(card: LoopCard, page: RunPage, actions?: Actions): Html {
   const route = card.from ? `${card.from} → ${card.to} · ${card.outcome} · ` : "";
   return html`<section class="panel decision" aria-labelledby="decision" data-live="card">
 <div class="row" style="flex-direction:column;align-items:flex-start;gap:4px">
@@ -355,14 +376,20 @@ ${
 }
 <div class="checkout">
 <span class="muted" style="font-size:14px">Fix it by hand in the run's checkout</span>
-<div class="row"><code class="path">${card.checkoutShown}</code><button type="button" class="btn" data-copy="${card.checkout}">Copy path</button></div>
+<div class="row"><code class="path">${card.checkoutShown}</code>${actions ? form(actions, `${runHref(page.run)}/open`, html`<button type="submit" class="btn">Open in editor</button>`) : ""}<button type="button" class="btn" data-copy="${card.checkout}">Copy path</button></div>
 <div class="changed" aria-live="polite"><span class="hint">Changed in the checkout · live</span>${
     card.changes && card.changes.length > 0
       ? card.changes.slice(0, 12).map(changeLine)
       : html`<span class="muted">nothing yet</span>`
   }${card.changes && card.changes.length > 12 ? html`<span class="muted">+${card.changes.length - 12} more</span>` : ""}</div>
 </div>
-${terminalHint(card, page.terminal, page.run)}
+${
+  card.rerun
+    ? html`<div class="banner info">↻ ${card.step} runs again — asked${card.rerun.actor ? ` by ${card.rerun.actor}` : ""}${card.rerun.channel === "ui" ? " from the page" : card.rerun.channel === "cli" ? " in the terminal" : ""}</div><div class="actions">${goesOn(page.terminal, page.run)}</div>`
+    : actions
+      ? html`<div class="actions">${form(actions, `${runHref(page.run)}/rerun`, html`<button type="submit" class="btn primary big">Run ${card.step} again</button>`)}<span class="hint">same as <code>r</code> on the terminal's card; ${page.terminal ? "the terminal waiting there goes on" : html`no terminal waits: <code>jarvis continue ${shortRunId(page.run.id)}</code> does it`}</span></div>`
+      : terminalHint(card, page.terminal, page.run)
+}
 </section>`;
 }
 
@@ -403,7 +430,7 @@ function approvalCardHtml(card: ApprovalCard, page: RunPage): Html {
 <span class="meta">${card.type}/${card.artifact.name}@${card.artifact.version}</span>
 </div>
 ${briefHtml(card)}
-${card.decision ? html`<div class="banner ok">${decisionText(card)}${page.terminal ? "" : html` — the run waits for <code>jarvis continue ${shortRunId(page.run.id)}</code>`}</div>` : ""}
+${card.decision ? html`<div class="banner ok">${decisionText(card)}</div><div class="actions">${goesOn(page.terminal, page.run)}</div>` : ""}
 <div class="actions"><a class="btn primary big" href="${artifactHref(page.run, card.artifact)}">Review the ${card.type}</a></div>
 ${card.decision ? "" : terminalHint(card, page.terminal, page.run)}
 </section>`;
@@ -437,7 +464,7 @@ ${
 </section>`;
 }
 
-export function runContent(page: RunPage, now: number): Html {
+export function runContent(page: RunPage, now: number, actions?: Actions, notice?: Html): Html {
   const r = page.run;
   const t = page.tokens;
   const extra =
@@ -461,13 +488,14 @@ export function runContent(page: RunPage, now: number): Html {
 ${rest ? html`<p class="muted" style="white-space:pre-wrap">${cut(rest, 600)}</p>` : ""}
 ${r.stateReason && r.state !== "RUNNING" ? html`<p class="muted">${r.stateReason}</p>` : ""}
 </div>
+${notice ?? ""}
 <div class="cols">
 <section class="panel side steps" aria-labelledby="steps" data-live="steps">
 <h2 id="steps">Steps</h2>
 <ol style="margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:2px">${page.steps.map((s) => stepRow(s, now))}</ol>
 </section>
 <div class="mainc">
-${card ? (card.kind === "loop" ? loopCardHtml(card, page) : card.kind === "approval" ? approvalCardHtml(card, page) : otherCardHtml(card.what, page)) : nowHtml(page, now)}
+${card ? (card.kind === "loop" ? loopCardHtml(card, page, actions) : card.kind === "approval" ? approvalCardHtml(card, page) : otherCardHtml(card.what, page)) : nowHtml(page, now)}
 ${feedHtml(page.feed)}
 <section class="panel arts" aria-labelledby="artifacts" data-live="arts">
 <h2 id="artifacts">Artifacts</h2>
@@ -549,8 +577,8 @@ export interface ArtifactExtras {
   readonly diff?: readonly DiffFile[];
   /** Why there is no diff (the checkout is gone, not a worktree). */
   readonly diffNote?: string;
-  /** Forms to decide here (stage 3: actions); without, the page says where to decide. */
-  readonly decide?: Html;
+  /** Forms to decide here; without, the page says where to decide (in the terminal). */
+  readonly actions?: Actions;
   readonly banner?: Html;
   readonly comments?: boolean;
 }
@@ -599,10 +627,29 @@ ${f && f.risks.length > 0 ? html`<div class="facts"><span class="lbl">Risks</spa
 ${f && f.openQuestions.length > 0 ? html`<div class="facts"><span class="lbl warn">Open questions</span>${f.openQuestions.map((x, i) => html`<span>${i + 1}) ${cut(x, 200)}</span>`)}</div>` : ""}
 ${
   page.decision
-    ? html`<div class="banner ${tone === "info" ? "info" : tone === "wait" ? "info" : tone}">${glyph} ${page.state} by ${page.decision.approval.actor.id}${page.decision.channel === "ui" ? " in the browser" : page.decision.channel === "cli" ? " in the terminal" : ""}${page.decision.approval.comment ? html`<br><span style="white-space:pre-wrap">${cut(page.decision.approval.comment, 600)}</span>` : ""}</div>`
+    ? html`<div class="banner ${tone === "info" ? "info" : tone === "wait" ? "info" : tone}">${glyph} ${page.state} by ${page.decision.approval.actor.id}${page.decision.channel === "ui" ? " in the browser" : page.decision.channel === "cli" ? " in the terminal" : ""}${page.decision.approval.comment ? html`<br><span style="white-space:pre-wrap">${page.decision.approval.comment.length > 1200 ? `${page.decision.approval.comment.slice(0, 1199)}…` : page.decision.approval.comment}</span>` : ""}</div>`
     : ""
 }
-${extras.decide ?? (page.awaited ? html`<div class="decide"><span class="hint">Decide in the terminal: <code>jarvis continue ${shortRunId(page.run.id)}</code> — <code>a</code> accepts, <code>c</code> sends back.</span><button type="button" class="btn" data-copy="jarvis continue ${shortRunId(page.run.id)}">Copy command</button></div>` : "")}
+${page.decision && page.atGate ? html`<div class="decide">${goesOn(page.terminal, page.run)}</div>` : ""}
+${
+  page.awaited && extras.actions
+    ? form(
+        extras.actions,
+        `${runHref(page.run)}/decide`,
+        html`<input type="hidden" name="artifact" value="${a.artifactId}"><input type="hidden" name="version" value="${a.version}"><input type="hidden" name="lines" value="">
+<div class="decide">
+<label for="comment">What to change <span class="muted">(for Send back; line comments on the diff go with it)</span></label>
+<textarea id="comment" name="comment" rows="3"></textarea>
+<button type="submit" name="decision" value="approve" class="btn accept big">Accept</button>
+<button type="submit" name="decision" value="request_changes" class="btn strong big" data-send-back>Send back</button>
+<span class="hint">Same as <code>a</code> / <code>c</code> on the terminal's card. ${page.terminal ? "The terminal waiting there picks the decision up and goes on." : html`No terminal waits: the run goes on with <code>jarvis continue ${shortRunId(page.run.id)}</code>.`}</span>
+</div>`,
+        html` data-decision`,
+      )
+    : page.awaited
+      ? html`<div class="decide"><span class="hint">Decide in the terminal: <code>jarvis continue ${shortRunId(page.run.id)}</code> — <code>a</code> accepts, <code>c</code> sends back.</span><button type="button" class="btn" data-copy="jarvis continue ${shortRunId(page.run.id)}">Copy command</button></div>`
+      : ""
+}
 </aside>`
       : "";
   return html`<div style="display:flex;flex-direction:column;gap:8px" data-live="head">
@@ -633,7 +680,9 @@ ${
   diff
     ? html`<section id="files" class="group" aria-labelledby="files-h"><h2 id="files-h">Files changed <span class="muted" style="font-weight:400">${diff.length}</span></h2>${
         diff.length > 0
-          ? diff.map((x, i) => diffFileHtml(x, i, extras.comments === true))
+          ? diff.map((x, i) =>
+              diffFileHtml(x, i, extras.comments === true && page.awaited && extras.actions !== undefined),
+            )
           : html`<div class="panel empty">No changes against the base.</div>`
       }</section>`
     : extras.diffNote

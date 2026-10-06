@@ -114,7 +114,7 @@ tr:last-child td{border-bottom:0}
 .arts ul{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:6px}
 .arts li{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:14px;align-items:baseline}
 .arts li a{font-family:var(--mono);font-size:13px;overflow-wrap:anywhere}
-.banner{padding:12px 16px;border-radius:10px;font-size:14px}
+.banner{padding:12px 16px;border-radius:10px;font-size:14px;overflow-wrap:anywhere}
 .banner.ok{background:var(--ok-bg);color:var(--ok-ink)}
 .banner.info{background:var(--accent-soft);color:var(--accent-dark)}
 .banner.bad{background:var(--bad-bg);color:var(--bad)}
@@ -153,8 +153,9 @@ tr:last-child td{border-bottom:0}
 .dl.add{background:var(--ok-bg)}
 .dl.note{color:var(--muted);font-style:italic}
 .dl .cm{width:28px;flex-shrink:0;display:flex;align-items:center;justify-content:center}
-.dl .cm button{width:22px;height:22px;padding:0;border:1px solid transparent;border-radius:5px;background:transparent;color:var(--accent);font-size:16px;line-height:18px;cursor:pointer;opacity:.35}
-.dl:hover .cm button,.dl .cm button:focus-visible{opacity:1;border-color:var(--border-btn);background:#fff}
+.dl .cm button{width:22px;height:22px;padding:0;border:1px solid var(--border-btn);border-radius:5px;background:#fff;color:var(--accent);font-size:16px;line-height:18px;cursor:pointer;opacity:.5}
+@media (hover:hover){.dl .cm button{opacity:0}.dl:hover .cm button{opacity:1}}
+.dl .cm button:focus-visible{opacity:1}
 .dl.commented{box-shadow:inset 3px 0 0 var(--accent)}
 .thread{padding:12px 16px 14px 120px;background:#FAFAF8;border-top:1px solid var(--line);border-bottom:1px solid var(--line);font-family:var(--sans);display:flex;flex-direction:column;gap:8px}
 .thread label{display:flex;flex-direction:column;gap:6px;max-width:620px;font-size:12px;color:var(--muted)}
@@ -180,7 +181,8 @@ tr:last-child td{border-bottom:0}
   .decision{padding:18px}
   .live{margin-left:0}
   th,td{padding:10px 14px}
-  .thread{padding-left:16px}
+  /* the diff scrolls sideways on a phone; a comment under a line stays in view */
+  .thread{padding-left:16px;position:sticky;left:0;width:calc(100vw - 34px)}
   .doc{padding:16px}
   .mainc{order:-1}
 }

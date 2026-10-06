@@ -5,6 +5,7 @@ import { createEngine } from "../../app/engine.ts";
 import { createRuntime } from "../../app/runtime.ts";
 import { resolveActor } from "../../core/actor/resolve.ts";
 import { startUiServer, type UiServer } from "../../ui/server.ts";
+import { systemOpener } from "../checkout.ts";
 import type { CliContext } from "../context.ts";
 import { CliExit, EXIT } from "../output.ts";
 import { loadForCli } from "./config.ts";
@@ -73,7 +74,9 @@ export async function runUi(ctx: CliContext, options: UiOptions = {}): Promise<v
       engine,
       homeDir: ctx.homeDir,
       ...(loaded.project?.root ? { projectRoot: loaded.project.root } : {}),
+      // decisions on the page are the CLI's, with its actor (ADR-0006); `channel: ui` tells them apart
       actor: async () => (await resolveActor(loaded.config, ctx.env, loaded.project?.root)).actor,
+      open: systemOpener(ctx),
     };
     const wanted = options.port ?? 4317;
     try {
