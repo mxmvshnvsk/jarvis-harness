@@ -229,4 +229,43 @@ steps:
     const rt = createRuntime(loaded, { env: {} });
     rt.close();
   });
+
+  it("keeps dependencies between worktrees with the same lockfile (workspace.cache)", async () => {
+    writeFileSync(join(sb.project, "yarn.lock"), "lock v1\n");
+    writeFileSync(join(sb.project, ".gitignore"), ".setup-ran\nnode_modules\n");
+    sh(sb.project, ["add", "-A"]);
+    sh(sb.project, ["commit", "-q", "-m", "lockfile"]);
+    const cacheDir = join(sb.root, "cache", "deps");
+    // the setup installs only when node_modules is missing, like a package manager with nothing to do
+    const setup =
+      "if [ -d node_modules ]; then echo kept >> .setup-ran; else mkdir -p node_modules/dep packages/a/node_modules && echo installed > node_modules/dep/index.js && echo installed >> .setup-ran; fi";
+    const stages: string[] = [];
+    const create = (runId: string) =>
+      WorktreeWorkspace.create({
+        repoRoot: sb.project,
+        worktreesDir: join(sb.root, "wt"),
+        runId,
+        task: "T",
+        setup,
+        env: gitEnv,
+        cache: { dir: cacheDir, key: ["yarn.lock"], paths: ["node_modules", "packages/*/node_modules"] },
+        onStage: (stage, detail) => {
+          if (stage === "cache") stages.push(detail);
+        },
+      });
+    const first = await create("run_cachefirst000000");
+    expect(readFileSync(join(first.ref.path, ".setup-ran"), "utf8")).toBe("installed\n");
+    expect(stages).toEqual(["kept node_modules, packages/a/node_modules for the next run"]);
+
+    const second = await create("run_cachesecond00000");
+    expect(readFileSync(join(second.ref.path, "node_modules/dep/index.js"), "utf8")).toBe("installed\n");
+    expect(readFileSync(join(second.ref.path, ".setup-ran"), "utf8")).toBe("kept\n");
+    expect(stages[1]).toMatch(/^restored node_modules, packages\/a\/node_modules \(key [0-9a-f]{8}\)$/);
+
+    // a changed lockfile is a miss
+    writeFileSync(join(sb.project, "yarn.lock"), "lock v2\n");
+    sh(sb.project, ["commit", "-q", "-am", "lockfile v2"]);
+    const third = await create("run_cachethird000000");
+    expect(readFileSync(join(third.ref.path, ".setup-ran"), "utf8")).toBe("installed\n");
+  });
 });

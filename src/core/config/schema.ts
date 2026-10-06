@@ -204,6 +204,16 @@ export const WorkspaceConfigSchema = z.strictObject({
   allowWrites: z.boolean().optional(),
   /** Worktrees of terminal runs older than this are removed by `jarvis gc` (ADR-0003 §6). */
   retentionDays: z.int().positive().default(7),
+  /**
+   * Dependencies kept between worktrees (src/orchestration/depsCache.ts): `paths` are copied out after
+   * a setup and back into the next worktree whose `key` files (lockfiles) have the same content.
+   */
+  cache: z
+    .strictObject({
+      key: z.array(z.string().min(1)).min(1),
+      paths: z.array(z.string().min(1)).min(1),
+    })
+    .optional(),
 });
 
 const BudgetCapSchema = z.strictObject({

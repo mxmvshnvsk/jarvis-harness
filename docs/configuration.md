@@ -68,6 +68,14 @@ telemetry:                     # ЗАРЕЗЕРВИРОВАНО: политик�
   export: { enabled: false, url: https://otel.corp.local, network: intranet, payloads: false, maxPayloadBytes: 4096 }
 ```
 
+`workspace.cache` — зависимости, которые переживают worktree. Раньше каждый прогон в своём worktree ставил
+зависимости с нуля, и до первого шага проходили минуты. После `setup` пути из `paths` копируются в
+`~/.jarvis/cache/deps/<проект>/<ключ>`, где ключ — хэш файлов `key` (lockfile). Следующий worktree с тем же
+lockfile получает их до `setup`, и `setup` почти ничего не делает. Копия — клон copy-on-write, где файловая
+система умеет (APFS — `cp -c`, btrfs/xfs — `--reflink`), поэтому там она не стоит ни времени, ни места. Хранятся
+три последних ключа. Сломанный кэш стоит только времени полного `setup`. Строка прогресса пишет
+`◌ dependencies restored node_modules (key …)` или `kept … for the next run`.
+
 `models.<id>.stream` — просить ответ потоком (SSE, `stream: true` + `stream_options.include_usage`). Заголовки
 приходят сразу, поэтому долгий ответ не обрывается по таймауту заголовков, а строка прогресса показывает, что
 ответ идёт (`thinking ~3k tok`, `receiving ~1.2k tok`); `jarvis models stats` — сколько ответов пришло потоком и
@@ -108,6 +116,9 @@ workspace:                     # ADR-0003
   setup: "pnpm install --offline --frozen-lockfile"   # после создания worktree
   allowWrites: true            # по умолчанию true для worktree, false для cwd
   retentionDays: 7             # jarvis gc
+  cache:                       # зависимости между worktree (по умолчанию выключено)
+    key: [pnpm-lock.yaml]      # файлы, по содержимому которых кэш подходит
+    paths: [node_modules, "packages/*/node_modules"]   # что сохранить; `*` — один уровень каталогов
 
 modelWait:                     # модель недоступна после повторов шлюза: прогон ждёт, а не падает
   checkEveryMinutes: 5         # как часто проверять (одна попытка, без повторов)

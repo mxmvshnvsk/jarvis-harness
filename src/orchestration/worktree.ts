@@ -3,6 +3,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { WorkspaceRef } from "../core/domain/run.ts";
 import { git, runShell } from "../tools/local/exec.ts";
+import { cacheKey, type DepsCacheConfig, restoreDeps, saveDeps } from "./depsCache.ts";
 import { CwdWorkspace, type Workspace, type WorkspaceFactory } from "./workspace.ts";
 
 /**
@@ -25,8 +26,10 @@ export interface CreateWorktreeOptions {
   readonly setup?: string;
   readonly setupTimeoutMs?: number;
   readonly env?: NodeJS.ProcessEnv;
+  /** Dependencies kept between worktrees: where, and what (`workspace.cache`). */
+  readonly cache?: { readonly dir: string } & DepsCacheConfig;
   /** Told when the worktree exists and before `setup` runs (it can take minutes: say so). */
-  readonly onStage?: (stage: "worktree" | "setup", detail: string) => void;
+  readonly onStage?: (stage: "worktree" | "setup" | "cache", detail: string) => void;
   /** Output of `setup`, line by line: what it is doing right now. */
   readonly onSetupLine?: (line: string) => void;
 }
@@ -149,6 +152,22 @@ export class WorktreeWorkspace implements Workspace {
       headCommit: baseCommit,
     };
     options.onStage?.("worktree", path);
+    const cache = options.cache;
+    const key = cache ? cacheKey(path, cache.key) : undefined;
+    const cacheDir = cache ? join(cache.dir, projectHash(options.repoRoot)) : undefined;
+    let hit = false;
+    if (cache && key && cacheDir) {
+      try {
+        const restored = await restoreDeps(cacheDir, key, path);
+        if (restored) {
+          hit = true;
+          options.onStage?.("cache", `restored ${restored.join(", ")} (key ${key.slice(0, 8)})`);
+        }
+      } catch (error) {
+        // a broken cache only costs the time of a full setup
+        options.onStage?.("cache", `not restored: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
     if (options.setup) {
       options.onStage?.("setup", options.setup);
       const r = await runShell(options.setup, {
@@ -164,6 +183,14 @@ export class WorktreeWorkspace implements Workspace {
         throw new WorktreeError(
           `workspace.setup failed (${r.timedOut ? "timed out" : `exit ${r.code ?? "killed"}`}): ${(r.stderr || r.stdout).trim().slice(-2000)}`,
         );
+      }
+    }
+    if (cache && key && cacheDir && !hit) {
+      try {
+        const saved = await saveDeps(cacheDir, key, path, cache.paths);
+        if (saved.length > 0) options.onStage?.("cache", `kept ${saved.join(", ")} for the next run`);
+      } catch (error) {
+        options.onStage?.("cache", `not kept: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
     return new WorktreeWorkspace(ref, options.env);

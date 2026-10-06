@@ -299,12 +299,20 @@ async function prepareWorkspace(
       ...(loaded.config.workspace.setup ? { setup: loaded.config.workspace.setup } : {}),
       setupTimeoutMs: loaded.config.tools.commandTimeoutMs,
       env: ctx.env,
+      ...(loaded.config.workspace.cache
+        ? { cache: { dir: join(loaded.home.cacheDir, "deps"), ...loaded.config.workspace.cache } }
+        : {}),
       onSetupLine: (line) => {
         lastLine = line;
       },
       onStage: (stage, detail) => {
         if (stage === "worktree") {
           ctx.out.note(`${st.muted("◌")} own checkout ${st.muted(detail)}`);
+          return;
+        }
+        if (stage === "cache") {
+          ctx.out.progress(undefined);
+          ctx.out.note(`${st.muted("◌")} dependencies ${st.muted(detail)}`);
           return;
         }
         ctx.out.note(`${st.muted("◌")} workspace.setup ${st.cmd(detail)}`);
