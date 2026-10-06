@@ -1,0 +1,19 @@
+# Shaped after a bug from the pilot, anonymised: a condition in a shared helper ignored the form's mode,
+# so a compact form showed a block only the full form should. `fix` workflow, small and cheap to record:
+#   jarvis evals run --suite regressions --mode record   # once, against the real model
+#   jarvis evals run --suite regressions                 # then replay, without the gateway
+id: compact-form-fields
+task: "Bug: in compact mode the order form shows the delivery fields. The compact checkout must show only items, contacts and payment."
+workflow: fix
+project:
+  version: 1
+  tools: { local: { tests: "node --test" } }
+gold:
+  files: [src/shared/delivery-fields.ts]
+  # the fixture's own tests, and the bug itself: the compact checkout without the delivery block
+  tests: >-
+    node --test && node --input-type=module -e "const { compactCheckout } = await import('./src/compact-checkout.ts');
+    const s = compactCheckout('1 Main St'); if (s.includes('delivery')) { console.error(s); process.exit(1); }"
+  acceptance: ["compact"]
+  requiredSources: ["src/shared/delivery-fields.ts"]
+maxApprovals: 6
