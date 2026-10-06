@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { Journey } from "../../src/app/journey.ts";
 import type { Runtime } from "../../src/app/runtime.ts";
+import { formatStepReport } from "../../src/cli/progress.ts";
+import { createStyle } from "../../src/cli/style.ts";
 import { ModelError } from "../../src/models/errors.ts";
 import { interruption } from "../../src/orchestration/interrupt.ts";
 import { LeaseHeldError } from "../../src/orchestration/types.ts";
@@ -99,6 +102,35 @@ describe("LocalWorkflowEngine", () => {
       rt.artifacts.versions(rt.artifacts.find(run.id, "research", "research.md")?.artifactId as string),
     ).toHaveLength(3);
     expect(rt.artifacts.listLatest(run.id, "loop-exhausted")).toHaveLength(1);
+  });
+
+  it("deletes scratch files an agent left and says so in the step's line", async () => {
+    const wf = workflowOf({
+      name: "scratch",
+      entry: "work",
+      steps: [{ id: "work", kind: "agentic", agent: "work", transitions: { onSuccess: "DONE" } }],
+    });
+    const left = ["tmp-a.txt", "tmp-b.txt", "probe.txt", "x-probe2.txt"];
+    const engine = engineFor(rt, [wf], { work: async () => ({ status: "success" }) }, undefined, {
+      async open(ref) {
+        return {
+          ref,
+          checkpoint: async () => undefined,
+          restore: async () => {},
+          sweepScratch: async () => left,
+        };
+      },
+    });
+    const run = createRun(rt, "scratch");
+    expect((await engine.execute(run.id, owner)).run.state).toBe("COMPLETED");
+    const journey = new Journey(["work"]);
+    const lines = rt.events.list({ runId: run.id }).flatMap((e) => journey.push(e));
+    const step = lines.find((l) => l.kind === "step");
+    expect(step?.kind === "step" && step.report.scratchRemoved).toEqual(left);
+    if (step?.kind !== "step") throw new Error("no step line");
+    expect(formatStepReport(step.report, [], createStyle(false))[1]).toBe(
+      "  removed scratch files the agent left: tmp-a.txt, tmp-b.txt, probe.txt +1",
+    );
   });
 
   it("runs the step of a used-up loop again as a fresh round after the person fixed it", async () => {

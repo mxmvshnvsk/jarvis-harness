@@ -146,6 +146,11 @@ export function formatStepReport(
     if (d) lines.push(`  ${st.muted("help:")} ${st.inline(d.help)}`);
   } else if (r.reason && r.outcome && r.outcome !== "success")
     lines.push(`  ${st.muted(r.reason.split("\n")[0] ?? "")}`);
+  if (r.scratchRemoved && r.scratchRemoved.length > 0) {
+    const names = r.scratchRemoved.slice(0, 3).join(", ");
+    const more = r.scratchRemoved.length > 3 ? ` +${r.scratchRemoved.length - 3}` : "";
+    lines.push(`  ${st.muted(`removed scratch files the agent left: ${names}${more}`)}`);
+  }
   return lines;
 }
 

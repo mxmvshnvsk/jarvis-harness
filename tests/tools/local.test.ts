@@ -141,6 +141,10 @@ describe("local tools", () => {
     expect(readFileSync(join(sb.project, "src/new/no-eol.ts"), "utf8")).toBe("export const y = 2;\n");
     await tools.invoke("repo.edit", { path: "src/new/no-eol.ts", oldText: "y = 2;\n", newText: "y = 3;" });
     expect(readFileSync(join(sb.project, "src/new/no-eol.ts"), "utf8")).toBe("export const y = 3;\n");
+    // a scratch file is refused: the workspace holds only the change (pilot: tmp-nl-probe*.txt in commits)
+    const probe = await tools.invoke("repo.write", { path: "tmp-nl-probe2.txt", content: "abc" });
+    expect(probe.ok).toBe(false);
+    expect(probe.error).toContain("looks like a scratch file");
     const missing = await tools.invoke("repo.edit", { path: "src/index.ts", oldText: "nope", newText: "x" });
     expect(missing.ok).toBe(false);
     expect(missing.error).toContain("fragment not found");

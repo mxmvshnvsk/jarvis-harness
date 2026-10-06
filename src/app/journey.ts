@@ -31,6 +31,8 @@ export interface StepReport {
   readonly budgetExhausted?: string;
   /** A `quick:` tool answered for the agent (no model call), or why it could not. */
   readonly quick?: { readonly tool: string; readonly used: boolean; readonly reason?: string };
+  /** Scratch files the agent left and the run deleted (`workspace.scratchRemoved`). */
+  readonly scratchRemoved?: readonly string[];
 }
 
 export interface LoopReport {
@@ -66,6 +68,7 @@ interface Open {
   tools?: Record<string, number>;
   maxToolCalls?: number;
   budgetExhausted?: string;
+  scratchRemoved?: string[];
 }
 
 /** Feeds events in journal order; returns the lines each event completes. */
@@ -147,6 +150,11 @@ export class Journey {
           }
         }
         return [];
+      case "workspace.scratchRemoved": {
+        const files = Array.isArray(p.files) ? p.files.filter((f): f is string => typeof f === "string") : [];
+        if (o && files.length > 0) o.scratchRemoved = files;
+        return [];
+      }
       case "step.finish":
         return this.close(o, e, str(p.status) ?? "success", str(p.outcome), str(p.reason));
       case "step.error":
@@ -204,6 +212,7 @@ export class Journey {
       ...(o.maxToolCalls ? { maxToolCalls: o.maxToolCalls } : {}),
       ...(o.budgetExhausted ? { budgetExhausted: o.budgetExhausted } : {}),
       ...(o.quick ? { quick: o.quick } : {}),
+      ...(o.scratchRemoved ? { scratchRemoved: o.scratchRemoved } : {}),
     };
     return [{ kind: "step", report }];
   }

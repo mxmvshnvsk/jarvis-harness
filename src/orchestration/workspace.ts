@@ -15,6 +15,11 @@ export interface Workspace {
    * when the workspace is clean or the mode has no commits.
    */
   humanCheckpoint?(actorId: string): Promise<{ commit: string; files: string[] } | undefined>;
+  /**
+   * Deletes new, untracked scratch files (`tmp-*`, `*probe*`, src/tools/local/scratch.ts) an agent
+   * left behind and returns them; only where the checkout is the run's own (a worktree).
+   */
+  sweepScratch?(): Promise<string[]>;
 }
 
 export class CwdWorkspace implements Workspace {

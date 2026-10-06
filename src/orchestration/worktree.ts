@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { basename, join } from "node:path";
 import type { WorkspaceRef } from "../core/domain/run.ts";
 import { git, runShell } from "../tools/local/exec.ts";
+import { isScratchFile } from "../tools/local/scratch.ts";
 import { cacheKey, type DepsCacheConfig, restoreDeps, saveDeps } from "./depsCache.ts";
 import { CwdWorkspace, type Workspace, type WorkspaceFactory } from "./workspace.ts";
 
@@ -79,18 +80,38 @@ const CYRILLIC: Record<string, string> = {
  * Latin letters, punctuation goes (pilot: a Russian task gave `jarvis/web-app-compact-.-./…`).
  */
 export function branchNameFor(task: string, runId: string): string {
+  return `jarvis/${taskSlug(task, 40)}/${shortOf(runId)}`;
+}
+
+/**
+ * Where a run's worktree lives: `<worktreesDir>/<repository>/<run>-<task>`, e.g.
+ * `~/.jarvis/worktrees/web-app/1a2b3c4d-compact-form`. Pilot: `5e6f7a8b9c0d/run_1a2b3c4d5e6f…` — the
+ * person going there by hand could not tell one run from another.
+ */
+export function worktreePathFor(worktreesDir: string, repoRoot: string, task: string, runId: string): string {
+  const repo =
+    basename(repoRoot)
+      .replace(/[^A-Za-z0-9._-]+/g, "-")
+      .replace(/^[-.]+/, "") || projectHash(repoRoot);
+  return join(worktreesDir, repo, `${shortOf(runId)}-${taskSlug(task, 30)}`);
+}
+
+const shortOf = (runId: string): string => runId.replace(/^run_/, "").slice(0, 8);
+
+/** A ticket key stays as it is (`ABC-123`), Cyrillic is spelt in Latin letters, punctuation goes. */
+function taskSlug(task: string, max: number): string {
   const key = /^\s*([A-Z][A-Z0-9]+-\d+)\b/.exec(task)?.[1];
-  const slug =
+  return (
     key ??
     ([...task.toLowerCase()]
       .map((ch) => CYRILLIC[ch] ?? ch)
       .join("")
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-+|-+$/g, "")
-      .slice(0, 40)
+      .slice(0, max)
       .replace(/-+$/, "") ||
-      "task");
-  return `jarvis/${slug}/${runId.replace(/^run_/, "").slice(0, 8)}`;
+      "task")
+  );
 }
 
 async function must(promise: ReturnType<typeof git>, what: string): Promise<string> {
@@ -136,8 +157,8 @@ export class WorktreeWorkspace implements Workspace {
       `resolve base "${baseRef}"`,
     );
     const branch = branchNameFor(options.task, options.runId);
-    const path = join(options.worktreesDir, projectHash(options.repoRoot), options.runId);
-    mkdirSync(join(options.worktreesDir, projectHash(options.repoRoot)), { recursive: true });
+    const path = worktreePathFor(options.worktreesDir, options.repoRoot, options.task, options.runId);
+    mkdirSync(join(path, ".."), { recursive: true });
     await must(
       git(["worktree", "add", "--quiet", path, "-b", branch, baseCommit], options.repoRoot),
       "create worktree",
@@ -234,6 +255,14 @@ export class WorktreeWorkspace implements Workspace {
       "Jarvis-Kind": "human-edit",
     });
     return { commit, files };
+  }
+
+  async sweepScratch(): Promise<string[]> {
+    const r = await git(["ls-files", "--others", "--exclude-standard"], this.ref.path);
+    if (r.code !== 0) return [];
+    const scratch = r.stdout.split("\n").filter((f) => f.length > 0 && isScratchFile(f));
+    for (const file of scratch) rmSync(join(this.ref.path, file), { force: true });
+    return scratch;
   }
 
   async restore(commit: string | undefined): Promise<void> {

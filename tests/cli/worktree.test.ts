@@ -86,6 +86,8 @@ describe("worktree workspace end to end (ADR-0003)", () => {
     const ws = detail.run.workspace;
     expect(ws.mode).toBe("worktree");
     expect(ws.branch).toBe(branchNameFor("ABC-9", detail.run.id));
+    // a path a person can tell apart: <repository>/<run>-<task>
+    expect(ws.path).toMatch(/\/worktrees\/project\/[0-9a-f]{8}-ABC-9$/);
     expect(existsSync(join(ws.path, ".setup-ran"))).toBe(true);
     expect(existsSync(join(ws.path, "src", "generated.ts"))).toBe(true);
     // The main checkout is untouched (ADR-0003 §4).

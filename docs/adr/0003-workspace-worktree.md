@@ -39,7 +39,9 @@ Run.workspace
 1. `baseRef` — `--base <ref>`; по умолчанию текущий `HEAD` проекта (разработчик обычно хочет работать от
    своей ветки). Незакоммиченные изменения в рабочее дерево Run **не переносятся**: Run стартует от
    коммита. CLI предупреждает, если рабочее дерево грязное.
-2. `git worktree add ~/.jarvis/worktrees/<projectHash>/<runId> -b jarvis/ABC-123/<runIdShort> <baseCommit>`.
+2. `git worktree add ~/.jarvis/worktrees/<repo>/<runIdShort>-<task> -b jarvis/ABC-123/<runIdShort> <baseCommit>`
+   (до пилота — `<projectHash>/<runId>`: человеку, который идёт туда руками, хэши ничего не говорили;
+   старые прогоны остаются по своим путям).
 3. Хук `workspace.setup` из `project.yaml` (например `pnpm install --offline --frozen-lockfile`) — в
    worktree нет `node_modules`; pnpm store делает установку дешёвой, но хук проектный, Jarvis его не
    угадывает.
@@ -52,7 +54,11 @@ impact и diff смотрят на одно состояние кода.
 ### 3. Checkpoint = commit
 
 Граница шага и intra-step checkpoint (ADR-0002 §4) делают `git add -A && git commit` в ветке Run с trailer'ами
-`Jarvis-Run: <id>`, `Jarvis-Step: <stepId>`, `Jarvis-Iteration: <n>`. Checkpoint в RunStore хранит sha. Resume:
+`Jarvis-Run: <id>`, `Jarvis-Step: <stepId>`, `Jarvis-Iteration: <n>`; заголовок — что шаг нашёл
+(`jarvis: verify #3 → defects_found`, плюс `Jarvis-Outcome` и `Jarvis-Reason`), иначе `jarvis: <step> #<n> success`.
+Перед коммитом после агентного шага удаляются новые неотслеживаемые пробные файлы (`tmp-*`, `*probe*`,
+`scratch*`; событие `workspace.scratchRemoved`, строка в выводе шага); `repo.write` такие файлы и не создаёт.
+Checkpoint в RunStore хранит sha. Resume:
 `git reset --hard <headCommit> && git clean -fd` (ignored-файлы, включая `node_modules`, не трогаются).
 Пустой diff — коммит не создаётся, checkpoint ссылается на предыдущий sha.
 

@@ -9,6 +9,7 @@ import { effectMarker } from "../../storage/effects.ts";
 import type { Capability, ToolContext, ToolOutput, ToolProvider } from "../types.ts";
 import { git, hasRipgrep, runCommand, runShell } from "./exec.ts";
 import { PathDeniedError, resolveInWorkspace } from "./paths.ts";
+import { isScratchFile } from "./scratch.ts";
 
 /**
  * Local tool provider (ADR-0001 §9): file system, search, git and project commands — all
@@ -311,6 +312,12 @@ export class LocalToolProvider implements ToolProvider {
         handler: async (args, ctx) => {
           try {
             const { absolute, relative: rel } = resolveInWorkspace(ctx, str(args, "path"));
+            if (!existsSync(absolute) && isScratchFile(rel)) {
+              return {
+                ok: false,
+                error: `${rel} looks like a scratch file (tmp-*, *probe*, scratch*): the workspace holds only the change itself; name a real file or leave the experiment out`,
+              };
+            }
             mkdirSync(dirname(absolute), { recursive: true });
             const before = existsSync(absolute) ? readFileSync(absolute, "utf8") : undefined;
             const content = withFinalNewline(str(args, "content"), before);

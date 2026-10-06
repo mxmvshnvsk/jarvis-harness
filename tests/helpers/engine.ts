@@ -10,6 +10,7 @@ import {
 import { LocalWorkflowEngine } from "../../src/orchestration/runtime.ts";
 import { BUILTIN_TOOLS } from "../../src/orchestration/tools/builtin.ts";
 import type { StepContext, StepOutcome } from "../../src/orchestration/types.ts";
+import type { WorkspaceFactory } from "../../src/orchestration/workspace.ts";
 import type { Sandbox } from "./tmp.ts";
 
 export const ACTOR: Actor = { kind: "user", id: "me@corp", verified: false };
@@ -42,6 +43,7 @@ export function engineFor(
   workflows: WorkflowDefinition[],
   agents: FakeAgents["handlers"] = {},
   clock?: () => Date,
+  workspaces?: WorkspaceFactory,
 ) {
   return new LocalWorkflowEngine({
     runtime,
@@ -52,6 +54,7 @@ export function engineFor(
     },
     leaseOptions: { heartbeatMs: 0 },
     ...(clock ? { clock } : {}),
+    ...(workspaces ? { workspaces } : {}),
   });
 }
 

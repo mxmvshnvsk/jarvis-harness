@@ -270,6 +270,16 @@ export class LocalWorkflowEngine {
     };
     try {
       const outcome = await this.executors[step.kind].execute(ctx);
+      if (step.kind === "agentic") {
+        // files the agent made to try something out do not go into the run's commits
+        const swept = (await workspace.sweepScratch?.()) ?? [];
+        if (swept.length > 0)
+          this.emit(run, "workspace.scratchRemoved", {
+            stepId: step.id,
+            iteration,
+            files: swept.slice(0, 50),
+          });
+      }
       this.rt.history.finish(historyId, outcome.status, outcome.outcome, outcome.outputs ?? []);
       this.emit(run, "step.finish", {
         stepId: step.id,
@@ -343,11 +353,19 @@ export class LocalWorkflowEngine {
       return { run: failed, stop: true };
     }
 
-    const headCommit = await workspace.checkpoint(`jarvis: ${step.id} #${iteration} ${outcome.status}`, {
-      "Jarvis-Run": run.id,
-      "Jarvis-Step": step.id,
-      "Jarvis-Iteration": String(iteration),
-    });
+    // the subject says what the step found (`verify #3 → defects_found`), not only that it ran
+    const found = outcome.outcome && outcome.outcome !== "success" ? outcome.outcome : undefined;
+    const why = outcome.reason?.split("\n")[0]?.slice(0, 200);
+    const headCommit = await workspace.checkpoint(
+      `jarvis: ${step.id} #${iteration} ${found ? `→ ${found}` : outcome.status}`,
+      {
+        "Jarvis-Run": run.id,
+        "Jarvis-Step": step.id,
+        "Jarvis-Iteration": String(iteration),
+        ...(found ? { "Jarvis-Outcome": found } : {}),
+        ...(found && why ? { "Jarvis-Reason": why } : {}),
+      },
+    );
     const iterations = { ...run.iterations };
     if (transition.edgeId) {
       const count = (iterations[transition.edgeId] ?? 0) + 1;
