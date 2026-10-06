@@ -47,6 +47,7 @@ import {
   runWork,
 } from "./commands/run.ts";
 import { runCancel, runStatus } from "./commands/status.ts";
+import { runUi } from "./commands/ui.ts";
 import { type CliContext, defaultContext } from "./context.ts";
 import { DIAGNOSES } from "./diagnostics.ts";
 import { CliExit, createOutput, EXIT } from "./output.ts";
@@ -319,6 +320,20 @@ export function buildProgram(options: RunOptions = {}): Command {
     .description("the run's checkout in your editor (JARVIS_EDITOR, else code, webstorm, idea…)")
     .action(async (run: string | undefined) => {
       await runOpen(ctxFor(), run);
+    });
+  program
+    .command("ui")
+    .description("the runs on a local page: what waits for you, what runs, documents and diffs (127.0.0.1)")
+    .option("--port <n>", "port to listen on (default 4317; 0 picks a free one)", (v: string) => Number(v))
+    .option("--open", "open the page in your browser (default at a terminal)")
+    .option("--no-open", "only print the address")
+    .action(async (opts: { port?: number; open?: boolean }) => {
+      await runUi(ctxFor(), {
+        ...(opts.port !== undefined && Number.isInteger(opts.port) && opts.port >= 0
+          ? { port: opts.port }
+          : {}),
+        ...(opts.open !== undefined ? { open: opts.open } : {}),
+      });
     });
   program
     .command("shell [run]")

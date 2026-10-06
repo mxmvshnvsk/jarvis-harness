@@ -165,6 +165,42 @@ export async function changedFilesOf(
 }
 
 /**
+ * What a gated document holds, for its card here and on the page of `jarvis ui` (ADR-0023 §3):
+ * title, the gist, counts (`3 requirements · 1 risk · 2 open questions`), risks, open questions.
+ */
+export interface DocFacts {
+  readonly doc: Record<string, unknown>;
+  readonly title?: string;
+  readonly summary?: string;
+  readonly counts: ReadonlyArray<{ readonly text: string; readonly warn: boolean }>;
+  readonly risks: readonly string[];
+  readonly openQuestions: readonly string[];
+}
+
+/** The facts of a JSON result document; undefined for anything else (markdown, text). */
+export function docFacts(name: string, text: string): DocFacts | undefined {
+  const doc = name.endsWith(".json") ? parseDoc(text) : undefined;
+  if (!doc) return undefined;
+  const n = (v: unknown, one: string, warn = false) => {
+    const k = count(v);
+    return k > 0 ? [{ text: `${k} ${one}${k === 1 ? "" : "s"}`, warn }] : [];
+  };
+  return {
+    doc,
+    ...(typeof doc.title === "string" ? { title: doc.title } : {}),
+    ...(typeof doc.summary === "string" ? { summary: doc.summary } : {}),
+    counts: [
+      ...n(doc.requirements, "requirement"),
+      ...n(doc.goals, "goal"),
+      ...n(doc.risks, "risk"),
+      ...n(doc.openQuestions, "open question", true),
+    ],
+    risks: strings(doc.risks),
+    openQuestions: strings(doc.openQuestions),
+  };
+}
+
+/**
  * The card before the decision, summary first (terraform's plan, a diff before an approval): title,
  * the gist, what the document holds, its first risks, the files an implementation changed, and a
  * link to the whole document — enough to decide whether to read it whole.
@@ -178,25 +214,15 @@ async function brief(
   text: string,
 ): Promise<Record<string, unknown> | undefined> {
   const st = ctx.out.style;
-  const doc = a.name.endsWith(".json") ? parseDoc(text) : undefined;
+  const facts = docFacts(a.name, text);
+  const doc = facts?.doc;
   ctx.out.line();
-  if (doc) {
-    const title = typeof doc.title === "string" ? doc.title : `${type}/${a.name}`;
-    ctx.out.line(`  ${st.heading(title)}`);
-    if (typeof doc.summary === "string") ctx.out.line(`  ${cut(doc.summary, 320)}`);
-    const n = (v: unknown, one: string) => {
-      const k = count(v);
-      return k > 0 ? `${k} ${one}${k === 1 ? "" : "s"}` : "";
-    };
-    const questions = n(doc.openQuestions, "open question");
-    const parts = [
-      n(doc.requirements, "requirement"),
-      n(doc.goals, "goal"),
-      n(doc.risks, "risk"),
-      questions ? st.warn(questions) : "",
-    ].filter(Boolean);
+  if (facts) {
+    ctx.out.line(`  ${st.heading(facts.title ?? `${type}/${a.name}`)}`);
+    if (facts.summary !== undefined) ctx.out.line(`  ${cut(facts.summary, 320)}`);
+    const parts = facts.counts.map((c) => (c.warn ? st.warn(c.text) : c.text));
     if (parts.length > 0) ctx.out.line(`  ${parts.join(st.muted(" · "))}`);
-    for (const risk of strings(doc.risks).slice(0, 2)) ctx.out.line(`  ${st.warn("risk")} ${cut(risk, 160)}`);
+    for (const risk of facts.risks.slice(0, 2)) ctx.out.line(`  ${st.warn("risk")} ${cut(risk, 160)}`);
   } else {
     for (const line of text.split("\n").slice(0, 8)) ctx.out.line(`  ${line}`);
   }

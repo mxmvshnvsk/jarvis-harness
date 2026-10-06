@@ -1,0 +1,658 @@
+import { type Activity, clock, kilo } from "../app/activity.ts";
+import { duration } from "../app/journey.ts";
+import type { Change } from "../cli/checkout.ts";
+import { toolMix } from "../cli/progress.ts";
+import { documentToMarkdown } from "../cli/render.ts";
+import { incompleteOf } from "../cli/style.ts";
+import type { Run } from "../core/domain/run.ts";
+import { shortRunId } from "../storage/runStore.ts";
+import { type DiffFile, escapeHtml, type Html, html, join, markdownToHtml, type Part } from "./html.ts";
+import type {
+  ApprovalCard,
+  ArtifactPage,
+  FeedItem,
+  LoopCard,
+  RunPage,
+  RunsPage,
+  StepRow,
+  WaitCard,
+  WaitingRun,
+} from "./model.ts";
+
+/**
+ * The pages of `jarvis ui` (ADR-0023 §3), server-rendered from the models in model.ts. Look: the
+ * approved mockups (runs, run, review) — Plex Sans and Mono, a warm ground, white panels. Regions
+ * marked `data-live` are re-rendered by the page's script when the journal moves.
+ */
+
+export interface Chrome {
+  readonly title: string;
+  readonly page: "runs" | "run" | "artifact" | "error";
+  readonly address: string;
+  readonly runId?: string;
+  readonly back?: { readonly href: string; readonly label: string };
+  readonly repos?: Html;
+  /** Re-render the live regions this often (ms): clocks, the checkout's changes. */
+  readonly tick?: number;
+}
+
+export function layout(chrome: Chrome, content: Html): string {
+  return html`<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>${chrome.title} · jarvis</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
+<link rel="stylesheet" href="/assets/app.css">
+<script src="/assets/app.js" defer></script>
+</head>
+<body data-page="${chrome.page}"${chrome.runId ? html` data-run="${chrome.runId}"` : ""}${chrome.tick ? html` data-tick="${chrome.tick}"` : ""}>
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="top"><div class="wrap">
+<a class="brand" href="/">jarvis</a>
+${chrome.back ? html`<a class="back" href="${chrome.back.href}">← ${chrome.back.label}</a>` : ""}
+${chrome.repos ?? ""}
+${chrome.page === "runs" ? html`<nav aria-label="Pages"><a href="/" aria-current="page">Runs</a></nav>` : ""}
+<span class="live" data-state="connecting" role="status"><span class="dot" aria-hidden="true"></span><span class="label">connecting…</span><span aria-hidden="true">·</span><span>${chrome.address}</span></span>
+</div></header>
+<main id="main" class="wrap">
+${content}
+</main>
+</body>
+</html>
+`.value;
+}
+
+/* ---- small pieces ---- */
+
+const firstLine = (text: string, max = 200): string => {
+  const line = text.split("\n")[0]?.trim() ?? "";
+  return [...line].length > max ? `${[...line].slice(0, max - 1).join("")}…` : line;
+};
+
+const cut = (text: string, max: number): string => {
+  const one = text.replace(/\s+/g, " ").trim();
+  return [...one].length > max ? `${[...one].slice(0, max - 1).join("")}…` : one;
+};
+
+/** `19:52:10` in the machine's time: the page runs where the terminal does. */
+export function wallClock(iso: string): string {
+  const d = new Date(iso);
+  return [d.getHours(), d.getMinutes(), d.getSeconds()].map((n) => String(n).padStart(2, "0")).join(":");
+}
+
+/** `12m`, `3h`, `2d`: how long something has waited. */
+function ago(iso: string, now: number): string {
+  const ms = Math.max(0, now - Date.parse(iso));
+  const m = Math.floor(ms / 60_000);
+  if (m < 1) return "just now";
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  return h < 48 ? `${h}h` : `${Math.floor(h / 24)}d`;
+}
+
+const runHref = (run: Pick<Run, "id">) => `/runs/${encodeURIComponent(shortRunId(run.id))}`;
+
+export function artifactHref(
+  run: Pick<Run, "id">,
+  a: { type: string; name: string; version?: number },
+): string {
+  return `${runHref(run)}/artifacts/${encodeURIComponent(a.type)}/${encodeURIComponent(a.name)}${a.version ? `?v=${a.version}` : ""}`;
+}
+
+/** The state of a run as a pill: `⏸ WAITING_HUMAN · loop`, `◌ RUNNING · verify#4`, `✓ COMPLETED`. */
+function statePill(run: Run, extra?: string): Html {
+  const s = run.state;
+  const tone =
+    s === "COMPLETED"
+      ? "ok"
+      : s === "FAILED"
+        ? "bad"
+        : s === "RUNNING"
+          ? "info"
+          : s === "CANCELLED" || s === "CREATED"
+            ? "plain"
+            : "wait";
+  const glyph = { ok: "✓", bad: "✗", info: "◌", plain: "–", wait: "⏸" }[tone];
+  return html`<span class="pill ${tone}">${glyph} ${s}${extra ? ` · ${extra}` : ""}</span>`;
+}
+
+function changeLine(c: Change): Html {
+  const code = c.code === "??" ? "+" : c.code;
+  const tone = code === "D" ? "bad" : code === "+" || code === "A" ? "ok" : "warn";
+  return html`<span><span class="${tone}">${code}</span> ${c.file}</span>`;
+}
+
+function terminalHint(card: WaitCard, terminal: boolean, run: Run): Html {
+  const cmd = `jarvis continue ${shortRunId(run.id)}`;
+  if (terminal)
+    return html`<p class="hint">A terminal waits at this card: what you decide there shows here, and the other way round.</p>`;
+  const key = card.kind === "loop" ? html` (<code>r</code> runs ${card.step} again)` : "";
+  return html`<div class="actions"><span class="hint">Decide in the terminal: <code>${cmd}</code>${key}</span><button type="button" class="btn" data-copy="${cmd}">Copy command</button></div>`;
+}
+
+/* ---- runs ---- */
+
+function waitingCardHtml(w: WaitingRun, now: number): Html {
+  const { run, card } = w;
+  const meta = html`<span class="meta">${run.workflow} · ${shortRunId(run.id)} · waiting ${ago(run.updatedAt, now)}${w.terminal ? " · a terminal waits" : ""}</span>`;
+  if (card.kind === "loop") {
+    const reasons = card.reasons
+      .slice(0, 2)
+      .map(
+        (r, i) =>
+          html`${i > 0 ? "; " : ""}${r.kind ? html`<span class="chip">${r.kind}</span> ` : ""}${cut(r.text, 120)}`,
+      );
+    const more = card.reasons.length > 2 ? ` +${card.reasons.length - 2} more` : "";
+    return html`<article class="panel card">
+<div class="row"><span class="pill wait">⏸ loop used up · ${card.step}</span>${meta}</div>
+<h3>${firstLine(run.task)}</h3>
+<p>${card.step} sent the work back ${card.iterations ? `${card.iterations} times` : "too often"}${card.reasons.length > 0 ? html`: ${reasons}${more}` : "."}</p>
+<div class="actions"><a class="btn primary" href="${runHref(run)}">Open the run</a></div>
+</article>`;
+  }
+  if (card.kind === "approval") {
+    const facts = card.facts;
+    const gist = facts
+      ? [facts.counts.map((c) => c.text).join(" · "), facts.summary ? cut(facts.summary, 180) : ""]
+          .filter(Boolean)
+          .join(". ")
+      : cut(card.excerpt ?? "", 180);
+    return html`<article class="panel card">
+<div class="row"><span class="pill info">⏸ approval · ${card.type}</span>${meta}</div>
+<h3>${firstLine(run.task)}</h3>
+${gist ? html`<p>${gist}</p>` : ""}
+${card.decision ? html`<p class="ok">${decisionText(card)} — the run waits for <code>jarvis continue</code></p>` : ""}
+<div class="actions"><a class="btn primary" href="${artifactHref(run, card.artifact)}">Review the ${card.type}</a><a class="btn" href="${runHref(run)}">Open the run</a></div>
+</article>`;
+  }
+  return html`<article class="panel card">
+<div class="row"><span class="pill wait">⏸ ${card.what}</span>${meta}</div>
+<h3>${firstLine(run.task)}</h3>
+<p>Answer in the terminal: <code>jarvis continue ${shortRunId(run.id)}</code></p>
+<div class="actions"><a class="btn primary" href="${runHref(run)}">Open the run</a></div>
+</article>`;
+}
+
+function decisionText(card: ApprovalCard): string {
+  const d = card.decision;
+  if (!d) return "";
+  const verb =
+    d.approval.decision === "approve"
+      ? "✓ accepted"
+      : d.approval.decision === "reject"
+        ? "✗ rejected"
+        : "↻ sent back";
+  return `${verb} by ${d.approval.actor.id}${d.channel === "ui" ? " in the browser" : d.channel === "cli" ? " in the terminal" : ""}`;
+}
+
+/** `model call 12, waiting 0:21, receiving ~1.1k tok`: what the step's agent does now. */
+function callText(a: Activity): string {
+  const step = a.step;
+  if (!step) return "starting…";
+  if (a.waitingMs === undefined) return `${step.modelCalls} model call${step.modelCalls === 1 ? "" : "s"}`;
+  const coming = a.receiving
+    ? a.receiving.outputChars > 0
+      ? `, receiving ~${kilo(Math.round(a.receiving.outputChars / 4))} tok`
+      : `, thinking ~${kilo(Math.round(a.receiving.reasoningChars / 4))} tok`
+    : "";
+  const retry = a.retrying ? `, retry ${a.retrying.attempt} after ${a.retrying.reason}` : "";
+  return `model call ${step.modelCalls + 1}, waiting ${clock(a.waitingMs)}${coming}${retry}`;
+}
+
+/** `[8/18] implementation#2 · model call 12, waiting 0:21, receiving ~1.1k tok` */
+function activityText(a: Activity | undefined, position?: { index: number; total: number }): string {
+  if (!a?.step) return "starting…";
+  const pos = position ? `[${position.index}/${position.total}] ` : "";
+  const step = `${pos}${a.step.id}${a.step.iteration > 1 ? `#${a.step.iteration}` : ""}${a.step.agent && a.step.agent !== a.step.id ? ` · ${a.step.agent}` : ""}`;
+  return `${step} · ${callText(a)}`;
+}
+
+function toolBudget(a: Activity | undefined, now: number): Html {
+  const step = a?.step;
+  const max = step?.maxToolCalls;
+  const used = step?.toolCalls ?? 0;
+  const pct = max ? Math.min(100, Math.round((used / max) * 100)) : 0;
+  const since = step ? clock(Math.max(0, now - Date.parse(step.startedAt))) : "";
+  return html`<div class="bar" role="img" aria-label="${max ? `${used} of ${max} tool calls used` : `${used} tool calls`}"><span style="width:${pct}%"></span></div>
+<span class="meta">tools ${max ? `${used}/${max}` : used}${since ? ` · ${since}` : ""}</span>`;
+}
+
+function recentState(run: Run): Html {
+  const why = run.stateReason ? ` · ${cut(run.stateReason, 48)}` : "";
+  switch (run.state) {
+    case "COMPLETED":
+      return html`<span class="ok">✓ COMPLETED</span>`;
+    case "FAILED":
+      return html`<span class="bad">✗ FAILED${why}</span>`;
+    case "CANCELLED":
+      return html`<span class="muted">– CANCELLED${why}</span>`;
+    case "RUNNING":
+      return html`<span class="warn">⏸ interrupted · <code>jarvis resume</code></span>`;
+    case "WAITING_BUDGET":
+      return html`<span class="warn">⏸ waits for ${run.waitingFor?.kind === "model" ? "the model" : "quota"}</span>`;
+    default:
+      return html`<span class="muted">${run.state}${why}</span>`;
+  }
+}
+
+export function repoPicker(page: RunsPage): Html {
+  if (page.repos.length < 2) return html``;
+  return html`<form class="repo" method="get" action="/"><label class="repo" for="repo">repository</label>
+<select id="repo" name="repo" data-autosubmit>
+<option value=""${page.repo ? "" : html` selected`}>all repositories</option>
+${page.repos.map((r) => html`<option value="${r.root}"${r.root === page.repo ? html` selected` : ""}>${r.name} (${r.runs})</option>`)}
+</select><button type="submit" class="btn sr">Show</button></form>`;
+}
+
+export function runsContent(page: RunsPage, now: number): Html {
+  const sum = [
+    `${page.waiting.length} wait${page.waiting.length === 1 ? "s" : ""} for you`,
+    `${page.running.length} running`,
+    `${page.today.runs} today`,
+    `${page.today.modelCalls} model call${page.today.modelCalls === 1 ? "" : "s"} today`,
+  ].join(" · ");
+  return html`<div class="lede" data-live="lede"><h1>Runs</h1><span class="muted">${sum}</span></div>
+<section class="group" aria-labelledby="waits" data-live="waiting">
+<h2 id="waits">Waits for you</h2>
+${
+  page.waiting.length > 0
+    ? html`<div class="cards">${page.waiting.map((w) => waitingCardHtml(w, now))}</div>`
+    : html`<div class="panel empty">Nothing waits for you.</div>`
+}
+</section>
+<section class="group" aria-labelledby="running" data-live="running">
+<h2 id="running">Running</h2>
+${
+  page.running.length > 0
+    ? page.running.map(
+        (r) => html`<div class="panel running">
+<div class="what"><a href="${runHref(r.run)}">${firstLine(r.run.task)}</a><span class="meta">${r.run.workflow} · ${shortRunId(r.run.id)} · ${activityText(r.activity, r.position)}</span></div>
+<div class="budget">${toolBudget(r.activity, now)}</div>
+<a href="${runHref(r.run)}">Follow</a>
+</div>`,
+      )
+    : html`<div class="panel empty">Nothing runs now.</div>`
+}
+</section>
+<section class="group" aria-labelledby="recent" data-live="recent">
+<h2 id="recent">Recent</h2>
+${
+  page.recent.length > 0
+    ? html`<div class="panel scroll recent"><table>
+<thead><tr><th scope="col">Run</th><th scope="col">Task</th><th scope="col">Workflow</th><th scope="col">State</th><th scope="col">Took</th><th scope="col">Model</th></tr></thead>
+<tbody>${page.recent.map(
+        (r) =>
+          html`<tr><td class="mono"><a href="${runHref(r.run)}">${shortRunId(r.run.id)}</a></td><td>${firstLine(r.run.task, 90)}</td><td>${r.run.workflow}</td><td>${recentState(r.run)}</td><td>${duration(r.tookMs)}</td><td class="muted">${r.modelCalls} call${r.modelCalls === 1 ? "" : "s"}</td></tr>`,
+      )}</tbody></table></div>`
+    : html`<div class="panel empty">No runs yet.</div>`
+}
+</section>`;
+}
+
+/* ---- one run ---- */
+
+function stepRow(s: StepRow, now: number): Html {
+  const icon = {
+    done: ["✓", "ok"],
+    failed: ["✗", "bad"],
+    skipped: ["–", "muted"],
+    running: ["◌", "info"],
+    waiting: ["⏸", "warn"],
+    pending: ["·", "muted"],
+  }[s.status];
+  const r = s.last;
+  const iteration = r && r.iteration > 1 ? `#${r.iteration}` : "";
+  const notes: string[] = [];
+  if (r && s.status !== "skipped") {
+    if (r.quick?.used) notes.push(`${r.quick.tool}, no model call`);
+    else if (r.agent) notes.push(r.agent);
+    if (r.modelCalls > 0) notes.push(`${r.modelCalls} call${r.modelCalls === 1 ? "" : "s"}`);
+    if (r.tools && Object.keys(r.tools).length > 0) notes.push(toolMix(r.tools));
+    if (r.budgetExhausted)
+      notes.push(`${r.budgetExhausted === "model" ? "model call" : "tool"} limit reached`);
+    // the loop's line names the outcome already
+    if (r.outcome && r.outcome !== "success" && s.loops.at(-1)?.outcome !== r.outcome) notes.push(r.outcome);
+    if (r.status !== "success" && r.reason) notes.push(cut(r.reason, 120));
+  }
+  if (s.status === "skipped" && r?.reason) notes.push(`skipped: ${r.reason}`);
+  const loop = s.loops.at(-1);
+  if (loop)
+    notes.push(
+      `sent the work back to ${loop.to} ${loop.iteration}${loop.max ? `/${loop.max}` : ""} — ${loop.outcome}`,
+    );
+  if (s.status === "waiting") notes.push("waits for you");
+  if (s.status === "running") notes.push("running now");
+  const took =
+    s.status === "running" && s.startedAt
+      ? clock(Math.max(0, now - Date.parse(s.startedAt)))
+      : r && s.status !== "skipped"
+        ? duration(r.durationMs)
+        : "";
+  const tone = icon?.[1] === "info" ? "" : icon?.[1];
+  return html`<li class="step ${s.status}${s.child ? " child" : ""}${s.status === "waiting" || s.status === "running" ? " focus" : ""}">
+<span class="ic ${tone ?? ""}" aria-hidden="true">${icon?.[0] ?? ""}</span>
+<span class="nm"><b>${s.id}${iteration}<span class="sr"> — ${s.status}</span></b>${notes.length > 0 ? html`<span class="note">${notes.join(" · ")}</span>` : ""}</span>
+<span class="took">${took}</span>
+</li>`;
+}
+
+function loopCardHtml(card: LoopCard, page: RunPage): Html {
+  const route = card.from ? `${card.from} → ${card.to} · ${card.outcome} · ` : "";
+  return html`<section class="panel decision" aria-labelledby="decision" data-live="card">
+<div class="row" style="flex-direction:column;align-items:flex-start;gap:4px">
+<span class="warn" style="font-size:13px;font-weight:500">Waits for you</span>
+<h2 id="decision" style="font-size:22px;line-height:28px">${card.step} sent the work back ${card.iterations ? `${card.iterations} times` : "too often"} — no rounds left</h2>
+<span class="muted" style="font-size:14px">${route}the last round's reasons:</span>
+</div>
+${
+  card.reasons.length > 0
+    ? html`<ul class="reasons">${card.reasons.map((r) => html`<li>${r.kind ? html`<span class="chip">${r.kind}</span>` : ""}<span>${r.text}</span></li>`)}</ul>`
+    : html`<p class="muted">No reason recorded.</p>`
+}
+<div class="checkout">
+<span class="muted" style="font-size:14px">Fix it by hand in the run's checkout</span>
+<div class="row"><code class="path">${card.checkoutShown}</code><button type="button" class="btn" data-copy="${card.checkout}">Copy path</button></div>
+<div class="changed" aria-live="polite"><span class="hint">Changed in the checkout · live</span>${
+    card.changes && card.changes.length > 0
+      ? card.changes.slice(0, 12).map(changeLine)
+      : html`<span class="muted">nothing yet</span>`
+  }${card.changes && card.changes.length > 12 ? html`<span class="muted">+${card.changes.length - 12} more</span>` : ""}</div>
+</div>
+${terminalHint(card, page.terminal, page.run)}
+</section>`;
+}
+
+/** The brief of a gated document, as the terminal's card shows it before the decision. */
+function briefHtml(card: ApprovalCard): Html {
+  const f = card.facts;
+  const partial = incompleteOf(card.artifact);
+  return html`${f?.summary ? html`<p>${cut(f.summary, 320)}</p>` : ""}
+${
+  f && f.counts.length > 0
+    ? html`<p class="muted">${join(
+        f.counts.map((c) => (c.warn ? html`<span class="warn">${c.text}</span>` : c.text)),
+        " · ",
+      )}</p>`
+    : ""
+}
+${f?.risks.slice(0, 2).map((r) => html`<p><span class="warn">risk</span> ${cut(r, 160)}</p>`) ?? ""}
+${card.excerpt ? html`<pre class="path" style="white-space:pre-wrap">${card.excerpt}</pre>` : ""}
+${partial ? html`<p class="warn">⚠ incomplete: agent ${partial.agentId} hit its ${partial.limit} limit</p>` : ""}
+${
+  card.files && card.files.length > 0
+    ? html`<div class="changed"><span class="hint">${card.files.length} file${card.files.length === 1 ? "" : "s"} changed</span>${card.files
+        .slice(0, 8)
+        .map(
+          (x) =>
+            html`<span><span class="ok">+${x.added}</span> <span class="bad">−${x.removed}</span> ${x.path}</span>`,
+        )}${card.files.length > 8 ? html`<span class="muted">+${card.files.length - 8} more</span>` : ""}</div>`
+    : ""
+}`;
+}
+
+function approvalCardHtml(card: ApprovalCard, page: RunPage): Html {
+  const title = card.facts?.title ?? `${card.type}/${card.artifact.name}`;
+  return html`<section class="panel decision" aria-labelledby="decision" data-live="card">
+<div class="row" style="flex-direction:column;align-items:flex-start;gap:4px">
+<span class="warn" style="font-size:13px;font-weight:500">Waits for you · approve ${card.type}</span>
+<h2 id="decision" style="font-size:22px;line-height:28px">${title}</h2>
+<span class="meta">${card.type}/${card.artifact.name}@${card.artifact.version}</span>
+</div>
+${briefHtml(card)}
+${card.decision ? html`<div class="banner ok">${decisionText(card)}${page.terminal ? "" : html` — the run waits for <code>jarvis continue ${shortRunId(page.run.id)}</code>`}</div>` : ""}
+<div class="actions"><a class="btn primary big" href="${artifactHref(page.run, card.artifact)}">Review the ${card.type}</a></div>
+${card.decision ? "" : terminalHint(card, page.terminal, page.run)}
+</section>`;
+}
+
+function nowHtml(page: RunPage, now: number): Html {
+  const a = page.activity;
+  if (!a?.step || !page.leaseLive) {
+    if (page.run.state !== "RUNNING") return html``;
+    return html`<section class="panel now" aria-label="Now" data-live="card"><div class="row"><span class="warn">⏸ no process drives this run (interrupted or crashed)</span></div>
+<div class="actions"><span class="hint">Go on with <code>jarvis resume ${shortRunId(page.run.id)}</code></span><button type="button" class="btn" data-copy="jarvis resume ${shortRunId(page.run.id)}">Copy command</button></div></section>`;
+  }
+  const last = a.lastTool
+    ? `last: ${a.lastTool.capability}${a.lastTool.detail ? ` ${a.lastTool.detail}` : ""}${a.lastTool.ok ? "" : " ✗"}`
+    : "";
+  return html`<section class="panel now" aria-label="Now" data-live="card">
+<div class="row"><span class="spin" aria-hidden="true"></span><b>${a.step.id}${a.step.iteration > 1 ? `#${a.step.iteration}` : ""}${a.step.agent && a.step.agent !== a.step.id ? ` · ${a.step.agent}` : ""}</b><span class="meta">${clock(Math.max(0, now - Date.parse(a.step.startedAt)))} · ${callText(a)}</span></div>
+${toolBudget(a, now)}
+${last ? html`<span class="meta">${last}</span>` : ""}
+</section>`;
+}
+
+function feedHtml(feed: readonly FeedItem[]): Html {
+  return html`<section class="panel feed" aria-labelledby="activity" data-live="feed">
+<h2 id="activity">Activity</h2>
+${
+  feed.length > 0
+    ? html`<ol>${feed.map((f) => html`<li><time datetime="${f.ts}">${wallClock(f.ts)}</time><span${f.tone ? html` class="${f.tone}"` : ""}>${f.text}</span></li>`)}</ol>`
+    : html`<p class="muted">Nothing yet.</p>`
+}
+</section>`;
+}
+
+export function runContent(page: RunPage, now: number): Html {
+  const r = page.run;
+  const t = page.tokens;
+  const extra =
+    r.state === "WAITING_HUMAN"
+      ? (r.waitingFor?.kind ?? undefined)
+      : r.state === "RUNNING" && page.activity?.step
+        ? `${page.activity.step.id}${page.activity.step.iteration > 1 ? `#${page.activity.step.iteration}` : ""}`
+        : undefined;
+  const meta = [
+    r.workflow,
+    `run ${shortRunId(r.id)}`,
+    duration(page.workedMs),
+    `${t.calls} model call${t.calls === 1 ? "" : "s"}`,
+    ...(t.calls > 0 ? [`in ${kilo(t.promptTokens)} · out ${kilo(t.outputTokens)} tok`] : []),
+  ].join(" · ");
+  const card = page.card;
+  const rest = r.task.split("\n").slice(1).join("\n").trim();
+  return html`<div class="lede-col" style="display:flex;flex-direction:column;gap:8px" data-live="head">
+<div class="row">${statePill(r, extra)}<span class="meta" style="font-size:13px">${meta}</span></div>
+<h1>${firstLine(r.task, 300)}</h1>
+${rest ? html`<p class="muted" style="white-space:pre-wrap">${cut(rest, 600)}</p>` : ""}
+${r.stateReason && r.state !== "RUNNING" ? html`<p class="muted">${r.stateReason}</p>` : ""}
+</div>
+<div class="cols">
+<section class="panel side steps" aria-labelledby="steps" data-live="steps">
+<h2 id="steps">Steps</h2>
+<ol style="margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:2px">${page.steps.map((s) => stepRow(s, now))}</ol>
+</section>
+<div class="mainc">
+${card ? (card.kind === "loop" ? loopCardHtml(card, page) : card.kind === "approval" ? approvalCardHtml(card, page) : otherCardHtml(card.what, page)) : nowHtml(page, now)}
+${feedHtml(page.feed)}
+<section class="panel arts" aria-labelledby="artifacts" data-live="arts">
+<h2 id="artifacts">Artifacts</h2>
+${
+  page.artifacts.length > 0
+    ? html`<ul>${page.artifacts.map(
+        (a) =>
+          html`<li><a href="${artifactHref(r, a)}">${a.type}/${a.name}@${a.version}</a><span class="meta">${a.stepId ?? "-"}${a.iteration && a.iteration > 1 ? `#${a.iteration}` : ""}</span>${a.state ? html`<span class="${a.state === "approved" ? "ok" : "warn"}" style="font-size:13px">${a.state}</span>` : ""}</li>`,
+      )}</ul>`
+    : html`<p class="muted">No artifacts yet.</p>`
+}
+</section>
+</div>
+</div>`;
+}
+
+function otherCardHtml(what: string, page: RunPage): Html {
+  const cmd = `jarvis continue ${shortRunId(page.run.id)}`;
+  return html`<section class="panel decision" aria-labelledby="decision" data-live="card">
+<span class="warn" style="font-size:13px;font-weight:500">Waits for you</span>
+<h2 id="decision">The run waits for ${what}</h2>
+<p>${page.run.stateReason ?? ""}</p>
+<div class="actions"><span class="hint">Answer in the terminal: <code>${cmd}</code></span><button type="button" class="btn" data-copy="${cmd}">Copy command</button></div>
+</section>`;
+}
+
+/* ---- one artifact ---- */
+
+function parseJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+}
+
+/** The document as the terminal's `jarvis show` reads it: a result document as markdown, else as is. */
+export function documentHtml(name: string, text: string, doc?: Record<string, unknown>): Html {
+  // the page's h1 is the title already
+  if (doc) {
+    const { title: _title, ...rest } = doc;
+    return markdownToHtml(documentToMarkdown(rest), { shift: 0 });
+  }
+  if (name.endsWith(".json")) {
+    const v = parseJson(text);
+    return html`<pre><code>${v === undefined ? text : JSON.stringify(v, null, 2)}</code></pre>`;
+  }
+  if (/\.(md|markdown)$/i.test(name) || /^#{1,6}\s/m.test(text)) return markdownToHtml(text);
+  return html`<pre><code>${text}</code></pre>`;
+}
+
+function diffFileHtml(f: DiffFile, index: number, comments: boolean): Html {
+  const status =
+    f.status === "added"
+      ? " · new"
+      : f.status === "deleted"
+        ? " · deleted"
+        : f.status === "renamed"
+          ? ` · from ${f.oldPath ?? "?"}`
+          : "";
+  const shown = f.lines.slice(0, 3000);
+  const rows = shown.map((l) => {
+    if (l.kind === "hunk")
+      return html`<div class="dl hunk"><span class="n"></span><span class="n"></span><span class="s"></span><span class="c">${l.text}</span></div>`;
+    if (l.kind === "note")
+      return html`<div class="dl note"><span class="n"></span><span class="n"></span><span class="s"></span><span class="c">${l.text}</span></div>`;
+    const sign = l.kind === "add" ? "+" : l.kind === "del" ? "−" : "";
+    const line = l.newLine ?? l.oldLine;
+    const can = comments && l.newLine !== undefined;
+    return html`<div class="dl ${l.kind === "context" ? "ctx" : l.kind}"${can ? html` data-path="${f.path}" data-line="${line}"` : ""}>${comments ? html`<span class="cm">${can ? html`<button type="button" data-comment aria-label="Comment on ${f.path} line ${line}">+</button>` : ""}</span>` : ""}<span class="n">${l.oldLine ?? ""}</span><span class="n">${l.newLine ?? ""}</span><span class="s" aria-hidden="true">${sign}</span><span class="c">${l.text}</span></div>`;
+  });
+  return html`<details class="panel file"${index < 12 ? html` open` : ""}>
+<summary><span class="fname">${f.path}</span><span class="fstat"><span class="ok">+${f.added}</span> <span class="bad">−${f.removed}</span>${status}</span></summary>
+<div class="scroll"><div class="diff" role="table" aria-label="Changes in ${f.path}">${rows}${f.lines.length > shown.length ? html`<div class="dl note"><span class="c">… ${f.lines.length - shown.length} more lines: jarvis diff</span></div>` : ""}</div></div>
+</details>`;
+}
+
+export interface ArtifactExtras {
+  readonly diff?: readonly DiffFile[];
+  /** Why there is no diff (the checkout is gone, not a worktree). */
+  readonly diffNote?: string;
+  /** Forms to decide here (stage 3: actions); without, the page says where to decide. */
+  readonly decide?: Html;
+  readonly banner?: Html;
+  readonly comments?: boolean;
+}
+
+export function artifactContent(page: ArtifactPage, extras: ArtifactExtras): Html {
+  const a = page.artifact;
+  const f = page.facts;
+  const title = f?.title ?? `${a.type}/${a.name}`;
+  const tone =
+    page.state === "accepted"
+      ? "ok"
+      : page.state === "rejected"
+        ? "bad"
+        : page.state === "sent back"
+          ? "wait"
+          : "info";
+  const glyph = { ok: "✓", bad: "✗", wait: "↻", info: "⏸" }[tone];
+  const who =
+    a.provenance.kind === "agent"
+      ? `agent ${a.provenance.agentId}`
+      : a.provenance.kind === "human"
+        ? `${a.provenance.actor.id}`
+        : a.provenance.kind;
+  const partial = incompleteOf(a);
+  const diff = extras.diff;
+  const requirements = Array.isArray(f?.doc.requirements) ? (f?.doc.requirements as unknown[]) : [];
+  const reqText = (x: unknown): string => {
+    if (typeof x === "string") return x;
+    if (x && typeof x === "object") {
+      const o = x as Record<string, unknown>;
+      return [o.id, o.text ?? o.title ?? o.summary].filter((v) => typeof v === "string").join(" ");
+    }
+    return "";
+  };
+  const aside =
+    page.awaited || page.decision || f
+      ? html`<aside class="panel aside" aria-labelledby="your-decision" data-live="decision">
+<h2 id="your-decision">${page.awaited ? "Your decision" : page.decision ? "Decision" : "In brief"}</h2>
+${f?.summary ? html`<p style="font-size:14px;line-height:21px;color:var(--ink-2)">${cut(f.summary, 400)}</p>` : ""}
+${
+  requirements.length > 0
+    ? html`<div class="facts"><span class="lbl">Requirements</span>${requirements.slice(0, 8).map((x) => html`<span>${cut(reqText(x), 140)}</span>`)}${requirements.length > 8 ? html`<span class="muted">+${requirements.length - 8} more</span>` : ""}</div>`
+    : ""
+}
+${f && f.risks.length > 0 ? html`<div class="facts"><span class="lbl">Risks</span>${f.risks.slice(0, 4).map((x) => html`<span>${cut(x, 200)}</span>`)}</div>` : ""}
+${f && f.openQuestions.length > 0 ? html`<div class="facts"><span class="lbl warn">Open questions</span>${f.openQuestions.map((x, i) => html`<span>${i + 1}) ${cut(x, 200)}</span>`)}</div>` : ""}
+${
+  page.decision
+    ? html`<div class="banner ${tone === "info" ? "info" : tone === "wait" ? "info" : tone}">${glyph} ${page.state} by ${page.decision.approval.actor.id}${page.decision.channel === "ui" ? " in the browser" : page.decision.channel === "cli" ? " in the terminal" : ""}${page.decision.approval.comment ? html`<br><span style="white-space:pre-wrap">${cut(page.decision.approval.comment, 600)}</span>` : ""}</div>`
+    : ""
+}
+${extras.decide ?? (page.awaited ? html`<div class="decide"><span class="hint">Decide in the terminal: <code>jarvis continue ${shortRunId(page.run.id)}</code> — <code>a</code> accepts, <code>c</code> sends back.</span><button type="button" class="btn" data-copy="jarvis continue ${shortRunId(page.run.id)}">Copy command</button></div>` : "")}
+</aside>`
+      : "";
+  return html`<div style="display:flex;flex-direction:column;gap:8px" data-live="head">
+<div class="row">${page.state ? html`<span class="pill ${tone}">${glyph} ${page.state}</span>` : ""}<span class="meta" style="font-size:13px">${a.type}/${a.name}@${a.version} · ${a.stepId ?? "-"}${a.iteration && a.iteration > 1 ? `#${a.iteration}` : ""} · ${who} · run ${shortRunId(page.run.id)}</span></div>
+<h1>${title}</h1>
+${
+  page.versions.length > 1
+    ? html`<nav class="versions" aria-label="Versions"><span style="background:none;color:var(--muted);padding:0">version</span>${page.versions.map(
+        (v) =>
+          v === a.version
+            ? html`<span aria-current="page">${v}</span>`
+            : html`<a href="${artifactHref(page.run, { type: a.type, name: a.name, version: v })}">${v}</a>`,
+      )}</nav>`
+    : ""
+}
+</div>
+${extras.banner ?? ""}
+${partial ? html`<div class="banner bad">⚠ incomplete: agent ${partial.agentId} hit its ${partial.limit} limit — what it did not cover is unknown</div>` : ""}
+${
+  diff
+    ? html`<nav class="tabs" aria-label="Sections"><a href="#document">Summary</a><a href="#files">Files changed <span class="muted">${diff.length}</span></a></nav>`
+    : ""
+}
+<div class="cols">
+<div class="mainc">
+<section id="document" class="panel doc" aria-label="Document">${documentHtml(a.name, page.text, f?.doc)}</section>
+${
+  diff
+    ? html`<section id="files" class="group" aria-labelledby="files-h"><h2 id="files-h">Files changed <span class="muted" style="font-weight:400">${diff.length}</span></h2>${
+        diff.length > 0
+          ? diff.map((x, i) => diffFileHtml(x, i, extras.comments === true))
+          : html`<div class="panel empty">No changes against the base.</div>`
+      }</section>`
+    : extras.diffNote
+      ? html`<p class="muted">${extras.diffNote}</p>`
+      : ""
+}
+</div>
+${aside}
+</div>`;
+}
+
+export function errorContent(status: number, message: string, hint?: Part): Html {
+  return html`<div class="lede"><h1>${status === 404 ? "Not found" : "Something went wrong"}</h1></div>
+<div class="panel empty"><p>${message}</p>${hint ? html`<p class="muted" style="margin-top:8px">${hint}</p>` : ""}</div>`;
+}
+
+/** The plain page a request without the session token gets. */
+export function forbiddenPage(): string {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>jarvis ui</title></head><body style="font-family:system-ui,sans-serif;background:#F7F6F3;color:#1D1C1A;padding:32px"><h1 style="font-size:22px">403 — this page needs its session token</h1><p>Open the address <code>jarvis ui</code> printed in the terminal: it carries the token.</p></body></html>`;
+}
+
+export { escapeHtml };

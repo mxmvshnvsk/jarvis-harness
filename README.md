@@ -111,6 +111,7 @@ jarvis ask "how do we pass dependencies into hooks"   # answer from your knowled
 jarvis spec ABC-42              # only research → requirements → spec, up to its approval
 jarvis hooks install            # standards, checks and impact analysis before every git push
 jarvis explain src/foo.ts:42    # why this line exists: task → spec → sources → tool calls
+jarvis ui                       # the runs on a local page (127.0.0.1): what waits for you, documents, diffs
 jarvis mcp serve                # Jarvis as a read-only MCP server for an IDE or another agent
 jarvis ci ABC-42 --bundle run.json.gz   # the same workflow in CI, handed over to a developer
 ```
