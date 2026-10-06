@@ -277,7 +277,7 @@ export class ModelGateway implements ModelCaller {
             error instanceof ModelError
               ? error
               : new ModelError("transient", String(error), { cause: error, modelId });
-          const delay = this.retryDelay(modelError, retries);
+          const delay = this.retryDelay(modelError, retries, request);
           const attemptMs = this.clock().getTime() - attemptStarted;
           if (delay === undefined) {
             this.emitError(request, modelError, retries, attemptMs);
@@ -345,7 +345,8 @@ export class ModelGateway implements ModelCaller {
   }
 
   /** undefined → do not retry. */
-  private retryDelay(error: ModelError, retries: number): number | undefined {
+  private retryDelay(error: ModelError, retries: number, request?: ModelRequest): number | undefined {
+    if (request?.noRetry) return undefined;
     if (error.kind === "transient" && retries < this.retry.maxTransientRetries) {
       return Math.min(this.retry.maxDelayMs, this.retry.baseDelayMs * 2 ** retries);
     }

@@ -413,7 +413,9 @@ export class AgentRuntimeRunner implements AgentRunner {
           outputs: [`${invalid.artifactId}@${invalid.version}`],
         };
       }
-      if (error instanceof ModelError && error.kind === "quota_exhausted") checkpoint();
+      // the run parks (quota window, or a model that is down): keep the conversation to go on from
+      if (error instanceof ModelError && (error.kind === "quota_exhausted" || error.kind === "transient"))
+        checkpoint();
       throw error;
     }
   }

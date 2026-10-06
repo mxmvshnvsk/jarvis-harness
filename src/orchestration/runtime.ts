@@ -1,3 +1,4 @@
+import { reasonOf } from "../app/activity.ts";
 import type { Runtime } from "../app/runtime.ts";
 import { BudgetExceededError, BudgetedGateway } from "../budget/runBudget.ts";
 import { EXIT } from "../cli/output.ts";
@@ -158,7 +159,7 @@ export class LocalWorkflowEngine {
         try {
           outcome = await this.executeStep(run, workflow, step, iteration, lease, workspace);
         } catch (error) {
-          const suspend = this.toSuspension(error);
+          const suspend = this.toSuspension(error, run);
           if (suspend) {
             run = await this.park(run, step, iteration, suspend, workspace);
             break;
@@ -266,7 +267,7 @@ export class LocalWorkflowEngine {
       });
       return outcome;
     } catch (error) {
-      const suspend = this.toSuspension(error);
+      const suspend = this.toSuspension(error, run);
       this.rt.history.finish(historyId, suspend ? "suspended" : "failure", suspend?.state);
       throw error;
     }
@@ -515,8 +516,11 @@ export class LocalWorkflowEngine {
   }
 
   /** Maps runtime errors to a parking decision (ADR-0001 §19, ADR-0002 §2, ADR-0018 §4). */
-  private toSuspension(error: unknown): SuspendRun | undefined {
+  private toSuspension(error: unknown, run: Run): SuspendRun | undefined {
     if (error instanceof SuspendRun) return error;
+    if (error instanceof ModelError && error.kind === "transient" && error.modelId) {
+      return this.waitForModel(error, error.modelId, run);
+    }
     if (error instanceof ModelError && error.kind === "quota_exhausted") {
       const resumeAfter = new Date(this.clock().getTime() + (error.retryAfterMs ?? 60_000));
       return new SuspendRun("WAITING_BUDGET", error.message, {
@@ -539,6 +543,41 @@ export class LocalWorkflowEngine {
       });
     }
     return undefined;
+  }
+
+  /**
+   * The gateway gave up on a model after its retries (network errors, 5xx, timeouts): the run
+   * waits for the model instead of failing — checked again in `modelWait.checkEveryMinutes`, by
+   * `jarvis continue` in the foreground or the daemon — until it has been down for
+   * `modelWait.giveUpAfterHours`. Pilot: a gateway slow for a whole afternoon failed run after run.
+   */
+  private waitForModel(error: ModelError, modelId: string, run: Run): SuspendRun | undefined {
+    const wait = this.rt.loaded.config.modelWait;
+    const now = this.clock().getTime();
+    // the outage goes on when the run parked for it last and no step succeeded since
+    const parkedAt = this.rt.checkpoints
+      .list(run.id)
+      .filter((c) => c.kind === "suspend")
+      .at(-1);
+    const lastSuccess = this.rt.history
+      .list(run.id)
+      .filter((h) => h.status === "success" && h.finishedAt)
+      .at(-1)?.finishedAt;
+    const previous =
+      parkedAt && (!lastSuccess || parkedAt.createdAt > lastSuccess)
+        ? (parkedAt.state.modelUnavailable as { since?: string; checks?: number } | undefined)
+        : undefined;
+    const since = previous?.since ?? new Date(now).toISOString();
+    if (now - Date.parse(since) >= wait.giveUpAfterHours * 3_600_000) return undefined;
+    const reason = reasonOf(error.message);
+    return new SuspendRun("WAITING_BUDGET", `model ${modelId} is unavailable: ${reason}`, {
+      resumeAfter: new Date(now + wait.checkEveryMinutes * 60_000),
+      waitingFor: { kind: "model", detail: modelId },
+      checkpointState: {
+        modelId,
+        modelUnavailable: { since, reason, checks: (previous?.checks ?? 0) + 1 },
+      },
+    });
   }
 
   private emit(run: Run, kind: string, payload: Record<string, unknown>): void {

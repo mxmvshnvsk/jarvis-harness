@@ -211,6 +211,17 @@ const BudgetCapSchema = z.strictObject({
   requests: z.int().positive().optional(),
 });
 
+/**
+ * A model that keeps failing (network errors, 5xx, timeouts after the gateway's own retries) parks
+ * the run instead of failing it: checked again every `checkEveryMinutes`, given up after
+ * `giveUpAfterHours` of unavailability (the run fails as before).
+ */
+export const ModelWaitSchema = z.strictObject({
+  checkEveryMinutes: z.number().positive().default(5),
+  giveUpAfterHours: z.number().positive().default(12),
+});
+export type ModelWait = z.infer<typeof ModelWaitSchema>;
+
 export const BudgetConfigSchema = z.strictObject({
   perRun: BudgetCapSchema.prefault({}),
   perStep: BudgetCapSchema.prefault({}),
@@ -379,6 +390,7 @@ export const UserConfigSchema = z.strictObject({
   context: ContextConfigSchema.optional(),
   telemetry: TelemetryConfigSchema.optional(),
   agents: z.record(z.string(), AgentConfigSchema).optional(),
+  modelWait: ModelWaitSchema.optional(),
 });
 export type UserConfig = z.infer<typeof UserConfigSchema>;
 
@@ -398,6 +410,7 @@ export const ProjectConfigSchema = z.strictObject({
   knowledge: KnowledgeConfigSchema.optional(),
   human: HumanConfigSchema.optional(),
   hooks: HooksConfigSchema.optional(),
+  modelWait: ModelWaitSchema.optional(),
   agents: z.record(z.string(), AgentConfigSchema).optional(),
   /** Stack tags (ADR-0021 §3): typescript, react, csharp, … Empty = detected from the workspace. */
   stack: z.array(z.string().min(1)).optional(),
@@ -428,6 +441,7 @@ export const ResolvedConfigSchema = z.strictObject({
   human: HumanConfigSchema.prefault({}),
   hooks: HooksConfigSchema.prefault({}),
   agents: z.record(z.string(), AgentConfigSchema).prefault({}),
+  modelWait: ModelWaitSchema.prefault({}),
   stack: z.array(z.string().min(1)).default([]),
   stackScopes: z.record(z.string().min(1), z.array(z.string().min(1))).prefault({}),
   /** Capability patterns denied by the active profile (ADR-0009 §1); applied by the Tool Router. */

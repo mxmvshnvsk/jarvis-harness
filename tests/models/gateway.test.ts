@@ -225,3 +225,14 @@ describe("classifyNetworkError", () => {
     );
   });
 });
+
+describe("ModelGateway noRetry", () => {
+  it("makes one attempt for a health check", async () => {
+    server.queue({ status: 500, body: { error: { message: "down" } } }, completion("late"));
+    const error = await gateway()
+      .call({ ...ask, noRetry: true })
+      .catch((e: unknown) => e);
+    expect((error as ModelError).kind).toBe("transient");
+    expect(server.requests).toHaveLength(1);
+  });
+});

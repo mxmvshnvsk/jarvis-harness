@@ -325,7 +325,11 @@ export function nextCommands(d: RunDetail, goOn?: string): Array<{ cmd: string; 
     });
     if (pending) out.push({ cmd: `jarvis show ${id} ${pending.type}`, why: `just read the ${pending.type}` });
   } else if (r.state === "WAITING_BUDGET") {
-    out.push({ cmd: `jarvis resume ${id}`, why: "when the quota window frees up" });
+    out.push(
+      r.waitingFor?.kind === "model"
+        ? { cmd: "jarvis continue", why: `waits for model ${r.waitingFor.detail ?? ""} here and goes on` }
+        : { cmd: `jarvis resume ${id}`, why: "when the quota window frees up" },
+    );
   } else if (r.state === "FAILED") {
     out.push({ cmd: `jarvis logs ${id} --level error`, why: "what went wrong" });
     out.push({ cmd: `jarvis resume ${id}`, why: "retry from the last checkpoint" });

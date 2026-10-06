@@ -202,8 +202,11 @@ export class SqliteRunStore {
       throw new StaleStateError(id, options.expectedState, run.state);
     assertTransition(run.state, to);
     const now = this.clock().toISOString();
-    // waiting_for describes a WAITING_HUMAN state only; every other transition clears it.
-    const waiting = to === "WAITING_HUMAN" && options.waitingFor ? JSON.stringify(options.waitingFor) : null;
+    // waiting_for describes a waiting state (a person, or a model that is down); others clear it.
+    const waiting =
+      (to === "WAITING_HUMAN" || to === "WAITING_BUDGET") && options.waitingFor
+        ? JSON.stringify(options.waitingFor)
+        : null;
     this.db
       .prepare(
         "UPDATE runs SET state = ?, state_reason = ?, waiting_for_json = ?, updated_at = ? WHERE id = ? AND state = ?",

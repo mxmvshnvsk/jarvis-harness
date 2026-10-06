@@ -219,6 +219,22 @@ jest — только связанные тесты (`--findRelatedTests`). Уп
 список на выбор, — и открывает тот же диалог; с id — этот прогон. Прогон, остановленный на квоте, упавший
 или прерванный, продолжается как `resume`. `approve`, `answer` и флаги остаются для скриптов и CI.
 
+Модель недоступна. Когда шлюз отказал после своих повторов (сетевая ошибка, 5xx, таймаут), прогон не падает,
+а ждёт модель (`WAITING_BUDGET`, `waitingFor: model`, в статусе — «waits for: the model»). В терминале команда
+ждёт на месте: обратный отсчёт до проверки, одна короткая попытка (`noRetry`), и прогон идёт дальше, когда
+модель ответила; Ctrl-C оставляет его ждать.
+
+```
+⏸ model deepseek-flash is unavailable since 18:02 (provider error (500)) — waiting here; Ctrl-C leaves the run parked
+check 2: still unavailable (network error)
+✓ model deepseek-flash answers again (0:12) — going on
+```
+
+`jarvis continue` для такого прогона сначала проверяет модель и только потом тратит на неё настоящий запрос;
+демон (`jarvis daemon`) продолжает его после `resumeAfter`. Проверка — раз в `modelWait.checkEveryMinutes`
+(5), прогон падает как раньше, если модель недоступна дольше `modelWait.giveUpAfterHours` (12) —
+[configuration.md](configuration.md).
+
 Одобренная spec идёт дальше. Когда `spec` (или `research`) завершился в терминале, Jarvis спрашивает «Go on
 to the implementation? impact → plan → implementation → …» и по `Y` (Enter) продолжает той же командой: новый
 прогон `sdd` начинается после одобрения spec — research, requirements и spec (с их одобрением) переносятся

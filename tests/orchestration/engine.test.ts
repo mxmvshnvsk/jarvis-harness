@@ -199,6 +199,46 @@ describe("LocalWorkflowEngine", () => {
     expect(attempt).toBe(2);
   });
 
+  it("waits for a model that is down instead of failing, and gives up after modelWait.giveUpAfterHours", async () => {
+    const wf = workflowOf({
+      name: "outage",
+      entry: "work",
+      steps: [{ id: "work", kind: "agentic", agent: "work", transitions: { onSuccess: "DONE" } }],
+    });
+    let now = new Date("2026-10-03T12:00:00Z");
+    const down = () => {
+      throw new ModelError("transient", "model flash: provider error (500): upstream", { modelId: "flash" });
+    };
+    const engine = engineFor(rt, [wf], { work: async () => down() }, () => now);
+    const run = createRun(rt, "outage");
+
+    const parked = await engine.execute(run.id, owner);
+    expect(parked.run.state).toBe("WAITING_BUDGET");
+    expect(parked.run.waitingFor).toEqual({ kind: "model", detail: "flash" });
+    expect(parked.run.stateReason).toBe("model flash is unavailable: provider error (500)");
+    const first = rt.checkpoints.latest(run.id)?.state;
+    expect(first?.resumeAfter).toBe("2026-10-03T12:05:00.000Z");
+    expect(first?.modelUnavailable).toEqual({
+      since: "2026-10-03T12:00:00.000Z",
+      reason: "provider error (500)",
+      checks: 1,
+    });
+
+    // still down: the outage goes on from the same moment
+    now = new Date("2026-10-03T12:06:00Z");
+    await engine.execute(run.id, owner);
+    expect(rt.checkpoints.latest(run.id)?.state.modelUnavailable).toMatchObject({
+      since: "2026-10-03T12:00:00.000Z",
+      checks: 2,
+    });
+
+    // twelve hours later the run fails as it used to
+    now = new Date("2026-10-04T00:00:01Z");
+    const failed = await engine.execute(run.id, owner);
+    expect(failed.run.state).toBe("FAILED");
+    expect(failed.run.stateReason).toContain("provider error (500)");
+  });
+
   it("fails the run on step failure and allows a retry via resume", async () => {
     const wf = workflowOf({
       name: "flaky",

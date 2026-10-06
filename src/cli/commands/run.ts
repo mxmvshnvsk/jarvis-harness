@@ -23,6 +23,7 @@ import { git } from "../../tools/local/exec.ts";
 import type { CliContext } from "../context.ts";
 import { humanGate } from "../gate.ts";
 import { CliExit, EXIT } from "../output.ts";
+import { waitParked } from "../parked.ts";
 import { followRun, formatRunHeader, oneLine } from "../progress.ts";
 import { createPrompt, isInteractive, type Prompt } from "../prompt.ts";
 import { documentToMarkdown, renderDiff, renderMarkdown } from "../render.ts";
@@ -76,6 +77,10 @@ async function executeAndReport(
         .finally(() => progress.stop());
       header = false;
       stealLease = false;
+      // a model that is down or a quota window: wait here and go on (Ctrl-C leaves it parked)
+      if (prompt && result.run.state === "WAITING_BUDGET") {
+        if ((await waitParked(ctx, runtime, result.run)) === "ready") continue;
+      }
       if (prompt && result.exitCode === EXIT.waitingHuman) {
         const actor = await actorFor(ctx, runtime);
         if ((await humanGate(ctx, runtime, result.run, actor, prompt)) === "decided") continue;
@@ -232,6 +237,12 @@ export async function runContinue(ctx: CliContext, ref: string | undefined): Pro
         throw new CliExit(EXIT.waitingHuman);
       }
     }
+    if (run.state === "WAITING_BUDGET" && prompt) {
+      // check the model before spending a full request (and its retries) on it
+      for (const line of formatRunHeader(run, planOf(engine, run), st)) ctx.out.line(line);
+      if ((await waitParked(ctx, runtime, run)) !== "ready") throw new CliExit(EXIT.waitingBudget);
+      await executeAndReport(ctx, runtime, engine, run, false, {}, prompt, false);
+    }
     await executeAndReport(ctx, runtime, engine, run, false, {}, prompt, run.state !== "WAITING_HUMAN");
   } finally {
     prompt?.close();
@@ -243,7 +254,7 @@ export async function runContinue(ctx: CliContext, ref: string | undefined): Pro
 function waitsFor(r: Run): string {
   if (r.state === "COMPLETED") return "ready to implement";
   if (r.state === "RUNNING") return "interrupted";
-  if (r.state === "WAITING_BUDGET") return "quota";
+  if (r.state === "WAITING_BUDGET") return r.waitingFor?.kind === "model" ? "the model" : "quota";
   return r.waitingFor?.kind ?? "a decision";
 }
 

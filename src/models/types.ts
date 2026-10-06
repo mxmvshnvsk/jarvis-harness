@@ -45,6 +45,8 @@ export interface ModelRequest {
   readonly stepId?: string;
   readonly iteration?: number;
   readonly agentId?: string;
+  /** One attempt only: a health check should say "down" now, not after the retries. */
+  readonly noRetry?: boolean;
 }
 
 export interface Usage {

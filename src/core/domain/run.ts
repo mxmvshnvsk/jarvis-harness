@@ -95,7 +95,7 @@ export const InteractionKindSchema = z.enum(["approval", "clarification", "revie
 export type InteractionKind = z.infer<typeof InteractionKindSchema>;
 
 export const WaitingForSchema = z.strictObject({
-  kind: z.enum(["approval", "clarification", "review", "conflict", "budget", "effect", "loop"]),
+  kind: z.enum(["approval", "clarification", "review", "conflict", "budget", "effect", "loop", "model"]),
   interactionId: z.string().min(1).optional(),
   detail: z.string().optional(),
 });

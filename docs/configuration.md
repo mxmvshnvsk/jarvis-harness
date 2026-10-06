@@ -109,6 +109,9 @@ workspace:                     # ADR-0003
   allowWrites: true            # по умолчанию true для worktree, false для cwd
   retentionDays: 7             # jarvis gc
 
+modelWait:                     # модель недоступна после повторов шлюза: прогон ждёт, а не падает
+  checkEveryMinutes: 5         # как часто проверять (одна попытка, без повторов)
+  giveUpAfterHours: 12         # дольше — прогон падает, как раньше
 budget:                        # ADR-0018 §4 — лимиты сверх пулов
   perRun:  { outputTokens: 200000, requests: 400 }
   perStep: { outputTokens: 40000, requests: 80 }

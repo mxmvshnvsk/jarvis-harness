@@ -33,7 +33,13 @@ export function resumeDecision(
         ? Date.parse(checkpoint.state.resumeAfter)
         : undefined;
     if (after !== undefined && after > now.getTime())
-      return { resume: false, reason: `budget window frees at ${new Date(after).toISOString()}` };
+      return {
+        resume: false,
+        reason:
+          run.waitingFor?.kind === "model"
+            ? `model ${run.waitingFor.detail ?? ""} is checked again at ${new Date(after).toISOString()}`
+            : `budget window frees at ${new Date(after).toISOString()}`,
+      };
     return { resume: true };
   }
   if (run.state === "WAITING_HUMAN") {

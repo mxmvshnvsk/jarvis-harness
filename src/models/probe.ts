@@ -40,6 +40,26 @@ const PING_TOOL = {
   parameters: { type: "object", properties: { echo: { type: "string" } }, required: ["echo"] },
 };
 
+/** One cheap request, one attempt: is the model answering right now? */
+export async function modelAlive(
+  gateway: ModelGateway,
+  modelId: string,
+): Promise<{ ok: true; latencyMs: number } | { ok: false; reason: string }> {
+  const started = Date.now();
+  try {
+    await gateway.call({
+      modelId,
+      role: "probe",
+      noRetry: true,
+      maxOutput: PROBE_MAX_OUTPUT,
+      messages: [{ role: "user", content: "Reply with the single word OK." }],
+    });
+    return { ok: true, latencyMs: Date.now() - started };
+  } catch (error) {
+    return { ok: false, reason: error instanceof Error ? error.message : String(error) };
+  }
+}
+
 export async function probeModel(gateway: ModelGateway, modelId: string): Promise<ProbeResult> {
   const errors: Record<string, string> = {};
   const inconclusive: Array<keyof ProbeResult["supports"]> = [];
