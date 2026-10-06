@@ -134,6 +134,28 @@ describe("worktree workspace end to end (ADR-0003)", () => {
     expect(sh(sb.project, ["status", "--porcelain"]).trim()).toBe("");
   });
 
+  it("says what it prepares, and a failed setup leaves no worktree or branch behind (pilot)", async () => {
+    sb.write("project/.jarvis/project.yaml", "version: 1\nworkspace:\n  setup: 'echo boom >&2; exit 3'\n");
+    sh(sb.project, ["add", "-A"]);
+    sh(sb.project, ["commit", "-q", "-m", "broken setup"]);
+    const r = await jarvis(["work", "T-1", "--workflow", "smoke"]);
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("◌ own checkout");
+    expect(r.err).toContain("◌ workspace.setup echo boom >&2; exit 3");
+    expect(r.err).toContain("error: workspace.setup failed (exit 3): boom");
+    expect(r.err).toContain("JARVIS_WORKSPACE__MODE=cwd");
+    expect(sh(sb.project, ["worktree", "list"]).trim().split("\n")).toHaveLength(1);
+    expect(sh(sb.project, ["branch", "--list", "jarvis/*"]).trim()).toBe("");
+  });
+
+  it("names the branch readably: ticket key, Cyrillic in Latin letters, no punctuation (pilot)", () => {
+    expect(branchNameFor("ABC-123 fix the form", "run_6e744e0a434e")).toBe("jarvis/ABC-123/6e744e0a");
+    expect(
+      branchNameFor("Баг: в компактном режиме (web-app, compact) при включении…", "run_6e744e0a434e"),
+    ).toBe("jarvis/bag-v-kompaktnom-rezhime-web-app-compact/6e744e0a");
+    expect(branchNameFor("¿…?", "run_6e744e0a434e")).toBe("jarvis/task/6e744e0a");
+  });
+
   it("restores the worktree to the last checkpoint on resume", async () => {
     const loaded = await loadConfig({ cwd: sb.project, homeDir: sb.home, env: {} });
     const wt = await WorktreeWorkspace.create({

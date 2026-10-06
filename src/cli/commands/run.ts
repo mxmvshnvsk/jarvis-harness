@@ -1,8 +1,10 @@
 import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
+import { clock } from "../../app/activity.ts";
 import { awaitedArtifact, recordDecision } from "../../app/decide.ts";
 import { createEngine } from "../../app/engine.ts";
 import { continuationStep, continuedBy, handOff } from "../../app/handoff.ts";
+import { duration } from "../../app/journey.ts";
 import { preflightMcp } from "../../app/preflight.ts";
 import { createRuntime, type Runtime } from "../../app/runtime.ts";
 import { runDetail } from "../../app/status.ts";
@@ -101,7 +103,7 @@ async function executeAndReport(
             answer !== undefined &&
             (answer === "" || answer === "y" || answer === "yes" || answer === "д" || answer === "да")
           ) {
-            const next = await startContinuation(ctx, runtime, engine, result.run);
+            const next = await startContinuation(ctx, runtime, engine, result.run, prompt);
             if (next) await executeAndReport(ctx, runtime, engine, next, false, {}, prompt);
           } else
             ctx.out.line(`${st.muted("later:")} ${st.cmd(`jarvis continue ${shortRunId(result.run.id)}`)}`);
@@ -205,7 +207,7 @@ export async function runContinue(ctx: CliContext, ref: string | undefined): Pro
     if (!run) return;
     if (run.state === "COMPLETED") {
       // a finished spec: an explicit `continue` is the consent to go on to the implementation
-      const next = await startContinuation(ctx, runtime, engine, run);
+      const next = await startContinuation(ctx, runtime, engine, run, prompt);
       if (!next) {
         const by = continuedBy(runtime, run);
         ctx.out.line(
@@ -252,16 +254,29 @@ async function prepareWorkspace(
   runId: string,
   task: string,
   base: string | undefined,
+  prompt?: Prompt,
 ): Promise<WorkspaceRef> {
   const loaded = runtime.loaded;
   const root = loaded.project?.root ?? ctx.cwd;
+  const cwd: WorkspaceRef = { mode: "cwd", repoRoot: root, path: root, baseRef: base ?? "HEAD" };
   const useWorktree = loaded.config.workspace.mode === "worktree" && loaded.project?.isGitRepo === true;
-  if (!useWorktree) return { mode: "cwd", repoRoot: root, path: root, baseRef: base ?? "HEAD" };
+  if (!useWorktree) return cwd;
+  const st = ctx.out.errStyle;
   if (await WorktreeWorkspace.isDirty(root)) {
     ctx.out.note(
-      `${ctx.out.errStyle.warn("note:")} the working tree has uncommitted changes; the run starts from the last commit (ADR-0003 §2)`,
+      `${st.warn("note:")} the working tree has uncommitted changes; the run starts from the last commit (ADR-0003 §2)`,
     );
   }
+  // creating the worktree and its setup (`yarn install`, a build) take minutes: say what runs and
+  // how long it has been running (pilot: `jarvis c` showed nothing for 22 s and then failed)
+  const started = Date.now();
+  let timer: ReturnType<typeof setInterval> | undefined;
+  let frame = 0;
+  const frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+  const stop = () => {
+    if (timer) clearInterval(timer);
+    ctx.out.progress(undefined);
+  };
   try {
     const wt = await WorktreeWorkspace.create({
       repoRoot: root,
@@ -272,14 +287,48 @@ async function prepareWorkspace(
       ...(loaded.config.workspace.setup ? { setup: loaded.config.workspace.setup } : {}),
       setupTimeoutMs: loaded.config.tools.commandTimeoutMs,
       env: ctx.env,
+      onStage: (stage, detail) => {
+        if (stage === "worktree") {
+          ctx.out.note(`${st.muted("◌")} own checkout ${st.muted(detail)}`);
+          return;
+        }
+        ctx.out.note(`${st.muted("◌")} workspace.setup ${st.cmd(detail)}`);
+        const draw = () =>
+          ctx.out.progress(
+            `${st.cmd(frames[frame++ % frames.length] as string)} ${st.muted(clock(Date.now() - started))} workspace.setup ${st.muted("(installing and building in the new checkout)")}`,
+          );
+        draw();
+        timer = setInterval(draw, 1000);
+        timer.unref?.();
+      },
     });
+    stop();
+    runtime.log.info("workspace.ready", { runId, path: wt.ref.path, ms: Date.now() - started });
+    ctx.out.note(`${st.ok("✓")} checkout ready ${st.muted(`in ${duration(Date.now() - started)}`)}`);
     return wt.ref;
   } catch (error) {
-    if (error instanceof WorktreeError) {
-      ctx.out.error(error.message);
-      throw new CliExit(EXIT.error);
+    stop();
+    if (!(error instanceof WorktreeError)) throw error;
+    runtime.log.error("workspace.failed", {
+      runId,
+      ms: Date.now() - started,
+      message: error.message.slice(0, 4000),
+    });
+    ctx.out.error(error.message);
+    if (prompt) {
+      const so = ctx.out.style;
+      const answer = (
+        await prompt.ask(
+          `${so.heading("Work in your checkout instead?")} ${so.warn("changes land in your working tree")} ${so.cmd("[y/N] >")} `,
+        )
+      )?.toLowerCase();
+      if (answer === "y" || answer === "yes" || answer === "д" || answer === "да") return cwd;
+    } else {
+      ctx.out.note(
+        `${st.muted("fix workspace.setup in .jarvis/project.yaml, or work in your checkout:")} ${st.cmd("JARVIS_WORKSPACE__MODE=cwd jarvis …")}`,
+      );
     }
-    throw error;
+    throw new CliExit(EXIT.error);
   }
 }
 
@@ -292,6 +341,7 @@ async function startContinuation(
   runtime: Runtime,
   engine: LocalWorkflowEngine,
   from: Run,
+  prompt?: Prompt,
 ): Promise<Run | undefined> {
   const targetName = nextWorkflowOf(engine, from);
   if (!targetName) return undefined;
@@ -300,7 +350,11 @@ async function startContinuation(
   if (!startAt || continuedBy(runtime, from)) return undefined;
   const actor = await actorFor(ctx, runtime);
   const runId = newRunId();
-  const workspace = await prepareWorkspace(ctx, runtime, runId, from.task, undefined);
+  // say at once what happens: preparing a worktree may take minutes before anything else shows
+  ctx.out.note(
+    `${ctx.out.errStyle.ok("→")} run ${shortRunId(from.id)} goes on as ${targetName} from ${startAt} ${ctx.out.errStyle.muted("— preparing the checkout")}`,
+  );
+  const workspace = await prepareWorkspace(ctx, runtime, runId, from.task, undefined, prompt);
   const run = runtime.runs.create({
     id: runId,
     task: from.task,

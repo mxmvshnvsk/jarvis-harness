@@ -25,19 +25,67 @@ export interface CreateWorktreeOptions {
   readonly setup?: string;
   readonly setupTimeoutMs?: number;
   readonly env?: NodeJS.ProcessEnv;
+  /** Told when the worktree exists and before `setup` runs (it can take minutes: say so). */
+  readonly onStage?: (stage: "worktree" | "setup", detail: string) => void;
 }
 
 export function projectHash(repoRoot: string): string {
   return createHash("sha256").update(repoRoot).digest("hex").slice(0, 12);
 }
 
+const CYRILLIC: Record<string, string> = {
+  а: "a",
+  б: "b",
+  в: "v",
+  г: "g",
+  д: "d",
+  е: "e",
+  ё: "e",
+  ж: "zh",
+  з: "z",
+  и: "i",
+  й: "y",
+  к: "k",
+  л: "l",
+  м: "m",
+  н: "n",
+  о: "o",
+  п: "p",
+  р: "r",
+  с: "s",
+  т: "t",
+  у: "u",
+  ф: "f",
+  х: "h",
+  ц: "ts",
+  ч: "ch",
+  ш: "sh",
+  щ: "sch",
+  ъ: "",
+  ы: "y",
+  ь: "",
+  э: "e",
+  ю: "yu",
+  я: "ya",
+};
+
+/**
+ * `jarvis/<slug of the task>/<run>`: a ticket key stays as it is (`ABC-123`), Cyrillic is spelt in
+ * Latin letters, punctuation goes (pilot: a Russian task gave `jarvis/web-app-compact-.-./…`).
+ */
 export function branchNameFor(task: string, runId: string): string {
-  const safeTask =
-    task
-      .replace(/[^A-Za-z0-9._-]+/g, "-")
+  const key = /^\s*([A-Z][A-Z0-9]+-\d+)\b/.exec(task)?.[1];
+  const slug =
+    key ??
+    ([...task.toLowerCase()]
+      .map((ch) => CYRILLIC[ch] ?? ch)
+      .join("")
+      .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-+|-+$/g, "")
-      .slice(0, 40) || "task";
-  return `jarvis/${safeTask}/${runId.replace(/^run_/, "").slice(0, 8)}`;
+      .slice(0, 40)
+      .replace(/-+$/, "") ||
+      "task");
+  return `jarvis/${slug}/${runId.replace(/^run_/, "").slice(0, 8)}`;
 }
 
 async function must(promise: ReturnType<typeof git>, what: string): Promise<string> {
@@ -98,15 +146,20 @@ export class WorktreeWorkspace implements Workspace {
       baseCommit,
       headCommit: baseCommit,
     };
+    options.onStage?.("worktree", path);
     if (options.setup) {
+      options.onStage?.("setup", options.setup);
       const r = await runShell(options.setup, {
         cwd: path,
         timeoutMs: options.setupTimeoutMs ?? 600_000,
         env: options.env ?? process.env,
       });
       if (r.code !== 0 || r.timedOut) {
+        // a failed setup leaves no half-made worktree or branch behind (pilot: `jarvis c` failed silently)
+        await git(["worktree", "remove", "--force", path], options.repoRoot);
+        await git(["branch", "-D", branch], options.repoRoot);
         throw new WorktreeError(
-          `workspace.setup failed (exit ${r.code ?? "killed"}): ${(r.stderr || r.stdout).trim().slice(-2000)}`,
+          `workspace.setup failed (${r.timedOut ? "timed out" : `exit ${r.code ?? "killed"}`}): ${(r.stderr || r.stdout).trim().slice(-2000)}`,
         );
       }
     }
