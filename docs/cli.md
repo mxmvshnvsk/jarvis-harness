@@ -123,6 +123,7 @@ reasoning, prefix cache. Результат записывается и срав
 deepseek-flash  last 24h · 32 answered, 0 failed (100%) · 2 retries
   latency    p50 41s · p90 2m 05s · max 4m 58s   timeout 10m 00s
   speed      p50 38 tok/s · p90 61 tok/s · max 95 tok/s
+  streamed   32 of 32 · first token p50 6s · p90 24s · max 1m 02s
   prompt     avg 33k · max 152k · total 1.0M · cached 0%
   output     avg 780 · max 3.2k · total 25k
   finish     tool_calls 24 · stop 8

@@ -9,7 +9,7 @@ import { type CassetteMode, type CassetteStore, cassetteKey, cassetteRequest } f
 import { ModelError } from "./errors.ts";
 import { type AdapterRegistry, adapterFor, defaultAdapters } from "./providers/index.ts";
 import { charsOfMessages, TokenEstimator } from "./tokens.ts";
-import type { ModelRequest, ModelResponse, ProviderResult } from "./types.ts";
+import type { ModelRequest, ModelResponse, ProviderResult, StreamProgress } from "./types.ts";
 
 /** The one method executors need; the budgeted wrapper (ADR-0018 §4) implements it too. */
 export interface ModelCaller {
@@ -25,6 +25,9 @@ export interface RetryPolicy {
   /** A Retry-After longer than this means the window is gone: treat as quota exhaustion. */
   readonly maxRetryAfterMs: number;
 }
+
+/** How often a streamed answer reports its progress to the journal. */
+const PROGRESS_EVERY_MS = 5_000;
 
 export const DEFAULT_RETRY: RetryPolicy = {
   maxTransientRetries: 2,
@@ -218,8 +221,30 @@ export class ModelGateway implements ModelCaller {
     try {
       for (;;) {
         attemptStarted = this.clock().getTime();
+        let reported = 0;
+        const attempt = retries;
+        const onProgress = (p: StreamProgress): void => {
+          const now = this.clock().getTime();
+          if (reported > 0 && now - reported < PROGRESS_EVERY_MS) return;
+          reported = now;
+          this.events.emit({
+            kind: "model.progress",
+            ...(request.runId ? { runId: request.runId } : {}),
+            ...(request.stepId ? { stepId: request.stepId } : {}),
+            ...(request.iteration !== undefined ? { iteration: request.iteration } : {}),
+            payload: {
+              modelId,
+              attempt,
+              elapsedMs: now - attemptStarted,
+              outputChars: p.outputChars,
+              reasoningChars: p.reasoningChars,
+              toolCalls: p.toolCalls,
+              ...(p.firstTokenMs !== undefined ? { firstTokenMs: p.firstTokenMs } : {}),
+            },
+          });
+        };
         try {
-          const result = await adapter.call(request, model, { headers });
+          const result = await adapter.call(request, model, { headers, onProgress });
           const latency = this.clock().getTime() - started;
           const source = this.cassette?.mode === "record" ? "record" : "live";
           const response = this.finish(request, result, latency, retries, source);
@@ -363,6 +388,8 @@ export class ModelGateway implements ModelCaller {
       retries,
       source,
       ...(result.rateLimit ? { rateLimit: result.rateLimit } : {}),
+      ...(result.streamed ? { streamed: true } : {}),
+      ...(result.firstTokenMs !== undefined ? { firstTokenMs: result.firstTokenMs } : {}),
     };
   }
 
@@ -407,6 +434,8 @@ export class ModelGateway implements ModelCaller {
         responseFormat: request.responseFormat?.kind ?? "text",
         toolCount: request.tools?.length ?? 0,
         rateLimit: response.rateLimit,
+        ...(response.streamed ? { streamed: true } : {}),
+        ...(response.firstTokenMs !== undefined ? { firstTokenMs: response.firstTokenMs } : {}),
       },
     });
   }

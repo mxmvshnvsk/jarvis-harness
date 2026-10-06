@@ -4,7 +4,22 @@ import type { AddressInfo } from "node:net";
 export interface FakeReply {
   readonly status?: number;
   readonly headers?: Record<string, string>;
-  readonly body: unknown;
+  readonly body?: unknown;
+  /** Answer as server-sent events: each chunk a `data:` line, then `[DONE]` unless `done: false`. */
+  readonly sse?: { readonly chunks: readonly unknown[]; readonly delayMs?: number; readonly done?: boolean };
+}
+
+/** Chunks of a streamed answer: the text in pieces, then the finish reason and usage. */
+export function streamedChunks(pieces: readonly string[], reasoning: readonly string[] = []): unknown[] {
+  return [
+    ...reasoning.map((r) => ({
+      model: "fake-model",
+      choices: [{ index: 0, delta: { reasoning_content: r } }],
+    })),
+    ...pieces.map((p) => ({ model: "fake-model", choices: [{ index: 0, delta: { content: p } }] })),
+    { model: "fake-model", choices: [{ index: 0, delta: {}, finish_reason: "stop" }] },
+    { model: "fake-model", choices: [], usage: { prompt_tokens: 42, completion_tokens: 7 } },
+  ];
 }
 
 export interface CapturedRequest {
@@ -81,6 +96,19 @@ export async function startFakeOpenAi(): Promise<FakeOpenAi> {
         responder?.(captured, index) ??
         ({ status: 500, body: { error: { message: "no reply configured" } } } satisfies FakeReply);
       index += 1;
+      if (reply.sse) {
+        const { chunks, delayMs = 0, done = true } = reply.sse;
+        res.writeHead(reply.status ?? 200, { "content-type": "text/event-stream", ...reply.headers });
+        void (async () => {
+          for (const chunk of chunks) {
+            res.write(`data: ${typeof chunk === "string" ? chunk : JSON.stringify(chunk)}\n\n`);
+            if (delayMs > 0) await new Promise((r) => setTimeout(r, delayMs));
+          }
+          if (done) res.write("data: [DONE]\n\n");
+          res.end();
+        })();
+        return;
+      }
       res.writeHead(reply.status ?? 200, { "content-type": "application/json", ...reply.headers });
       res.end(typeof reply.body === "string" ? reply.body : JSON.stringify(reply.body));
     });

@@ -36,6 +36,8 @@ export interface ModelStats {
   readonly latencyMs?: Percentiles;
   /** Output tokens per second of answering time, per call. */
   readonly outputPerSecond?: Percentiles;
+  /** Streamed answers: how many, and how long until their first piece arrived. */
+  readonly streamed?: { readonly calls: number; readonly firstTokenMs?: Percentiles };
   readonly promptTokens: { readonly total: number; readonly avg: number; readonly max: number };
   readonly outputTokens: { readonly total: number; readonly avg: number; readonly max: number };
   readonly cachedShare: number;
@@ -136,6 +138,8 @@ export function modelStats(events: readonly StoredEvent[]): ModelStats[] {
     const failed = a.errors.length;
     const latency = percentiles(latencies);
     const speed = percentiles(speeds);
+    const streamedCalls = a.calls.filter((e) => pay(e).streamed === true);
+    const firstToken = percentiles(streamedCalls.map((e) => num(pay(e).firstTokenMs)).filter((v) => v > 0));
     out.push({
       modelId,
       calls: answered,
@@ -145,6 +149,9 @@ export function modelStats(events: readonly StoredEvent[]): ModelStats[] {
       retriedCalls: a.calls.filter((e) => num(pay(e).retries) > 0).length,
       ...(latency ? { latencyMs: latency } : {}),
       ...(speed ? { outputPerSecond: speed } : {}),
+      ...(streamedCalls.length > 0
+        ? { streamed: { calls: streamedCalls.length, ...(firstToken ? { firstTokenMs: firstToken } : {}) } }
+        : {}),
       promptTokens: stat(prompts),
       outputTokens: stat(outputs),
       cachedShare: sum(prompts) > 0 ? cached / sum(prompts) : 0,

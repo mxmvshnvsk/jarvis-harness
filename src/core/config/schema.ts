@@ -63,6 +63,12 @@ export const ModelConfigSchema = z.strictObject({
   tokenizer: z.string().min(1).optional(),
   timeoutMs: z.int().positive().default(120_000),
   maxConcurrency: z.int().positive().default(2),
+  /**
+   * Ask for the answer as a stream (SSE). On by default: headers arrive at once, so a long answer
+   * is not cut by a header timeout and the progress line shows it coming. A gateway that refuses
+   * streaming is asked again without it, once per process.
+   */
+  stream: z.boolean().optional(),
 });
 export type ModelConfig = z.infer<typeof ModelConfigSchema>;
 

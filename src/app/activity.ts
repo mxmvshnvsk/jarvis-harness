@@ -37,6 +37,8 @@ export interface Activity {
   readonly lastRetry?: string;
   /** Retries of the call in flight: how many, and why the last attempt failed. */
   readonly retrying?: { readonly attempt: number; readonly reason: string };
+  /** A streamed answer on its way: characters of the answer and of the reasoning so far. */
+  readonly receiving?: { readonly outputChars: number; readonly reasoningChars: number };
 }
 
 const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
@@ -72,6 +74,7 @@ export function activityOf(events: readonly StoredEvent[], now: Date = new Date(
   let waitingSince: string | undefined;
   let lastRetry: string | undefined;
   let retrying: { attempt: number; reason: string } | undefined;
+  let receiving: { outputChars: number; reasoningChars: number } | undefined;
   for (const e of events) {
     if (e.runId !== runId) continue;
     const p = (e.payload ?? {}) as Record<string, unknown>;
@@ -117,9 +120,14 @@ export function activityOf(events: readonly StoredEvent[], now: Date = new Date(
         if (step) step.modelCalls += 1;
         if (agentActive) waitingSince = e.ts;
         retrying = undefined;
+        receiving = undefined;
+        break;
+      case "model.progress":
+        receiving = { outputChars: num(p.outputChars), reasoningChars: num(p.reasoningChars) };
         break;
       case "model.retry":
         // the wait keeps counting from the first attempt: the answer is still the same one
+        receiving = undefined;
         lastRetry = str(p.message);
         retrying = { attempt: num(p.attempt) || (retrying?.attempt ?? 0) + 1, reason: reasonOf(lastRetry) };
         break;
@@ -131,6 +139,7 @@ export function activityOf(events: readonly StoredEvent[], now: Date = new Date(
         lastTool = { capability, ok: p.ok !== false, ...(detail ? { detail } : {}) };
         if (agentActive) waitingSince = e.ts;
         retrying = undefined;
+        receiving = undefined;
         break;
       }
       case "run.state": {
@@ -168,7 +177,15 @@ export function activityOf(events: readonly StoredEvent[], now: Date = new Date(
     ...(waitingMs !== undefined && waitingSince ? { waitingSince, waitingMs } : {}),
     ...(lastRetry ? { lastRetry } : {}),
     ...(retrying && waitingMs !== undefined ? { retrying } : {}),
+    ...(receiving && waitingMs !== undefined ? { receiving } : {}),
   };
+}
+
+/** "receiving ~1.2k tok" while the answer streams in; "thinking ~3k tok" while only reasoning does. */
+function receivingText(r: NonNullable<Activity["receiving"]>): string {
+  const tokens = (chars: number) => kilo(Math.round(chars / 4));
+  if (r.outputChars > 0) return `receiving ~${tokens(r.outputChars)} tok`;
+  return `thinking ~${tokens(r.reasoningChars)} tok`;
 }
 
 /** "model x: provider error (500): {…}" → "provider error (500)". */
@@ -247,7 +264,9 @@ export function formatActivity(a: Activity, options: FormatOptions = {}): string
             ? " — slower than usual"
             : "";
       const retry = a.retrying ? `, retry ${a.retrying.attempt} after ${a.retrying.reason}` : "";
-      wait = `, waiting ${clock(a.waitingMs)}${retry || late ? st.warn(`${retry}${late}`) : ""}`;
+      // a streamed answer shows that it is coming: "waiting 4:10" alone read as a hung gateway (pilot)
+      const coming = a.receiving && !a.retrying ? `, ${receivingText(a.receiving)}` : "";
+      wait = `, waiting ${clock(a.waitingMs)}${coming}${retry || (late && !coming) ? st.warn(`${retry}${coming ? "" : late}`) : ""}`;
     }
     // while waiting, name the call in flight: "0 calls, waiting 2:02" read as if nothing was asked (pilot)
     parts.push(

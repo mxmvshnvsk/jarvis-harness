@@ -102,6 +102,23 @@ describe("live activity of a run", () => {
     expect(answered?.retrying).toBeUndefined();
   });
 
+  it("shows a streamed answer coming instead of a bare wait", () => {
+    const events = [
+      ...RUN.slice(0, 3),
+      ev(10, "model.progress", { modelId: "flash", outputChars: 0, reasoningChars: 12_000 }),
+    ];
+    const thinking = activityOf(events, at(200)) as NonNullable<ReturnType<typeof activityOf>>;
+    expect(formatActivity(thinking, { timeoutMs: 120_000 })).toContain("waiting 3:19, thinking ~3.0k tok ·");
+    const receiving = activityOf(
+      [...events, ev(20, "model.progress", { outputChars: 4_800, reasoningChars: 12_000 })],
+      at(200),
+    ) as NonNullable<ReturnType<typeof activityOf>>;
+    expect(formatActivity(receiving)).toContain("receiving ~1.2k tok");
+    // the answer clears it
+    const done = activityOf([...events, ev(30, "model.call", { latencyMs: 29_000 })], at(200));
+    expect(done?.receiving).toBeUndefined();
+  });
+
   it("tells a slow answer from one past the model timeout", () => {
     const slow = activityOf(RUN, at(123 + 200)) as NonNullable<ReturnType<typeof activityOf>>;
     expect(formatActivity(slow)).toContain("waiting 3:20 — slower than usual");

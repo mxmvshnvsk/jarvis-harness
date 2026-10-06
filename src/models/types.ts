@@ -67,6 +67,9 @@ export interface ModelResponse {
   readonly source: "live" | "replay" | "record";
   /** Provider rate-limit headers when present (ADR-0018 §5). */
   readonly rateLimit?: RateLimitInfo;
+  /** The answer came as a stream; `firstTokenMs` is when its first piece arrived. */
+  readonly streamed?: boolean;
+  readonly firstTokenMs?: number;
 }
 
 export interface RateLimitInfo {
@@ -84,11 +87,23 @@ export interface ProviderResult {
   readonly finishReason: FinishReason;
   readonly model: string;
   readonly rateLimit?: RateLimitInfo;
+  readonly streamed?: boolean;
+  readonly firstTokenMs?: number;
+}
+
+/** How far a streamed answer has come: characters of the answer and of the model's reasoning. */
+export interface StreamProgress {
+  readonly outputChars: number;
+  readonly reasoningChars: number;
+  readonly toolCalls: number;
+  readonly firstTokenMs?: number;
 }
 
 export interface ProviderCallOptions {
   readonly signal?: AbortSignal;
   readonly headers: Readonly<Record<string, string>>;
+  /** Called as pieces of a streamed answer arrive. */
+  readonly onProgress?: (progress: StreamProgress) => void;
 }
 
 export interface ProviderAdapter {

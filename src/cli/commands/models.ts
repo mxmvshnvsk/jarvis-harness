@@ -228,6 +228,10 @@ export async function runModelsStats(
           );
         if (s.outputPerSecond)
           ctx.out.line(`${f("speed")}${p(s.outputPerSecond, (n) => `${Math.round(n)} tok/s`)}`);
+        if (s.streamed)
+          ctx.out.line(
+            `${f("streamed")}${s.streamed.calls} of ${s.calls}${s.streamed.firstTokenMs ? `${st.muted(" · first token ")}${p(s.streamed.firstTokenMs, duration)}` : ""}`,
+          );
         ctx.out.line(
           `${f("prompt")}avg ${kTok(s.promptTokens.avg)} ${st.muted("·")} max ${kTok(s.promptTokens.max)} ${st.muted("·")} total ${kTok(s.promptTokens.total)} ${st.muted(`· cached ${Math.round(s.cachedShare * 100)}%`)}`,
         );

@@ -7,6 +7,18 @@ const ev = (kind: string, payload: Record<string, unknown>, ts = "2026-10-06T07:
   ({ seq: ++seq, ts, kind, runId: "run_1", payload }) as StoredEvent;
 
 describe("model stats", () => {
+  it("counts streamed answers and the time to their first token", () => {
+    const call = (extra: Record<string, unknown>) =>
+      ev("model.call", { modelId: "flash", latencyMs: 60_000, promptTokens: 1, outputTokens: 1, ...extra });
+    const [flash] = modelStats([
+      call({ streamed: true, firstTokenMs: 4_000 }),
+      call({ streamed: true, firstTokenMs: 9_000 }),
+      call({}),
+    ]);
+    expect(flash?.streamed).toEqual({ calls: 2, firstTokenMs: { p50: 4_000, p90: 9_000, max: 9_000 } });
+    expect(modelStats([call({})])[0]?.streamed).toBeUndefined();
+  });
+
   it("answers, failures, retries, latency, speed, tokens and why requests failed", () => {
     const call = (latencyMs: number, promptTokens: number, outputTokens: number, extra = {}) =>
       ev("model.call", {

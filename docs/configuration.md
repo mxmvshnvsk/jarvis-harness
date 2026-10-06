@@ -47,6 +47,7 @@ models:                        # ADR-0007, ADR-0017 §2
     tokenizer: deepseek
     timeoutMs: 120000
     maxConcurrency: 2
+    stream: true               # ответ потоком (SSE); по умолчанию включено, см. ниже
   embed:
     provider: openai-compatible
     baseUrl: https://llm.corp.local/v1
@@ -66,6 +67,13 @@ context: {}                    # пороги сжатия контекста, �
 telemetry:                     # ЗАРЕЗЕРВИРОВАНО: политика egress проверяется (doctor), экспортёра пока нет
   export: { enabled: false, url: https://otel.corp.local, network: intranet, payloads: false, maxPayloadBytes: 4096 }
 ```
+
+`models.<id>.stream` — просить ответ потоком (SSE, `stream: true` + `stream_options.include_usage`). Заголовки
+приходят сразу, поэтому долгий ответ не обрывается по таймауту заголовков, а строка прогресса показывает, что
+ответ идёт (`thinking ~3k tok`, `receiving ~1.2k tok`); `jarvis models stats` — сколько ответов пришло потоком и
+время до первого токена. Сервер, который отвечает на поток ошибкой 400/422 про `stream`, спрашивается ещё раз без
+него, и до конца процесса — без него; сервер, который игнорирует `stream` и отвечает обычным JSON, читается как
+есть. Обрыв потока посреди ответа и ошибка внутри потока — временные сбои с повтором. `stream: false` выключает.
 
 Роли, которые используют встроенные агенты: `research` (research, requirements, specification, impact,
 plan, release-notes, onboard-mapper, knowledge-answerer), `implementation` (implementation, test, docs, telemetry), `review` (review,
