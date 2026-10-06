@@ -10,6 +10,7 @@ import {
 } from "../models/structured.ts";
 import type { Message, ToolDefinition } from "../models/types.ts";
 import type { AgentRunner } from "../orchestration/executors.ts";
+import { InterruptedError, interruption } from "../orchestration/interrupt.ts";
 import type { StepContext, StepOutcome } from "../orchestration/types.ts";
 import type { ToolResult } from "../tools/types.ts";
 import { buildBaseMessages } from "./context.ts";
@@ -238,6 +239,8 @@ export class AgentRuntimeRunner implements AgentRunner {
         checkpoint();
         return { status: "failure", reason: "cancel requested" };
       }
+      // Ctrl-C between calls: keep the conversation, park the run (src/orchestration/interrupt.ts)
+      interruption.throwIfRequested();
       if (modelCalls >= limits.maxModelCalls) {
         budgetExhausted = "model";
         break;
@@ -413,8 +416,11 @@ export class AgentRuntimeRunner implements AgentRunner {
           outputs: [`${invalid.artifactId}@${invalid.version}`],
         };
       }
-      // the run parks (quota window, or a model that is down): keep the conversation to go on from
-      if (error instanceof ModelError && (error.kind === "quota_exhausted" || error.kind === "transient"))
+      // the run parks (quota window, a model that is down, Ctrl-C): keep the conversation to go on from
+      if (
+        error instanceof InterruptedError ||
+        (error instanceof ModelError && (error.kind === "quota_exhausted" || error.kind === "transient"))
+      )
         checkpoint();
       throw error;
     }

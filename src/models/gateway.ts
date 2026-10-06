@@ -3,6 +3,7 @@ import { MemoryUsageStore, type UsageStore } from "../budget/usage.ts";
 import { prefixReuse } from "../context/serialize.ts";
 import type { ModelConfig, ResolvedConfig } from "../core/config/schema.ts";
 import { EnvSecretResolver, type SecretRef, type SecretResolver } from "../core/config/secrets.ts";
+import { InterruptedError, interruption } from "../orchestration/interrupt.ts";
 import { modelAllowed } from "../security/policy/egress.ts";
 import { type EventSink, MemoryEventStore } from "../telemetry/events.ts";
 import { errorFields, type Logger, NULL_LOGGER } from "../telemetry/log.ts";
@@ -248,7 +249,12 @@ export class ModelGateway implements ModelCaller {
           });
         };
         try {
-          const result = await adapter.call(request, model, { headers, onProgress });
+          interruption.throwIfRequested();
+          const result = await adapter.call(request, model, {
+            headers,
+            onProgress,
+            signal: interruption.signal,
+          });
           const latency = this.clock().getTime() - started;
           const source = this.cassette?.mode === "record" ? "record" : "live";
           const response = this.finish(request, result, latency, retries, source);
@@ -277,6 +283,8 @@ export class ModelGateway implements ModelCaller {
           });
           return response;
         } catch (error) {
+          // Ctrl-C: not a failure of the model, and nothing to retry
+          if (interruption.requested) throw new InterruptedError();
           const modelError =
             error instanceof ModelError
               ? error

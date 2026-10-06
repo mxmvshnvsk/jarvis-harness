@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Runtime } from "../../src/app/runtime.ts";
 import { ModelError } from "../../src/models/errors.ts";
+import { interruption } from "../../src/orchestration/interrupt.ts";
 import { LeaseHeldError } from "../../src/orchestration/types.ts";
 import { loadWorkflows } from "../../src/workflows/load.ts";
 import { ACTOR, createRun, engineFor, testRuntime, workflowOf, writeArtifact } from "../helpers/engine.ts";
@@ -237,6 +238,42 @@ describe("LocalWorkflowEngine", () => {
     const failed = await engine.execute(run.id, owner);
     expect(failed.run.state).toBe("FAILED");
     expect(failed.run.stateReason).toContain("provider error (500)");
+  });
+
+  it("Ctrl-C parks the run where it is (SUSPENDED, exit 130) and continue goes on from there", async () => {
+    const wf = workflowOf({
+      name: "two",
+      entry: "a",
+      steps: [
+        { id: "a", kind: "agentic", agent: "a", transitions: { onSuccess: "b" } },
+        { id: "b", kind: "agentic", agent: "b", transitions: { onSuccess: "DONE" } },
+      ],
+    });
+    const ran: string[] = [];
+    const engine = engineFor(rt, [wf], {
+      a: async () => {
+        ran.push("a");
+        interruption.request(); // the person pressed Ctrl-C while step a was running
+        return { status: "success" };
+      },
+      b: async () => {
+        ran.push("b");
+        return { status: "success" };
+      },
+    });
+    const run = createRun(rt, "two");
+    try {
+      const stopped = await engine.execute(run.id, owner);
+      expect(stopped.run.state).toBe("SUSPENDED");
+      expect(stopped.exitCode).toBe(130);
+      expect(stopped.run.currentStep).toBe("b");
+      expect(ran).toEqual(["a"]);
+    } finally {
+      interruption.reset();
+    }
+    const resumed = await engine.execute(run.id, owner);
+    expect(resumed.run.state).toBe("COMPLETED");
+    expect(ran).toEqual(["a", "b"]);
   });
 
   it("fails the run on step failure and allows a retry via resume", async () => {

@@ -4,6 +4,7 @@ import { EnvSecretResolver } from "../../src/core/config/secrets.ts";
 import { defaultAdapters, ModelError, ModelGateway } from "../../src/models/index.ts";
 import { resetStreamSupport } from "../../src/models/providers/openaiCompatible.ts";
 import { sseData } from "../../src/models/sse.ts";
+import { InterruptedError, interruption } from "../../src/orchestration/interrupt.ts";
 import { MemoryEventStore } from "../../src/telemetry/events.ts";
 import { completion, type FakeOpenAi, startFakeOpenAi, streamedChunks } from "../helpers/fakeOpenAi.ts";
 import { testConfig } from "../helpers/modelConfig.ts";
@@ -166,5 +167,19 @@ describe("streamed answers", () => {
       .catch((e: unknown) => e);
     expect(error).toBeInstanceOf(ModelError);
     expect((error as ModelError).kind).toBe("invalid");
+  });
+
+  it("Ctrl-C cancels the call in flight: no retry, an InterruptedError", async () => {
+    server.queue({ sse: { chunks: streamedChunks(["a", "b", "c", "d"]), delayMs: 100 } });
+    setTimeout(() => interruption.request(), 50);
+    try {
+      const error = await gateway()
+        .call(ask)
+        .catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(InterruptedError);
+      expect(events.events.filter((e) => e.kind === "model.retry")).toHaveLength(0);
+    } finally {
+      interruption.reset();
+    }
   });
 });

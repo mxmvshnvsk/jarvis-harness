@@ -14,6 +14,7 @@ import type { ApprovalDecision } from "../../core/domain/artifact.ts";
 import type { Run, WorkspaceRef } from "../../core/domain/run.ts";
 import { removeMarkers } from "../../interaction/review/collector.ts";
 import { daemonTick } from "../../orchestration/daemon.ts";
+import { interruption } from "../../orchestration/interrupt.ts";
 import { leaseOwner } from "../../orchestration/lease.ts";
 import type { LocalWorkflowEngine } from "../../orchestration/runtime.ts";
 import { LeaseHeldError } from "../../orchestration/types.ts";
@@ -68,6 +69,7 @@ async function executeAndReport(
   const plan = planOf(engine, run);
   // a person at a terminal decides where the run stops and it goes on; otherwise exit 10 + commands
   const prompt = shared ?? promptFor(ctx, runtime);
+  interruption.reset();
   try {
     let header = showHeader;
     let stealLease = steal;
@@ -178,7 +180,7 @@ export async function runContinue(ctx: CliContext, ref: string | undefined): Pro
       // waiting for a person, for a quota window, or interrupted (RUNNING with no process: Ctrl-C, a
       // closed terminal — pilot: `jarvis c` said "nothing waits" right after a Ctrl-C)
       const waiting = runtime.runs
-        .list({ state: ["WAITING_HUMAN", "WAITING_BUDGET", "RUNNING"], limit: 50 })
+        .list({ state: ["WAITING_HUMAN", "WAITING_BUDGET", "SUSPENDED", "RUNNING"], limit: 50 })
         .filter((r) => r.workspace.repoRoot === root || r.workspace.path === root)
         .filter((r) => r.state !== "RUNNING" || !r.lease || Date.parse(r.lease.until) < now);
       // and an approved spec of the last days that has not gone on to the implementation yet
@@ -257,7 +259,7 @@ export async function runContinue(ctx: CliContext, ref: string | undefined): Pro
 /** Why a run waits, in a word or two. */
 function waitsFor(r: Run): string {
   if (r.state === "COMPLETED") return "ready to implement";
-  if (r.state === "RUNNING") return "interrupted";
+  if (r.state === "RUNNING" || r.state === "SUSPENDED") return "interrupted";
   if (r.state === "WAITING_BUDGET") return r.waitingFor?.kind === "model" ? "the model" : "quota";
   return r.waitingFor?.kind ?? "a decision";
 }

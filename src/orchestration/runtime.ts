@@ -18,6 +18,7 @@ import { LeaseLostError } from "../storage/runStore.ts";
 import { errorFields } from "../telemetry/log.ts";
 import { UnresolvedEffectError } from "./effects.ts";
 import { AgenticExecutor, ApprovalExecutor, CompositeExecutor, DeterministicExecutor } from "./executors.ts";
+import { InterruptedError, interruption } from "./interrupt.ts";
 import { HeldLease, type HeldLeaseOptions } from "./lease.ts";
 import {
   type ExecutionResult,
@@ -65,9 +66,16 @@ export function exitCodeFor(state: RunState, reason?: string): number {
       return EXIT.waitingBudget;
     case "CANCELLED":
       return EXIT.ok;
+    case "SUSPENDED":
+      return EXIT.interrupted;
     default:
       return EXIT.error;
   }
+}
+
+/** A run stopped with Ctrl-C keeps its place: SUSPENDED, `jarvis continue` goes on from it. */
+function interrupted(): SuspendRun {
+  return new SuspendRun("SUSPENDED", "interrupted with Ctrl-C; `jarvis continue` goes on from here");
 }
 
 export class LocalWorkflowEngine {
@@ -155,6 +163,11 @@ export class LocalWorkflowEngine {
         }
         const step = findStep(workflow, run.currentStep as string);
         const iteration = run.currentIteration;
+        if (interruption.requested) {
+          // Ctrl-C between steps: park before the next one
+          run = await this.park(run, step, iteration, interrupted(), workspace);
+          break;
+        }
         let outcome: StepOutcome;
         try {
           outcome = await this.executeStep(run, workflow, step, iteration, lease, workspace);
@@ -518,6 +531,7 @@ export class LocalWorkflowEngine {
   /** Maps runtime errors to a parking decision (ADR-0001 §19, ADR-0002 §2, ADR-0018 §4). */
   private toSuspension(error: unknown, run: Run): SuspendRun | undefined {
     if (error instanceof SuspendRun) return error;
+    if (error instanceof InterruptedError) return interrupted();
     if (error instanceof ModelError && error.kind === "transient" && error.modelId) {
       return this.waitForModel(error, error.modelId, run);
     }

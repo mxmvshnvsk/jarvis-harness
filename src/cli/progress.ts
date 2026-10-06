@@ -3,6 +3,7 @@ import { duration, Journey, type LoopReport, type StepReport } from "../app/jour
 import type { Runtime } from "../app/runtime.ts";
 import type { ArtifactVersion } from "../core/domain/artifact.ts";
 import type { Run } from "../core/domain/run.ts";
+import { interruption } from "../orchestration/interrupt.ts";
 import type { StoredEvent } from "../telemetry/events.ts";
 import type { CliContext } from "./context.ts";
 import { terminalSignals } from "./notify.ts";
@@ -162,6 +163,8 @@ export function formatParked(run: Run, st: Style, plan: readonly string[] = []):
   }
   if (run.state === "FAILED")
     return `${st.bad("✗")} ${step}${st.bad("run failed")}${run.stateReason ? `: ${run.stateReason}` : ""}`;
+  if (run.state === "SUSPENDED")
+    return `${st.warn("⏸")} ${step}${st.warn("stopped")}${run.stateReason ? st.muted(` — ${run.stateReason}`) : ""}`;
   return undefined;
 }
 
@@ -239,7 +242,10 @@ export function followRun(ctx: CliContext, runtime: Runtime, options: FollowOpti
       if (e.kind === "run.state") {
         // judged by the event, not by the run now: polling may see a later state
         const state = (e.payload as { state?: string } | undefined)?.state ?? "";
-        const run = state.startsWith("WAITING") || state === "FAILED" ? runtime.runs.get(runId) : undefined;
+        const run =
+          state.startsWith("WAITING") || state === "FAILED" || state === "SUSPENDED"
+            ? runtime.runs.get(runId)
+            : undefined;
         const parked = run ? formatParked({ ...run, state: state as Run["state"] }, st, plan) : undefined;
         if (parked) {
           signals.mark();
@@ -271,8 +277,19 @@ export function followRun(ctx: CliContext, runtime: Runtime, options: FollowOpti
   };
   header();
 
-  // Ctrl-C: hand the run back at once (no 90 s wait for the lease to expire) and say how to go on.
-  // Pilot: an interrupted run stayed RUNNING in `status` and looked hung.
+  // Ctrl-C, first: stop where the run keeps its place — the model call in flight is cancelled, the
+  // agent's conversation kept, the run parks (src/orchestration/interrupt.ts); the second quits at once.
+  const onFirstInterrupt = () => {
+    if (!runId) return onInterrupt();
+    interruption.request();
+    ctx.out.progress(undefined);
+    ctx.out.note(
+      `${st.warn("⏸")} stopping: the current model call is cancelled and the run keeps its place ${st.muted("— Ctrl-C again to quit at once")}`,
+    );
+    process.once("SIGINT", onInterrupt);
+  };
+  // Ctrl-C, second: hand the run back at once (no 90 s wait for the lease to expire) and say how to
+  // go on. Pilot: an interrupted run stayed RUNNING in `status` and looked hung.
   const onInterrupt = () => {
     poll();
     ctx.out.progress(undefined);
@@ -292,8 +309,11 @@ export function followRun(ctx: CliContext, runtime: Runtime, options: FollowOpti
     } else ctx.out.note("interrupted");
     process.exit(130);
   };
-  if (options.signals !== false) process.once("SIGINT", onInterrupt);
-  const detach = () => process.removeListener("SIGINT", onInterrupt);
+  if (options.signals !== false) process.once("SIGINT", onFirstInterrupt);
+  const detach = () => {
+    process.removeListener("SIGINT", onFirstInterrupt);
+    process.removeListener("SIGINT", onInterrupt);
+  };
 
   if (!ctx.out.live) {
     // no live line, but the course of the run and the notices still matter (CI logs, pipes); a quiet

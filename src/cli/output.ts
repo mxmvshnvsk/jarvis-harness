@@ -9,6 +9,8 @@ export const EXIT = {
   waitingBudget: 11,
   policyDenied: 12,
   leaseLost: 13,
+  /** Stopped with Ctrl-C (128 + SIGINT), the run kept its place. */
+  interrupted: 130,
 } as const;
 
 export interface Output {
