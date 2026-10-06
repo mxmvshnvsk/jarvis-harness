@@ -218,7 +218,7 @@ steps:
     args:
       type: spec
       name: spec.json
-      content: '{"title":"Fix the form","summary":"Hide the fields.","requirements":[{"id":"R1","text":"Hide"}],"openQuestions":["Ever show them?","Which way?"]}'
+      content: '{"title":"Fix the form","summary":"Hide the fields.","requirements":[{"id":"R1","text":"Hide"}],"openQuestions":["Ever show them?","Which way?"],"risks":["The checkout may depend on the block."]}'
     outputs: [spec]
     transitions: { onSuccess: approve }
   - id: approve
@@ -244,8 +244,11 @@ steps:
     ]);
     expect(r.code).toBe(0);
     expect(r.out).toContain("Fix the form");
-    expect(r.out).toContain("1 requirement · 2 open questions");
-    expect(r.out).toContain("enter read it whole    a accept    c send back with changes    q decide later");
+    expect(r.out).toContain("1 requirement · 1 risk · 2 open questions");
+    expect(r.out).toContain("risk The checkout may depend on the block.");
+    expect(r.out).toContain(
+      "enter read it whole    a accept    c send back with changes    e …in $EDITOR    q decide later    ? help",
+    );
     expect(r.out).toContain("## Requirements");
     expect(r.out).toContain("1/2 Ever show them?");
     expect(r.out).toContain("↻ sent back spec/spec.json@1 with your changes");
@@ -262,6 +265,32 @@ steps:
     const sentBack = rt.artifacts.approvalsFor(spec?.artifactId as string, 1)[0];
     rt.close();
     expect(sentBack?.decision).toBe("request_changes");
+    expect(sentBack?.comment).toBe(
+      "Answers to the open questions:\n1) Ever show them?\n   → never\n\nkeep it small",
+    );
+  });
+
+  it("sends back with a comment written in $EDITOR from a template with the open questions", async () => {
+    sb.write("project/.jarvis/workflows/reviewed.yaml", REVIEWED);
+    // an "editor" that answers the first question and adds a note, as a person would
+    sb.write(
+      "editor.sh",
+      `#!/bin/sh\ngrep -q '# 1) Ever show them?' "$1" || exit 1\nprintf '%s\\n' '# 1) Ever show them?' 'never' '# What else to change:' 'keep it small' > "$1"\n`,
+    );
+    const r = await jarvis(
+      ["work", "ABC-9", "--workflow", "reviewed"],
+      { ...ON, EDITOR: `sh ${sb.root}/editor.sh` },
+      ["?", "e", "a"],
+    );
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("the same, written in your editor from a template with the questions");
+    expect(r.out).toContain("↻ sent back spec/spec.json@1 with your changes");
+    const loaded = await loadConfig({ cwd: sb.project, homeDir: sb.home, env: {} });
+    const rt = createRuntime(loaded, { env: {} });
+    const runId = rt.runs.list({ includeTerminal: true })[0]?.id as string;
+    const spec = rt.artifacts.listLatest(runId, "spec")[0];
+    const sentBack = rt.artifacts.approvalsFor(spec?.artifactId as string, 1)[0];
+    rt.close();
     expect(sentBack?.comment).toBe(
       "Answers to the open questions:\n1) Ever show them?\n   → never\n\nkeep it small",
     );
