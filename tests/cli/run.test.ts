@@ -230,6 +230,25 @@ steps:
     expect(done.err).toContain("✓ [2/2] approve");
     expect(`${done.out}${done.err}`.match(/▶ gated/g)).toHaveLength(1);
 
+    // interrupted (RUNNING, no process): continue resumes it (pilot: Ctrl-C, then "nothing waits")
+    const loaded = await loadConfig({ cwd: sb.project, homeDir: sb.home, env: {} });
+    const rt = createRuntime(loaded, { env: {} });
+    const smoke = rt.runs.create({
+      task: "ABC-8",
+      workflow: "smoke",
+      owner: { kind: "user", id: "me@corp", verified: false },
+      workspace: { mode: "cwd", repoRoot: sb.project, path: sb.project, baseRef: "HEAD" },
+      dataClass: "internal",
+    });
+    // as the engine leaves it: entered the first step, then the process died
+    rt.runs.update(smoke.id, { currentStep: "hello", currentIteration: 1 });
+    rt.runs.transition(smoke.id, "RUNNING");
+    rt.runs.acquireLease(smoke.id, "cli:host:4242", -1000);
+    rt.close();
+    const resumed = await jarvis(["c"], ON, []);
+    expect(resumed.code).toBe(0);
+    expect(resumed.out).toContain("COMPLETED");
+
     const none = await jarvis(["continue"], ON, []);
     expect(none.code).toBe(0);
     expect(none.out).toContain("nothing waits for you here");

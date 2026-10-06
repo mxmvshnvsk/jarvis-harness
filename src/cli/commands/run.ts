@@ -138,9 +138,13 @@ export async function runContinue(ctx: CliContext, ref: string | undefined): Pro
     if (ref) run = requireRun(ctx, runtime, ref);
     else {
       const root = loaded.project?.root ?? ctx.cwd;
+      const now = Date.now();
+      // waiting for a person, for a quota window, or interrupted (RUNNING with no process: Ctrl-C, a
+      // closed terminal — pilot: `jarvis c` said "nothing waits" right after a Ctrl-C)
       const waiting = runtime.runs
-        .list({ state: ["WAITING_HUMAN"], limit: 50 })
-        .filter((r) => r.workspace.repoRoot === root || r.workspace.path === root);
+        .list({ state: ["WAITING_HUMAN", "WAITING_BUDGET", "RUNNING"], limit: 50 })
+        .filter((r) => r.workspace.repoRoot === root || r.workspace.path === root)
+        .filter((r) => r.state !== "RUNNING" || !r.lease || Date.parse(r.lease.until) < now);
       if (waiting.length === 0) {
         ctx.out.line(`nothing waits for you here ${st.muted("(`jarvis status --all` lists every run)")}`);
         return;
@@ -148,7 +152,7 @@ export async function runContinue(ctx: CliContext, ref: string | undefined): Pro
       if (waiting.length === 1 || !prompt) {
         if (waiting.length > 1) {
           ctx.out.error(
-            `${waiting.length} runs wait for you: ${waiting.map((r) => shortRunId(r.id)).join(", ")} — \`jarvis continue <run>\``,
+            `${waiting.length} runs wait for you: ${waiting.map((r) => `${shortRunId(r.id)} (${waitsFor(r)})`).join(", ")} — \`jarvis continue <run>\``,
           );
           throw new CliExit(EXIT.error);
         }
@@ -157,7 +161,7 @@ export async function runContinue(ctx: CliContext, ref: string | undefined): Pro
         ctx.out.line(st.heading(`${waiting.length} runs wait for you`));
         waiting.forEach((r, i) => {
           ctx.out.line(
-            `  ${st.cmd(String(i + 1))}  ${st.name(shortRunId(r.id))}  ${r.workflow} ${st.muted("·")} ${oneLine(r.task, 60)} ${st.muted(`· ${r.currentStep ?? "-"}`)}`,
+            `  ${st.cmd(String(i + 1))}  ${st.name(shortRunId(r.id))}  ${r.workflow} ${st.muted("·")} ${oneLine(r.task, 60)} ${st.muted(`· ${r.currentStep ?? "-"} ·`)} ${st.warn(waitsFor(r))}`,
           );
         });
         const pick = Number(await prompt.ask(`${st.cmd(">")} `));
@@ -184,6 +188,13 @@ export async function runContinue(ctx: CliContext, ref: string | undefined): Pro
     prompt?.close();
     await runtime.close();
   }
+}
+
+/** Why a run waits, in a word or two. */
+function waitsFor(r: Run): string {
+  if (r.state === "RUNNING") return "interrupted";
+  if (r.state === "WAITING_BUDGET") return "quota";
+  return r.waitingFor?.kind ?? "a decision";
 }
 
 /** `jarvis work <task>` — create a run and execute it in the foreground (ADR-0001 §15). */
