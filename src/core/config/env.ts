@@ -38,6 +38,10 @@ export const RESERVED_ENV = new Set([
   "JARVIS_PAGER",
   "JARVIS_ACCESSIBLE",
   "JARVIS_ASCII",
+  // set by Jarvis for what it starts: project commands and the shell in a run's checkout (src/cli/checkout.ts).
+  // Pilot: `jarvis c` typed in that shell failed with `Unrecognized key: "run"`.
+  "JARVIS_RUN",
+  "JARVIS_SHELL",
 ]);
 
 function normalizeKey(key: string): string {

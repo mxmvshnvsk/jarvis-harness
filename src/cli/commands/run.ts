@@ -21,7 +21,14 @@ import { LeaseHeldError } from "../../orchestration/types.ts";
 import { gitIdentityEnv, WorktreeError, WorktreeWorkspace } from "../../orchestration/worktree.ts";
 import { LeaseLostError, newRunId, shortRunId } from "../../storage/runStore.ts";
 import { git } from "../../tools/local/exec.ts";
-import { changesIn, checkoutLink, formatChanges, type ShellIn, systemShell } from "../checkout.ts";
+import {
+  changesIn,
+  checkoutLink,
+  formatChanges,
+  refuseInsideRunShell,
+  type ShellIn,
+  systemShell,
+} from "../checkout.ts";
 import type { CliContext } from "../context.ts";
 import { humanGate } from "../gate.ts";
 import { CliExit, EXIT } from "../output.ts";
@@ -167,6 +174,7 @@ function promptFor(ctx: CliContext, runtime: Runtime): Prompt | undefined {
  * given one. At a terminal it asks right there and goes on; a parked, failed or crashed run resumes.
  */
 export async function runContinue(ctx: CliContext, ref: string | undefined): Promise<void> {
+  refuseInsideRunShell(ctx);
   const loaded = await loadForCli(ctx);
   const runtime = createRuntime(loaded, { env: ctx.env });
   const prompt = promptFor(ctx, runtime);

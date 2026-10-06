@@ -399,6 +399,14 @@ steps:
 
     const path = await jarvis(["shell", "--print"], {});
     expect(path.out.trim()).toBe(sb.project);
+
+    // `jarvis c` typed in that shell: back to the card, not a second run (JARVIS_RUN is no config key)
+    const nested = await jarvis(["c"], { ...ON, JARVIS_SHELL: "4c3b2a1d", JARVIS_RUN: "4c3b2a1d" });
+    expect(nested.code).toBe(1);
+    expect(nested.err).toContain(
+      "this is the shell jarvis opened for run 4c3b2a1d: `exit` (Ctrl-D) goes back",
+    );
+    expect((await jarvis(["config", "show"], { JARVIS_RUN: "4c3b2a1d" })).code).toBe(0);
   });
 
   it("accessible mode: a numbered menu, answered with numbers", async () => {

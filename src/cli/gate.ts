@@ -331,7 +331,11 @@ async function loopGate(
       continue;
     }
     if (input === "s") {
-      ctx.out.line(st.muted(`  a shell in ${homePath(dir, ctx.homeDir)} — exit (Ctrl-D) to come back`));
+      ctx.out.line(
+        st.muted(
+          `  a shell in ${homePath(dir, ctx.homeDir)} — fix, then \`exit\` (Ctrl-D) back to this card and r`,
+        ),
+      );
       if (!shell(dir, run)) {
         ctx.out.line(st.warn(`  could not start a shell; the checkout is ${dir}`));
         continue;

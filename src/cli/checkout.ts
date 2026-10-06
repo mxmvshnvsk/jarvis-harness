@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import type { Run } from "../core/domain/run.ts";
 import { shortRunId } from "../storage/runStore.ts";
 import type { CliContext } from "./context.ts";
+import { CliExit, EXIT } from "./output.ts";
 import type { Style } from "./style.ts";
 
 /**
@@ -25,7 +26,10 @@ export function checkoutLink(st: Style, path: string, homeDir: string): string {
 /** Opens a shell in `dir` and waits until the person leaves it; false when it could not start. */
 export type ShellIn = (dir: string, run: Run) => boolean;
 
-/** `$SHELL` (or `sh`), interactive, with `JARVIS_RUN` set to the run's short id. */
+/**
+ * `$SHELL` (or `sh`), interactive, with `JARVIS_RUN` and `JARVIS_SHELL` set to the run's short id, so
+ * a `jarvis continue` typed in it says to go back instead of starting the run a second time.
+ */
 export function systemShell(ctx: CliContext): ShellIn {
   return (dir, run) => {
     const env = ctx.env ?? {};
@@ -34,7 +38,7 @@ export function systemShell(ctx: CliContext): ShellIn {
       cwd: dir,
       stdio: "inherit",
       shell: true,
-      env: { ...process.env, ...env, JARVIS_RUN: shortRunId(run.id) },
+      env: { ...process.env, ...env, JARVIS_RUN: shortRunId(run.id), JARVIS_SHELL: shortRunId(run.id) },
     });
     return !r.error;
   };
@@ -68,4 +72,17 @@ export function formatChanges(changes: readonly Change[], st: Style, shown = 5):
   };
   const more = changes.length > shown ? `  ${st.muted(`+${changes.length - shown}`)}` : "";
   return `${changes.slice(0, shown).map(label).join("  ")}${more}`;
+}
+
+/**
+ * In the shell a run's card opened (`s`), `jarvis continue` would run the step under the card that is
+ * still waiting: say how to get back instead. Pilot: typed there out of habit.
+ */
+export function refuseInsideRunShell(ctx: CliContext): void {
+  const id = ctx.env?.JARVIS_SHELL;
+  if (!id) return;
+  ctx.out.error(
+    `this is the shell jarvis opened for run ${id}: \`exit\` (Ctrl-D) goes back to its card, then r runs the step again`,
+  );
+  throw new CliExit(EXIT.error);
 }
