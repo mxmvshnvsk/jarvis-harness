@@ -3,8 +3,9 @@ import { describe, expect, it } from "vitest";
 import { activityOf, formatActivity, noticeOf } from "../../src/app/activity.ts";
 import type { Runtime } from "../../src/app/runtime.ts";
 import type { CliContext } from "../../src/cli/context.ts";
-import { createOutput } from "../../src/cli/output.ts";
+import { createOutput, progressModeOf } from "../../src/cli/output.ts";
 import { followRun } from "../../src/cli/progress.ts";
+import { stripAnsi } from "../../src/cli/style.ts";
 import type { StoredEvent } from "../../src/telemetry/events.ts";
 
 const T0 = Date.parse("2026-10-05T09:00:00.000Z");
@@ -240,5 +241,69 @@ describe("notices that stay in the terminal", () => {
     progress.stop();
     expect(err.text()).toContain("provider error (500) after 5:00 — retry 1/2");
     expect(err.text().match(/retry 1\/2/g)).toHaveLength(1);
+  });
+
+  it("--progress plain: lines only, with a heartbeat after a quiet while", async () => {
+    const journal: StoredEvent[] = [];
+    const runtime = {
+      events: {
+        lastSeq: () => 0,
+        list: ({ afterSeq }: { afterSeq: number }) => journal.filter((e) => e.seq > afterSeq),
+      },
+      runs: { get: () => undefined, releaseLease: () => false },
+      loaded: { config: { models: {}, budget: { perStep: {} } } },
+    } as unknown as Runtime;
+    const err = stream(true);
+    const out = createOutput(false, { out: stream(false).s, err: err.s }, { progressSetting: "plain" });
+    expect(out.progressMode).toBe("plain");
+    const progress = followRun({ out } as unknown as CliContext, runtime, {
+      intervalMs: 5,
+      heartbeatMs: 20,
+      signals: false,
+    });
+    // an agent that waits for the model (agent.start is the last thing that happened)
+    journal.push(...(RUN.slice(0, 3) as StoredEvent[]));
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    progress.stop();
+    expect(stripAnsi(err.text())).toMatch(/… \S+ · map#1 onboard-mapper · model call 1, waiting/);
+    expect(err.text()).not.toContain("\u001b[2K");
+  });
+
+  it("--progress json: the run's events as JSON lines, nothing for people", async () => {
+    const journal: StoredEvent[] = [];
+    const runtime = {
+      events: {
+        lastSeq: () => 0,
+        list: ({ afterSeq }: { afterSeq: number }) => journal.filter((e) => e.seq > afterSeq),
+      },
+      runs: { get: () => undefined, releaseLease: () => false },
+      loaded: { config: { models: {}, budget: { perStep: {} } } },
+    } as unknown as Runtime;
+    const err = stream(true);
+    const out = createOutput(false, { out: stream(false).s, err: err.s }, { progressSetting: "json" });
+    const progress = followRun({ out } as unknown as CliContext, runtime, {
+      intervalMs: 5,
+      signals: false,
+      plan: ["map"],
+    });
+    journal.push(...(RUN.slice(0, 3) as StoredEvent[]), RETRY);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    progress.stop();
+    const lines = err
+      .text()
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l) as { kind: string; runId: string });
+    expect(lines.map((l) => l.kind)).toEqual(["run.created", "step.start", "agent.start", "model.retry"]);
+    expect(lines[0]?.runId).toBe("run_1");
+  });
+
+  it("resolves the mode from --progress, JARVIS_PROGRESS and the terminal", () => {
+    expect(progressModeOf(undefined, false, true)).toBe("live");
+    expect(progressModeOf(undefined, false, false)).toBe("plain");
+    expect(progressModeOf("auto", true, true)).toBe("plain");
+    expect(progressModeOf("tty", false, false)).toBe("live");
+    expect(progressModeOf("off", false, true)).toBe("plain");
+    expect(progressModeOf("JSON", false, true)).toBe("json");
   });
 });

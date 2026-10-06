@@ -75,13 +75,24 @@ export function buildProgram(options: RunOptions = {}): Command {
     .option("--cwd <dir>", "run as if started in this directory")
     .option("--color", "colour the output even when it is not a terminal")
     .option("--no-color", "plain output (also NO_COLOR=1)")
+    .option(
+      "--progress <mode>",
+      "how a run's course is shown on stderr: auto, tty (redrawn), plain (lines and a heartbeat), json (events)",
+    )
     .showHelpAfterError();
 
   const ctxFor = (): CliContext => {
-    const opts = program.opts<{ json: boolean; profile?: string; cwd?: string; color?: boolean }>();
+    const opts = program.opts<{
+      json: boolean;
+      profile?: string;
+      cwd?: string;
+      color?: boolean;
+      progress?: string;
+    }>();
     const env = options.context?.env ?? process.env;
+    const setting = opts.progress ?? env.JARVIS_PROGRESS;
     const out = createOutput(opts.json, streams, {
-      progress: env.JARVIS_PROGRESS !== "off",
+      ...(setting ? { progressSetting: setting } : {}),
       env,
       ...(opts.color !== undefined ? { color: opts.color } : {}),
     });

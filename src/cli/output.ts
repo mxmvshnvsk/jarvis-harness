@@ -32,6 +32,14 @@ export interface Output {
   /** Whether `progress` draws anything (a terminal on stderr, not `--json`, not JARVIS_PROGRESS=off). */
   readonly live: boolean;
   /**
+   * How the course of a run is shown on stderr (`--progress`, JARVIS_PROGRESS): `live` — lines that
+   * stay and a redrawn region (a terminal); `plain` — only lines, with a heartbeat (pipes, CI, nohup);
+   * `json` — the run's events as JSON lines, nothing for people.
+   */
+  readonly progressMode: ProgressMode;
+  /** One event as a JSON line on stderr (`progressMode` json). */
+  event(value: unknown): void;
+  /**
    * Redraws the live region on stderr — one line, or a few (`string[]`); `undefined` clears it. Other
    * output clears it first. Each line is cut to the terminal's width (read on every draw, so a
    * resize is followed); the redraw is one synchronized update, so it does not flicker.
@@ -41,10 +49,27 @@ export interface Output {
   terminal(sequence: string): void;
 }
 
+export type ProgressMode = "live" | "plain" | "json";
+
+/** `--progress auto|tty|plain|json` (or JARVIS_PROGRESS; `off` is the old spelling of `plain`). */
+export function progressModeOf(setting: string | undefined, json: boolean, tty: boolean): ProgressMode {
+  const s = (setting ?? "auto").toLowerCase();
+  if (s === "json") return "json";
+  if (s === "plain" || s === "off") return "plain";
+  if (s === "tty") return "live";
+  return !json && tty ? "live" : "plain";
+}
+
 export function createOutput(
   json: boolean,
   streams: { out: NodeJS.WritableStream; err: NodeJS.WritableStream },
-  options: { progress?: boolean; color?: boolean; env?: NodeJS.ProcessEnv } = {},
+  options: {
+    progress?: boolean;
+    /** `auto` (default), `tty`, `plain`, `json`. */
+    progressSetting?: string;
+    color?: boolean;
+    env?: NodeJS.ProcessEnv;
+  } = {},
 ): Output {
   const err = streams.err as NodeJS.WritableStream & { isTTY?: boolean; columns?: number };
   const env = options.env ?? {};
@@ -64,7 +89,9 @@ export function createOutput(
   const errStyle = colors(err);
   const glyph = (text: string) =>
     text.replace(/^(⚠|⏸|✗)/, (g) => (g === "✗" ? errStyle.bad(g) : errStyle.warn(g)));
-  const live = !json && options.progress !== false && err.isTTY === true;
+  const progressMode =
+    options.progress === false ? "plain" : progressModeOf(options.progressSetting, json, err.isTTY === true);
+  const live = progressMode === "live";
   let shown = 0;
   /** Erases the live region: the current line, then each line above it that belongs to it. */
   const erase = () => `\r\u001b[2K${"\u001b[1A\u001b[2K".repeat(Math.max(0, shown - 1))}`;
@@ -76,6 +103,10 @@ export function createOutput(
   return {
     json,
     live,
+    progressMode,
+    event(value) {
+      if (progressMode === "json") streams.err.write(`${JSON.stringify(value)}\n`);
+    },
     style,
     errStyle,
     line(text = "") {

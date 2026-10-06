@@ -36,6 +36,8 @@ export interface FollowOptions {
   readonly header?: boolean;
   readonly intervalMs?: number;
   readonly signals?: boolean;
+  /** `plain` mode: a heartbeat line after this long without output (30 s). */
+  readonly heartbeatMs?: number;
 }
 
 const FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -173,12 +175,15 @@ export function followRun(ctx: CliContext, runtime: Runtime, options: FollowOpti
   const events: StoredEvent[] = [];
   const signals = terminalSignals(ctx);
   let percent = 0;
+  const json = ctx.out.progressMode === "json";
+  /** When a line last went out: `plain` mode says the run is alive after a quiet half minute. */
+  let printed = Date.now();
   const short = () => (runId ? shortId(runId) : "");
   let headed = options.header === false;
   let frame = 0;
 
   const header = () => {
-    if (headed || !runId) return;
+    if (headed || !runId || json) return;
     const run = runtime.runs.get(runId);
     if (!run) return;
     headed = true;
@@ -199,6 +204,20 @@ export function followRun(ctx: CliContext, runtime: Runtime, options: FollowOpti
       if (!runId || e.runId !== runId) continue;
       header();
       events.push(e);
+      if (json) {
+        // the run's events as they are, one JSON line each: for tools, dashboards, CI annotations
+        ctx.out.event({
+          seq: e.seq,
+          ts: e.ts,
+          kind: e.kind,
+          runId: e.runId,
+          ...(e.stepId ? { stepId: e.stepId } : {}),
+          ...(e.iteration !== undefined ? { iteration: e.iteration } : {}),
+          payload: e.payload ?? {},
+        });
+        continue;
+      }
+      printed = Date.now();
       if (e.kind === "step.start") {
         const stepId = (e.payload as { stepId?: string } | undefined)?.stepId ?? e.stepId ?? "";
         const at = plan.indexOf(stepId);
@@ -277,8 +296,17 @@ export function followRun(ctx: CliContext, runtime: Runtime, options: FollowOpti
   const detach = () => process.removeListener("SIGINT", onInterrupt);
 
   if (!ctx.out.live) {
-    // no live line, but the course of the run and the notices still matter (CI logs, pipes)
-    const timer = setInterval(poll, options.intervalMs ?? 1000);
+    // no live line, but the course of the run and the notices still matter (CI logs, pipes); a quiet
+    // half minute gets a heartbeat line, so a log shows a slow model call and not a hung process
+    const heartbeatMs = options.heartbeatMs ?? 30_000;
+    const timer = setInterval(() => {
+      poll();
+      if (json || Date.now() - printed < heartbeatMs) return;
+      const activity = activityOf(events);
+      if (!activity || activity.finished || activity.waitingMs === undefined) return;
+      printed = Date.now();
+      ctx.out.note(`${st.muted("…")} ${formatActivity(activity, { paint: st })}`);
+    }, options.intervalMs ?? 1000);
     timer.unref?.();
     return {
       stop: () => {
