@@ -7,6 +7,7 @@ import type { StoredEvent } from "../telemetry/events.ts";
 import type { CliContext } from "./context.ts";
 import { terminalSignals } from "./notify.ts";
 import type { Style } from "./style.ts";
+import { artifactLink } from "./view.ts";
 
 /**
  * The course of a foreground run (`work`, `spec`, `research`, `resume`, `onboard --module`, `ask`)
@@ -60,8 +61,16 @@ export function formatRunHeader(
 }
 
 /** `→ spec.md, questions.json` — what the step produced, by name. */
-function producedOf(artifacts: readonly ArtifactVersion[]): string {
-  return artifacts.map((a) => `${a.name}${a.version > 1 ? `@${a.version}` : ""}`).join(", ");
+function producedOf(
+  artifacts: readonly ArtifactVersion[],
+  link?: (a: ArtifactVersion, label: string) => string,
+): string {
+  return artifacts
+    .map((a) => {
+      const label = `${a.name}${a.version > 1 ? `@${a.version}` : ""}`;
+      return link ? link(a, label) : label;
+    })
+    .join(", ");
 }
 
 export function formatStepReport(
@@ -69,6 +78,8 @@ export function formatStepReport(
   artifacts: readonly ArtifactVersion[],
   st: Style,
   width = 0,
+  /** Makes an artifact's name a link to its file (src/cli/view.ts). */
+  link?: (a: ArtifactVersion, label: string) => string,
 ): string[] {
   if (r.status === "skipped") {
     const pos = r.index ? st.muted(`[${r.index}/${r.total}] `) : "";
@@ -96,7 +107,7 @@ export function formatStepReport(
     ? ` ${st.warn(`· ${r.budgetExhausted === "model" ? "model call" : "tool"} limit reached, result may be incomplete`)}`
     : "";
   const outcome = r.outcome && r.outcome !== "success" ? ` ${st.muted("·")} ${st.warn(r.outcome)}` : "";
-  const produced = artifacts.length > 0 ? `  ${st.muted("→")} ${producedOf(artifacts)}` : "";
+  const produced = artifacts.length > 0 ? `  ${st.muted("→")} ${producedOf(artifacts, link)}` : "";
   const lines = [
     `${glyph} ${pos}${name}  ${duration(r.durationMs).padEnd(7)} ${st.muted(facts.join(" · "))}${retries}${limit}${outcome}${produced}`.trimEnd(),
   ];
@@ -140,6 +151,7 @@ export function followRun(ctx: CliContext, runtime: Runtime, options: FollowOpti
   const journey = new Journey(plan);
   const events: StoredEvent[] = [];
   const signals = terminalSignals(ctx);
+  let percent = 0;
   const short = () => (runId ? shortId(runId) : "");
   let headed = options.header === false;
   let frame = 0;
@@ -170,10 +182,18 @@ export function followRun(ctx: CliContext, runtime: Runtime, options: FollowOpti
         const stepId = (e.payload as { stepId?: string } | undefined)?.stepId ?? e.stepId ?? "";
         const at = plan.indexOf(stepId);
         signals.title(`▶ jarvis ${at >= 0 ? `${at + 1}/${plan.length} ` : ""}${stepId}`);
+        if (at >= 0) {
+          percent = (at / plan.length) * 100;
+          signals.progress("normal", percent);
+        }
       }
       for (const line of journey.push(e)) {
+        signals.mark();
         if (line.kind === "step")
-          for (const l of formatStepReport(line.report, producedBy(line.report), st, width)) ctx.out.note(l);
+          for (const l of formatStepReport(line.report, producedBy(line.report), st, width, (a, label) =>
+            artifactLink(st, runtime, a, label),
+          ))
+            ctx.out.note(l);
         else ctx.out.note(formatLoop(line.report, st));
       }
       if (e.kind === "run.state") {
@@ -181,18 +201,25 @@ export function followRun(ctx: CliContext, runtime: Runtime, options: FollowOpti
         const state = (e.payload as { state?: string } | undefined)?.state ?? "";
         const run = state.startsWith("WAITING") || state === "FAILED" ? runtime.runs.get(runId) : undefined;
         const parked = run ? formatParked({ ...run, state: state as Run["state"] }, st, plan) : undefined;
-        if (parked) ctx.out.note(parked);
+        if (parked) {
+          signals.mark();
+          ctx.out.note(parked);
+        }
         const step = run?.currentStep ? ` at ${run.currentStep}` : "";
         if (state === "WAITING_HUMAN") {
           signals.title(`⏸ jarvis needs you${step}`);
+          signals.progress("warning", percent);
           signals.notify("jarvis", `run ${short()} waits for you${step}`);
         } else if (state === "WAITING_BUDGET") {
           signals.title(`⏸ jarvis waits for ${run?.waitingFor?.kind === "model" ? "the model" : "quota"}`);
+          signals.progress("warning", percent);
         } else if (state === "FAILED") {
           signals.title("✗ jarvis failed");
+          signals.progress("error", percent);
           signals.notify("jarvis", `run ${short()} failed${step}`);
         } else if (state === "COMPLETED") {
           signals.title("✓ jarvis done");
+          signals.progress("hide");
           signals.notify("jarvis", `run ${short()} is done`);
         }
         continue;

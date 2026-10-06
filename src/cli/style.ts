@@ -11,6 +11,8 @@ import type { ArtifactVersion } from "../core/domain/artifact.ts";
  */
 export interface Style {
   readonly enabled: boolean;
+  /** Whether `link` makes clickable links (a terminal that knows OSC 8). */
+  readonly links: boolean;
   /** Section and document headings. */
   heading(text: string): string;
   /** The handle a line is about: a candidate, a run, a module. */
@@ -31,6 +33,8 @@ export interface Style {
   byState(state: string, text: string): string;
   /** Backticked spans of a message rendered as commands (backticks dropped when coloured). */
   inline(text: string): string;
+  /** `text` the terminal opens `url` on click (OSC 8), where it can; the text alone elsewhere. */
+  link(url: string, text: string): string;
 }
 
 export interface ColorOptions {
@@ -90,10 +94,15 @@ function byState(state: string, text: string): string {
   return text;
 }
 
-export function createStyle(enabled: boolean): Style {
+export function createStyle(enabled: boolean, options: { links?: boolean } = {}): Style {
   const id = (text: string) => text;
+  const link = options.links
+    ? (url: string, text: string) => `\u001b]8;;${url}\u0007${text}\u001b]8;;\u0007`
+    : (_url: string, text: string) => text;
   if (!enabled) {
     return {
+      links: options.links === true,
+      link,
       enabled,
       heading: id,
       name: id,
@@ -111,6 +120,7 @@ export function createStyle(enabled: boolean): Style {
   }
   return {
     enabled,
+    links: options.links === true,
     heading: bold,
     name: (text) => bold(cyan(text)),
     muted: dim,
@@ -123,6 +133,7 @@ export function createStyle(enabled: boolean): Style {
     state: (state) => byState(state, state),
     byState,
     inline: (text) => text.replace(/`([^`\n]+)`/g, (_m, code: string) => cyan(code)),
+    link,
   };
 }
 
@@ -139,7 +150,7 @@ export function incompleteOf(
 export const PLAIN: Style = createStyle(false);
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: matching ANSI escapes is the point
-const ANSI = /\u001b\[[0-9;]*m/g;
+const ANSI = /\u001b\[[0-9;]*m|\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)/g;
 
 /** Length as the terminal shows it (escapes do not take columns). */
 export function visibleLength(text: string): number {

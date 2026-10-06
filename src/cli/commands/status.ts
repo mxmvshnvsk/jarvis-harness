@@ -359,7 +359,11 @@ function workedMs(d: RunDetail): number {
 }
 
 /** The end of a foreground run: state, cost, what it produced and what to do next. */
-export function renderSummary(ctx: CliContext, d: RunDetail, options: { goOn?: string } = {}): void {
+export function renderSummary(
+  ctx: CliContext,
+  d: RunDetail,
+  options: { goOn?: string; link?: (a: RunDetail["artifacts"][number], label: string) => string } = {},
+): void {
   const { out } = ctx;
   const st = out.style;
   const r = d.run;
@@ -389,7 +393,7 @@ export function renderSummary(ctx: CliContext, d: RunDetail, options: { goOn?: s
         ? st.muted(`  ${a.stepId}${a.iteration && a.iteration > 1 ? `#${a.iteration}` : ""}`)
         : "";
       out.line(
-        `${i === 0 ? f("artifacts") : " ".repeat(13)}${a.type}/${a.name}@${a.version}${step}${gate}${incomplete}`,
+        `${i === 0 ? f("artifacts") : " ".repeat(13)}${options.link ? options.link(a, `${a.type}/${a.name}@${a.version}`) : `${a.type}/${a.name}@${a.version}`}${step}${gate}${incomplete}`,
       );
     });
   const next = nextCommands(d, options.goOn);

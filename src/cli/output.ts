@@ -1,3 +1,4 @@
+import { supportsHyperlinks, terminalOf } from "./notify.ts";
 import { colorEnabled, createStyle, type Style, stripAnsi } from "./style.ts";
 
 /** Exit codes (ADR-0009 §3). */
@@ -42,6 +43,8 @@ export function createOutput(
   options: { progress?: boolean; color?: boolean; env?: NodeJS.ProcessEnv } = {},
 ): Output {
   const err = streams.err as NodeJS.WritableStream & { isTTY?: boolean; columns?: number };
+  const env = options.env ?? {};
+  const linksHere = supportsHyperlinks(terminalOf(env), env);
   const colors = (stream: { isTTY?: boolean }) =>
     createStyle(
       colorEnabled({
@@ -50,6 +53,8 @@ export function createOutput(
         ...(options.color !== undefined ? { flag: options.color } : {}),
         ...(options.env ? { env: options.env } : {}),
       }),
+      // a link is an escape sequence: only for a terminal that opens it, never in a pipe or --json
+      { links: !json && stream.isTTY === true && linksHere },
     );
   const style = colors(streams.out as { isTTY?: boolean });
   const errStyle = colors(err);

@@ -28,6 +28,7 @@ import { followRun, formatRunHeader, oneLine } from "../progress.ts";
 import { createPrompt, isInteractive, type Prompt } from "../prompt.ts";
 import { documentToMarkdown, renderDiff, renderMarkdown } from "../render.ts";
 import { incompleteOf, padStyled } from "../style.ts";
+import { artifactLink } from "../view.ts";
 import { loadForCli } from "./config.ts";
 import { renderSummary } from "./status.ts";
 
@@ -94,7 +95,10 @@ async function executeAndReport(
           ? nextWorkflowOf(engine, result.run)
           : undefined;
       ctx.out.result({ ...extra, ...detail, exitCode: result.exitCode }, () =>
-        renderSummary(ctx, detail, goOn ? { goOn } : {}),
+        renderSummary(ctx, detail, {
+          ...(goOn ? { goOn } : {}),
+          link: (a, label) => artifactLink(ctx.out.style, runtime, a, label),
+        }),
       );
       // an approved spec goes on to the implementation in the same command (pilot: the run just ended)
       if (prompt && result.run.state === "COMPLETED" && !continuedBy(runtime, result.run)) {
@@ -864,7 +868,7 @@ export async function runShow(
             const state = stateOf(a);
             const partial = incompleteOf(a);
             ctx.out.line(
-              `  ${padStyled(`${a.type}/${a.name}@${a.version}`, w)}  ${st.muted(padStyled(a.stepId ? `${a.stepId}${a.iteration && a.iteration > 1 ? `#${a.iteration}` : ""}` : "-", 16))} ${state === "approved" ? st.ok(state) : st.warn(state)}${partial ? ` ${st.warn(`⚠ incomplete (${partial.limit} limit)`)}` : ""}`.trimEnd(),
+              `  ${padStyled(artifactLink(st, runtime, a, `${a.type}/${a.name}@${a.version}`), w)}  ${st.muted(padStyled(a.stepId ? `${a.stepId}${a.iteration && a.iteration > 1 ? `#${a.iteration}` : ""}` : "-", 16))} ${state === "approved" ? st.ok(state) : st.warn(state)}${partial ? ` ${st.warn(`⚠ incomplete (${partial.limit} limit)`)}` : ""}`.trimEnd(),
             );
           }
           if (masked.length > 0) {
