@@ -36,7 +36,9 @@ jarvis --help
 ```
 
 No global link? `node bin/jarvis.js <command>` runs the built CLI, and `pnpm dev <command>` runs it from
-sources.
+sources. The linked `jarvis` runs `dist/`: after a pull it warns when the build is older than the checkout
+(`jarvis runs a build of 1a2b3c4, the checkout is at 5d6e7f8 — run pnpm build`), and `jarvis --version`
+names the commit it was built from.
 
 ## Kickstart
 

@@ -1,7 +1,7 @@
 import { Command } from "commander";
 import { ConfigError } from "../core/config/errors.ts";
 import { errorFields } from "../telemetry/log.ts";
-import { packageInfo } from "../version.ts";
+import { staleBuild, versionText } from "../version.ts";
 import { cliLogger } from "./cliLog.ts";
 import { runAsk } from "./commands/ask.ts";
 import { runAuthRemove, runAuthSet, runAuthStatus } from "./commands/auth.ts";
@@ -65,12 +65,11 @@ function silenceSqliteWarning(): void {
 
 export function buildProgram(options: RunOptions = {}): Command {
   const streams = options.streams ?? { out: process.stdout, err: process.stderr };
-  const info = packageInfo();
   const program = new Command();
   program
     .name("jarvis")
     .description("Jarvis — durable AI engineering runtime")
-    .version(info.version, "-V, --version")
+    .version(versionText(), "-V, --version")
     .option("--json", "machine-readable output", false)
     .option("--profile <name>", "apply a configuration profile (ADR-0009)")
     .option("--cwd <dir>", "run as if started in this directory")
@@ -689,6 +688,13 @@ export async function run(argv: readonly string[], options: RunOptions = {}): Pr
     writeErr: (s) => streams.err.write(s),
   });
   const log = cliLogger(options.context);
+  const stale = staleBuild();
+  if (stale) {
+    // stderr only: --json output and exit codes stay as they are
+    streams.err.write(
+      `warning: jarvis runs a build of ${stale.built.slice(0, 7)}, the checkout is at ${stale.head.slice(0, 7)} — run \`pnpm build\` in ${stale.root}\n`,
+    );
+  }
   const started = Date.now();
   log.info("cli.invoke", {
     args: argv.slice(2),
