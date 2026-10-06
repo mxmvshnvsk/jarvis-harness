@@ -25,8 +25,10 @@ import {
   askCardToGoOn,
   changesIn,
   checkoutLink,
+  describeFiles,
   formatChanges,
   type OpenIn,
+  reviewFiles,
   type ShellIn,
   systemOpener,
   systemShell,
@@ -1122,7 +1124,20 @@ export async function runOpen(
   try {
     const st = ctx.out.style;
     const run = checkoutRun(ctx, runtime, loaded.project?.root ?? ctx.cwd, ref);
-    const editor = (options.open ?? systemOpener(ctx))(run.workspace.path);
+    // what to look at: the reasons of a used-up loop first, then what the run changed
+    const exhausted =
+      run.waitingFor?.kind === "loop" ? runtime.artifacts.listLatest(run.id, "loop-exhausted")[0] : undefined;
+    let reasons = "";
+    try {
+      const doc = exhausted
+        ? (JSON.parse(runtime.artifacts.text(exhausted)) as { reason?: unknown })
+        : undefined;
+      reasons = typeof doc?.reason === "string" ? doc.reason : "";
+    } catch {
+      reasons = "";
+    }
+    const files = reviewFiles(run.workspace.path, run.workspace.baseCommit ?? run.workspace.baseRef, reasons);
+    const editor = (options.open ?? systemOpener(ctx))(run.workspace.path, files);
     if (!editor) {
       ctx.out.error(
         `no editor found — set JARVIS_EDITOR (code, idea, webstorm…); the checkout is ${run.workspace.path}`,
@@ -1130,7 +1145,7 @@ export async function runOpen(
       throw new CliExit(EXIT.error);
     }
     ctx.out.line(
-      `${st.ok("↗")} run ${st.name(shortRunId(run.id))} opened in ${editor}  ${checkoutLink(st, run.workspace.path, ctx.homeDir)}`,
+      `${st.ok("↗")} run ${st.name(shortRunId(run.id))} opened in ${editor}${files.length > 0 ? `: ${describeFiles(files)}` : ""}  ${checkoutLink(st, run.workspace.path, ctx.homeDir)}`,
     );
   } finally {
     await runtime.close();

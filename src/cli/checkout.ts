@@ -4,6 +4,7 @@ import { homedir, tmpdir } from "node:os";
 import { basename, delimiter, join } from "node:path";
 import type { Run } from "../core/domain/run.ts";
 import { shortRunId } from "../storage/runStore.ts";
+import { isScratchFile } from "../tools/local/scratch.ts";
 import type { CliContext } from "./context.ts";
 import type { Style } from "./style.ts";
 
@@ -135,71 +136,143 @@ export function formatChanges(changes: readonly Change[], st: Style, shown = 5):
   return `${changes.slice(0, shown).map(label).join("  ")}${more}`;
 }
 
-/** Opens the run's checkout in the person's editor without waiting; the editor's name, or undefined. */
-export type OpenIn = (dir: string) => string | undefined;
+/** A file to open for review, absolute, at the line worth looking at. */
+export interface FileToOpen {
+  readonly path: string;
+  readonly line?: number;
+}
 
-const EDITORS: ReadonlyArray<readonly [string, string]> = [
-  ["code", "VS Code"],
-  ["cursor", "Cursor"],
-  ["webstorm", "WebStorm"],
-  ["idea", "IntelliJ IDEA"],
-  ["zed", "Zed"],
-  ["subl", "Sublime Text"],
+/**
+ * Opens the run's checkout in the person's editor, with the files to look at, without waiting;
+ * returns the editor's name, or undefined when there is none.
+ */
+export type OpenIn = (dir: string, files?: readonly FileToOpen[]) => string | undefined;
+
+/**
+ * How an editor takes a folder and files at lines: `vscode` — `code <dir> -g a.ts:113 b.ts`;
+ * `jetbrains` — `webstorm <dir> --line 113 a.ts b.ts` (the files open in that project, not in
+ * LightEdit); `colon` — `zed <dir> a.ts:113`; `paths` — folder and files, no lines; `folder` — the
+ * folder only (Finder, a file manager).
+ */
+export type EditorKind = "vscode" | "jetbrains" | "colon" | "paths" | "folder";
+
+export interface Editor {
+  readonly command: readonly string[];
+  readonly label: string;
+  readonly kind: EditorKind;
+}
+
+const EDITORS: ReadonlyArray<readonly [string, string, EditorKind]> = [
+  ["code", "VS Code", "vscode"],
+  ["cursor", "Cursor", "vscode"],
+  ["webstorm", "WebStorm", "jetbrains"],
+  ["idea", "IntelliJ IDEA", "jetbrains"],
+  ["zed", "Zed", "colon"],
+  ["subl", "Sublime Text", "colon"],
 ];
 
-/** macOS apps that open a folder with `open -a`, when their command is not on PATH. */
-const MAC_APPS: ReadonlyArray<readonly [string, string]> = [
-  ["Visual Studio Code", "VS Code"],
-  ["Cursor", "Cursor"],
-  ["WebStorm", "WebStorm"],
-  ["IntelliJ IDEA", "IntelliJ IDEA"],
-  ["IntelliJ IDEA Ultimate", "IntelliJ IDEA"],
-  ["IntelliJ IDEA CE", "IntelliJ IDEA"],
-  ["Zed", "Zed"],
+/** Other names a person may give in JARVIS_EDITOR. */
+const KINDS: Readonly<Record<string, EditorKind>> = {
+  codium: "vscode",
+  "code-insiders": "vscode",
+  windsurf: "vscode",
+  pycharm: "jetbrains",
+  goland: "jetbrains",
+  phpstorm: "jetbrains",
+  rider: "jetbrains",
+  clion: "jetbrains",
+  rubymine: "jetbrains",
+  fleet: "paths",
+};
+
+/** macOS apps and the command-line launcher inside each, for when it is not on PATH. */
+const MAC_APPS: ReadonlyArray<readonly [string, string, string, EditorKind]> = [
+  ["Visual Studio Code", "VS Code", "Contents/Resources/app/bin/code", "vscode"],
+  ["Cursor", "Cursor", "Contents/Resources/app/bin/cursor", "vscode"],
+  ["WebStorm", "WebStorm", "Contents/MacOS/webstorm", "jetbrains"],
+  ["IntelliJ IDEA", "IntelliJ IDEA", "Contents/MacOS/idea", "jetbrains"],
+  ["IntelliJ IDEA Ultimate", "IntelliJ IDEA", "Contents/MacOS/idea", "jetbrains"],
+  ["IntelliJ IDEA CE", "IntelliJ IDEA", "Contents/MacOS/idea", "jetbrains"],
+  ["Zed", "Zed", "Contents/MacOS/cli", "colon"],
 ];
 
-function onPath(command: string, env: NodeJS.ProcessEnv): boolean {
-  if (command.includes("/")) return existsSync(command);
-  return (env.PATH ?? "").split(delimiter).some((dir) => dir.length > 0 && existsSync(join(dir, command)));
+function onPath(command: string, env: NodeJS.ProcessEnv, extra: readonly string[] = []): string | undefined {
+  if (command.includes("/")) return existsSync(command) ? command : undefined;
+  for (const dir of [...(env.PATH ?? "").split(delimiter), ...extra]) {
+    if (dir.length > 0 && existsSync(join(dir, command))) return join(dir, command);
+  }
+  return undefined;
 }
 
 /**
  * The editor a checkout opens in: `JARVIS_EDITOR` (a command, may carry arguments: `idea`,
- * `code -n`), else the first known editor command on PATH, else (macOS) an installed editor app,
- * else the system's file opener. Pilot: "fix it there yourself" sent people to copy a path.
+ * `code -n`), else the first known editor command on PATH (and JetBrains Toolbox scripts), else
+ * (macOS) the launcher inside an installed editor app, else the system's file opener. Pilot: "fix it
+ * there yourself" sent people to copy a path; then `o` opened the folder without the files.
  */
 export function editorFor(
   env: NodeJS.ProcessEnv,
   options: { platform?: NodeJS.Platform; home?: string } = {},
-): { readonly command: readonly string[]; readonly label: string } | undefined {
+): Editor | undefined {
   const own = env.JARVIS_EDITOR?.trim();
   if (own) {
     const command = own.split(/\s+/);
-    const name = basename(command[0] as string);
-    return { command, label: EDITORS.find(([c]) => c === name)?.[1] ?? name };
+    const name = basename(command[0] as string).replace(/\.(sh|cmd|exe)$/, "");
+    const known = EDITORS.find(([c]) => c === name);
+    return { command, label: known?.[1] ?? name, kind: known?.[2] ?? KINDS[name] ?? "paths" };
   }
-  for (const [command, label] of EDITORS) if (onPath(command, env)) return { command: [command], label };
   const platform = options.platform ?? process.platform;
+  const home = options.home ?? homedir();
+  const toolbox =
+    platform === "darwin" ? [join(home, "Library/Application Support/JetBrains/Toolbox/scripts")] : [];
+  for (const [command, label, kind] of EDITORS) {
+    const found = onPath(command, env, toolbox);
+    if (found) return { command: [found], label, kind };
+  }
   if (platform === "darwin") {
-    const home = options.home ?? homedir();
-    for (const [app, label] of MAC_APPS)
-      if ([`/Applications/${app}.app`, join(home, "Applications", `${app}.app`)].some((p) => existsSync(p)))
-        return { command: ["open", "-a", app], label };
-    return { command: ["open"], label: "Finder" };
+    for (const [app, label, launcher, kind] of MAC_APPS) {
+      const bundle = [`/Applications/${app}.app`, join(home, "Applications", `${app}.app`)].find((p) =>
+        existsSync(p),
+      );
+      if (!bundle) continue;
+      const cli = join(bundle, launcher);
+      return existsSync(cli)
+        ? { command: [cli], label, kind }
+        : { command: ["open", "-a", app], label, kind: "paths" };
+    }
+    return { command: ["open"], label: "Finder", kind: "folder" };
   }
   if (platform !== "win32" && onPath("xdg-open", env))
-    return { command: ["xdg-open"], label: "the file manager" };
+    return { command: ["xdg-open"], label: "the file manager", kind: "folder" };
   return undefined;
 }
 
+/** The command line that opens `dir` with `files` in `editor`. */
+export function openCommand(editor: Editor, dir: string, files: readonly FileToOpen[] = []): string[] {
+  const at = (f: FileToOpen) => (f.line ? `${f.path}:${f.line}` : f.path);
+  const base = [...editor.command, dir];
+  switch (editor.kind) {
+    case "vscode":
+      return files.length > 0 ? [...base, "-g", ...files.map(at)] : base;
+    case "jetbrains":
+      return [...base, ...files.flatMap((f) => (f.line ? ["--line", String(f.line), f.path] : [f.path]))];
+    case "colon":
+      return [...base, ...files.map(at)];
+    case "paths":
+      return [...base, ...files.map((f) => f.path)];
+    case "folder":
+      return base;
+  }
+}
+
 export function systemOpener(ctx: CliContext): OpenIn {
-  return (dir) => {
+  return (dir, files = []) => {
     const env = ctx.env ?? {};
     const editor = editorFor(env, { home: ctx.homeDir });
     if (!editor) return undefined;
-    const [command, ...args] = editor.command;
+    const [command, ...args] = openCommand(editor, dir, files);
     try {
-      const child = spawn(command as string, [...args, dir], {
+      const child = spawn(command as string, args, {
         detached: true,
         stdio: "ignore",
         env: { ...process.env, ...env },
@@ -211,6 +284,56 @@ export function systemOpener(ctx: CliContext): OpenIn {
     }
     return editor.label;
   };
+}
+
+/**
+ * What to open for review, in order: the files the reasons name (`…/a.test.tsx:113` — at that
+ * line; a path cut with `…/` is matched against the changed files), then the files the run changed
+ * against its base, most changed first, each at its first changed line; no deleted or scratch
+ * files; at most `max`.
+ */
+export function reviewFiles(dir: string, base: string | undefined, reasons = "", max = 8): FileToOpen[] {
+  const git = (args: string[]) => spawnSync("git", args, { cwd: dir, encoding: "utf8" });
+  const changed: Array<{ file: string; size: number }> = [];
+  const firstLine = new Map<string, number>();
+  if (base) {
+    const numstat = git(["diff", "--numstat", base]);
+    if (numstat.status === 0)
+      for (const l of numstat.stdout.split("\n").filter(Boolean)) {
+        const [added, removed, file] = l.split("\t");
+        if (file) changed.push({ file, size: (Number(added) || 0) + (Number(removed) || 0) });
+      }
+    changed.sort((a, b) => b.size - a.size);
+    const hunks = git(["diff", "-U0", "--no-color", base]);
+    let current: string | undefined;
+    if (hunks.status === 0)
+      for (const l of hunks.stdout.split("\n")) {
+        if (l.startsWith("+++ ")) current = l.startsWith("+++ b/") ? l.slice(6) : undefined;
+        const m = /^@@ -\d+(?:,\d+)? \+(\d+)/.exec(l);
+        if (current && m && !firstLine.has(current)) firstLine.set(current, Math.max(1, Number(m[1])));
+      }
+  }
+  const out: FileToOpen[] = [];
+  const seen = new Set<string>();
+  const add = (file: string, line?: number) => {
+    if (seen.has(file) || out.length >= max || isScratchFile(file)) return;
+    const path = join(dir, file);
+    if (!existsSync(path)) return;
+    seen.add(file);
+    out.push(line ? { path, line } : { path });
+  };
+  for (const m of reasons.matchAll(
+    /(?:…\/|\.\.\.\/)?((?:[\w@.+-]+\/)*[\w@+-][\w@.+-]*\.[A-Za-z0-9]+)(?::(\d+))?/g,
+  )) {
+    const named = m[1] as string;
+    const line = m[2] ? Number(m[2]) : undefined;
+    const file = existsSync(join(dir, named))
+      ? named
+      : changed.find((c) => c.file === named || c.file.endsWith(`/${named}`))?.file;
+    if (file) add(file, line);
+  }
+  for (const c of changed) add(c.file, firstLine.get(c.file));
+  return out;
 }
 
 /**
@@ -240,4 +363,11 @@ export function watchCheckout(
   }, options.everyMs ?? 1500);
   timer.unref?.();
   return () => clearInterval(timer);
+}
+
+/** `upload-toggle.test.tsx:113, UploadToggle.tsx +1` — what an editor was asked to open, in a few words. */
+export function describeFiles(files: readonly FileToOpen[], shown = 2): string {
+  const name = (f: FileToOpen) => `${basename(f.path)}${f.line ? `:${f.line}` : ""}`;
+  const more = files.length > shown ? ` +${files.length - shown}` : "";
+  return `${files.slice(0, shown).map(name).join(", ")}${more}`;
 }

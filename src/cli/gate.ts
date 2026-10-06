@@ -13,9 +13,11 @@ import {
   type Change,
   changesIn,
   checkoutLink,
+  describeFiles,
   formatChanges,
   homePath,
   type OpenIn,
+  reviewFiles,
   type ShellIn,
   systemOpener,
   systemShell,
@@ -322,7 +324,8 @@ async function loopGate(
   const doc = record ? parseDoc(runtime.artifacts.text(record)) : undefined;
   const edge = typeof doc?.edge === "string" ? doc.edge : (run.waitingFor?.detail ?? "a back edge");
   const route = /^(.+)->(.+)#(.+)$/.exec(edge);
-  const reasons = reasonsOf(typeof doc?.reason === "string" ? doc.reason : "");
+  const reasonText = typeof doc?.reason === "string" ? doc.reason : "";
+  const reasons = reasonsOf(reasonText);
   const step = run.currentStep ?? "the step";
   const dir = run.workspace.path;
   const env = ctx.env ?? {};
@@ -377,10 +380,12 @@ async function loopGate(
         continue;
       }
       if (input === "o") {
-        const editor = open(dir);
+        // the files the reasons name first, at their lines, then what the run changed
+        const files = reviewFiles(dir, run.workspace.baseCommit ?? run.workspace.baseRef, reasonText);
+        const editor = open(dir, files);
         ctx.out.line(
           editor
-            ? `  ${st.ok("↗")} opened in ${editor} ${st.muted(`· this card watches the checkout — save there, then r here`)}`
+            ? `  ${st.ok("↗")} opened in ${editor}${files.length > 0 ? `: ${describeFiles(files)}` : ""} ${st.muted(`· this card watches the checkout — save there, then r here`)}`
             : st.warn(
                 `  no editor found — set JARVIS_EDITOR (code, idea, webstorm…); the checkout is ${homePath(dir, ctx.homeDir)}`,
               ),
@@ -509,10 +514,11 @@ export async function humanGate(
       continue;
     }
     if (input === "o" && withOpen) {
-      const editor = open(run.workspace.path);
+      const files = reviewFiles(run.workspace.path, run.workspace.baseCommit ?? run.workspace.baseRef);
+      const editor = open(run.workspace.path, files);
       ctx.out.line(
         editor
-          ? `  ${st.ok("↗")} opened the run's checkout in ${editor}`
+          ? `  ${st.ok("↗")} opened the run's changes in ${editor}${files.length > 0 ? `: ${describeFiles(files)}` : ""}`
           : st.warn(`  no editor found — set JARVIS_EDITOR (code, idea, webstorm…)`),
       );
       continue;
