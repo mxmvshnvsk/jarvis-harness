@@ -45,6 +45,7 @@ import {
 } from "./commands/run.ts";
 import { runCancel, runStatus } from "./commands/status.ts";
 import { type CliContext, defaultContext } from "./context.ts";
+import { DIAGNOSES } from "./diagnostics.ts";
 import { CliExit, createOutput, EXIT } from "./output.ts";
 
 export interface RunOptions {
@@ -225,6 +226,31 @@ export function buildProgram(options: RunOptions = {}): Command {
     .action(async (question: string[], opts: { llm: boolean; general: boolean; limit: number }) => {
       await runAsk(ctxFor(), question, opts);
     });
+  program
+    .command("errors [code]")
+    .description("what an error code means and what to do: J001 … (no code: the list)")
+    .action((code: string | undefined) => {
+      const ctx = ctxFor();
+      const st = ctx.out.style;
+      const list = code ? DIAGNOSES.filter((d) => d.code.toLowerCase() === code.toLowerCase()) : DIAGNOSES;
+      if (code && list.length === 0) {
+        ctx.out.error(`no error code ${code} (\`jarvis errors\` lists them)`);
+        throw new CliExit(EXIT.error);
+      }
+      ctx.out.result(
+        list.map(({ match: _m, ...d }) => d),
+        () => {
+          for (const d of list) {
+            ctx.out.line(`${st.bad(d.code)}  ${st.heading(d.title)}`);
+            if (code) {
+              ctx.out.line(`  ${d.explain}`);
+              ctx.out.line(`  ${st.muted("help:")} ${d.help}`);
+            }
+          }
+        },
+      );
+    });
+
   program
     .command("explain <target>")
     .description(
@@ -723,7 +749,8 @@ export async function run(argv: readonly string[], options: RunOptions = {}): Pr
     }
     if (error instanceof ConfigError) {
       log.error("cli.error", { message: error.message, ms: Date.now() - started });
-      streams.err.write(`${error.message}\n`);
+      const d = DIAGNOSES.find((x) => x.code === "J008") as (typeof DIAGNOSES)[number];
+      streams.err.write(`error[${d.code}]: ${error.message}\n  help: ${d.help.replace(/`/g, "")}\n`);
       return EXIT.error;
     }
     if (error && typeof error === "object" && "exitCode" in error && "code" in error) {

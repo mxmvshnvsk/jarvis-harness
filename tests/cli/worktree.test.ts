@@ -142,7 +142,7 @@ describe("worktree workspace end to end (ADR-0003)", () => {
     expect(r.code).toBe(1);
     expect(r.err).toContain("◌ own checkout");
     expect(r.err).toContain("◌ workspace.setup echo boom >&2; exit 3");
-    expect(r.err).toContain("error: workspace.setup failed (exit 3): boom");
+    expect(r.err).toContain("error[J006]: workspace.setup failed (exit 3): boom");
     expect(r.err).toContain("JARVIS_WORKSPACE__MODE=cwd");
     expect(sh(sb.project, ["worktree", "list"]).trim().split("\n")).toHaveLength(1);
     expect(sh(sb.project, ["branch", "--list", "jarvis/*"]).trim()).toBe("");

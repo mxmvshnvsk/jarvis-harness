@@ -352,11 +352,8 @@ async function prepareWorkspace(
         )
       )?.toLowerCase();
       if (answer === "y" || answer === "yes" || answer === "д" || answer === "да") return cwd;
-    } else {
-      ctx.out.note(
-        `${st.muted("fix workspace.setup in .jarvis/project.yaml, or work in your checkout:")} ${st.cmd("JARVIS_WORKSPACE__MODE=cwd JARVIS_WORKSPACE__ALLOW_WRITES=true jarvis …")}`,
-      );
     }
+    // without a prompt the help line of the error (J006) says how to go on
     throw new CliExit(EXIT.error);
   }
 }

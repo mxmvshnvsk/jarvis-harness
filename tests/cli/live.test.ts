@@ -78,3 +78,25 @@ describe("the live region", () => {
     expect(formatRecent(a as NonNullable<typeof a>)).toBe("  ↳ read src/order-form.ts · search isCompact ✗");
   });
 });
+
+describe("the anatomy of an error", () => {
+  it("gives an error a code and a help line, in the output and in a failed step", async () => {
+    const { diagnose, DIAGNOSES } = await import("../../src/cli/diagnostics.ts");
+    expect(diagnose("model flash: network error: fetch failed (UND_ERR_HEADERS_TIMEOUT)")?.code).toBe("J001");
+    expect(diagnose("model flash: provider error (502): bad gateway")?.code).toBe("J002");
+    expect(diagnose("fetch failed (SELF_SIGNED_CERT_IN_CHAIN: …)")?.code).toBe("J003");
+    expect(diagnose("something else entirely")).toBeUndefined();
+    expect(new Set(DIAGNOSES.map((d) => d.code)).size).toBe(DIAGNOSES.length);
+    let err = "";
+    const sink = new Writable({
+      write(c, _e, cb) {
+        err += String(c);
+        cb();
+      },
+    });
+    createOutput(false, { out: sink, err: sink }).error("model flash: provider error (500): upstream");
+    expect(err).toBe(
+      "error[J002]: model flash: provider error (500): upstream\n  help: the run waits for the model and goes on by itself; `jarvis models stats` and `jarvis models probe <id>` show how it is\n",
+    );
+  });
+});

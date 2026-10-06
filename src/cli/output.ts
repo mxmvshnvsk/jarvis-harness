@@ -1,3 +1,4 @@
+import { diagnose } from "./diagnostics.ts";
 import { supportsHyperlinks, terminalOf } from "./notify.ts";
 import { colorEnabled, createStyle, cutStyled, type Style } from "./style.ts";
 
@@ -125,8 +126,12 @@ export function createOutput(
     },
     error(text) {
       clear();
-      const prefix = errStyle.enabled ? `\u001b[1m${errStyle.bad("error:")}\u001b[22m` : "error:";
+      // error[J002]: what happened, then what to do (src/cli/diagnostics.ts)
+      const d = diagnose(text);
+      const label = d ? `error[${d.code}]:` : "error:";
+      const prefix = errStyle.enabled ? `\u001b[1m${errStyle.bad(label)}\u001b[22m` : label;
       streams.err.write(`${prefix} ${errStyle.inline(text)}\n`);
+      if (d) streams.err.write(`  ${errStyle.muted("help:")} ${errStyle.inline(d.help)}\n`);
     },
     note(text) {
       clear();

@@ -6,6 +6,7 @@ import type { Run } from "../core/domain/run.ts";
 import { interruption } from "../orchestration/interrupt.ts";
 import type { StoredEvent } from "../telemetry/events.ts";
 import type { CliContext } from "./context.ts";
+import { diagnose } from "./diagnostics.ts";
 import { terminalSignals } from "./notify.ts";
 import type { Style } from "./style.ts";
 import { artifactLink } from "./view.ts";
@@ -135,9 +136,13 @@ export function formatStepReport(
   const lines = [
     `${glyph} ${pos}${name}  ${duration(r.durationMs).padEnd(7)} ${st.muted(facts.join(" · "))}${retries}${limit}${outcome}${produced}`.trimEnd(),
   ];
-  if (!ok && r.reason)
-    lines.push(`  ${st.bad(r.status === "error" ? "error:" : "failed:")} ${r.reason.split("\n")[0]}`);
-  else if (r.reason && r.outcome && r.outcome !== "success")
+  if (!ok && r.reason) {
+    const d = diagnose(r.reason);
+    lines.push(
+      `  ${st.bad(r.status === "error" ? `error${d ? `[${d.code}]` : ""}:` : `failed${d ? `[${d.code}]` : ""}:`)} ${r.reason.split("\n")[0]}`,
+    );
+    if (d) lines.push(`  ${st.muted("help:")} ${st.inline(d.help)}`);
+  } else if (r.reason && r.outcome && r.outcome !== "success")
     lines.push(`  ${st.muted(r.reason.split("\n")[0] ?? "")}`);
   return lines;
 }
@@ -161,8 +166,10 @@ export function formatParked(run: Run, st: Style, plan: readonly string[] = []):
       : run.state.toLowerCase();
     return `${st.warn("⏸")} ${step}${st.warn(`waiting for ${what}`)}${run.stateReason ? st.muted(` — ${run.stateReason}`) : ""}`;
   }
-  if (run.state === "FAILED")
-    return `${st.bad("✗")} ${step}${st.bad("run failed")}${run.stateReason ? `: ${run.stateReason}` : ""}`;
+  if (run.state === "FAILED") {
+    const d = diagnose(run.stateReason);
+    return `${st.bad("✗")} ${step}${st.bad(`run failed${d ? ` [${d.code}]` : ""}`)}${run.stateReason ? `: ${run.stateReason}` : ""}${d ? `\n  ${st.muted("help:")} ${st.inline(d.help)}` : ""}`;
+  }
   if (run.state === "SUSPENDED")
     return `${st.warn("⏸")} ${step}${st.warn("stopped")}${run.stateReason ? st.muted(` — ${run.stateReason}`) : ""}`;
   return undefined;
