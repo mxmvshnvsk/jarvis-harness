@@ -336,6 +336,55 @@ steps:
     expect(none.out).toContain("nothing waits for you here");
   });
 
+  it("a used-up loop: the card says why and where the checkout is; r runs the step again", async () => {
+    const loaded = await loadConfig({ cwd: sb.project, homeDir: sb.home, env: {} });
+    const rt = createRuntime(loaded, { env: {} });
+    const parked = rt.runs.create({
+      task: "ABC-11",
+      workflow: "gated",
+      owner: { kind: "user", id: "me@corp", verified: false },
+      workspace: { mode: "cwd", repoRoot: sb.project, path: sb.project, baseRef: "HEAD" },
+      dataClass: "internal",
+    });
+    // as the engine leaves it when a back edge is used up (ADR-0004 §3)
+    rt.runs.update(parked.id, { currentStep: "write", currentIteration: 3 });
+    rt.runs.transition(parked.id, "RUNNING");
+    rt.artifacts.put({
+      runId: parked.id,
+      type: "loop-exhausted",
+      name: "write->write#defects_found.json",
+      content: JSON.stringify({
+        edge: "write->write#defects_found",
+        iterations: 2,
+        reason: "lint: no newline at the end of a.test.ts; stray files: tmp-probe.txt",
+      }),
+      mediaType: "application/json",
+      provenance: { kind: "tool", capability: "runtime.loop" },
+      stepId: "write",
+      iteration: 3,
+    });
+    rt.runs.transition(parked.id, "WAITING_HUMAN", {
+      reason: "back edge write->write#defects_found exhausted after 2 iteration(s)",
+      waitingFor: { kind: "loop", detail: "write->write#defects_found" },
+    });
+    rt.close();
+
+    const later = await jarvis(["c"], ON, ["q"]);
+    expect(later.code).toBe(10);
+    expect(later.out).toContain("write sent the work back 2 times (write->write#defects_found)");
+    expect(later.out).toContain("• lint: no newline at the end of a.test.ts");
+    expect(later.out).toContain("• stray files: tmp-probe.txt");
+    expect(later.out).toContain(`checkout: ${sb.project}`);
+    expect(later.out).toContain("r run write again");
+    expect(later.out).toContain("left waiting; come back with jarvis continue");
+
+    const again = await jarvis(["c"], ON, ["r", "a"]);
+    expect(again.code).toBe(0);
+    expect(again.out).toContain("↻ running write again");
+    expect(again.out).toContain("✓ accepted spec/spec.md@1");
+    expect(again.out).toContain("COMPLETED");
+  });
+
   it("accessible mode: a numbered menu, answered with numbers", async () => {
     const r = await jarvis(["work", "ABC-10", "--workflow", "gated"], { ...ON, JARVIS_ACCESSIBLE: "1" }, [
       "2",

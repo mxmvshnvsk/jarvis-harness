@@ -464,6 +464,12 @@ export class LocalWorkflowEngine {
       this.emit(run, "run.recovered", { stepId: run.currentStep });
       return run;
     }
+    if (run.state === "WAITING_HUMAN" && run.waitingFor?.kind === "loop" && run.currentStep) {
+      // a used-up back edge (ADR-0004 §3): the person fixed the checkout, the step runs again as a
+      // fresh round — not the round that used the loop up, whose agents' state would be restored
+      const fresh = this.rt.history.list(run.id).filter((h) => h.stepId === run.currentStep).length + 1;
+      this.rt.runs.update(run.id, { currentIteration: fresh });
+    }
     const resumed = this.rt.runs.transition(run.id, "RUNNING", { reason: `resumed from ${run.state}` });
     this.emit(resumed, "run.state", { state: resumed.state, reason: resumed.stateReason });
     return resumed;

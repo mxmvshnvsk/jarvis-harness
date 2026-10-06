@@ -101,6 +101,45 @@ describe("LocalWorkflowEngine", () => {
     expect(rt.artifacts.listLatest(run.id, "loop-exhausted")).toHaveLength(1);
   });
 
+  it("runs the step of a used-up loop again as a fresh round after the person fixed it", async () => {
+    const wf = workflowOf({
+      name: "loop",
+      entry: "work",
+      steps: [
+        { id: "work", kind: "agentic", agent: "work", transitions: { onSuccess: "verify" } },
+        {
+          id: "verify",
+          kind: "agentic",
+          agent: "verify",
+          transitions: {
+            onSuccess: "DONE",
+            onOutcome: { defects_found: { to: "work", maxIterations: 1 } },
+          },
+        },
+      ],
+    });
+    let fixed = false;
+    const seen: string[] = [];
+    const engine = engineFor(rt, [wf], {
+      work: async () => ({ status: "success" }),
+      verify: async (ctx) => {
+        seen.push(`${ctx.iteration}:${ctx.restored ? "restored" : "fresh"}`);
+        ctx.saveCheckpoint({ toolCalls: 40 });
+        return fixed
+          ? { status: "success" }
+          : { status: "success", outcome: "defects_found", reason: "lint: no final newline" };
+      },
+    });
+    const run = createRun(rt, "loop");
+    const parked = await engine.execute(run.id, owner);
+    expect(parked.run.waitingFor).toMatchObject({ kind: "loop" });
+    expect(parked.run).toMatchObject({ currentStep: "verify", currentIteration: 2 });
+    fixed = true;
+    const resumed = await engine.execute(run.id, owner);
+    expect(resumed.run.state).toBe("COMPLETED");
+    expect(seen).toEqual(["1:fresh", "2:fresh", "3:fresh"]);
+  });
+
   it("parks on the approval gate, resumes after approval, and re-parks after a human edit", async () => {
     const wf = workflowOf({
       name: "gate",

@@ -270,6 +270,45 @@ async function changes(
   return parts.length > 0 ? parts.join("\n\n") : "";
 }
 
+/**
+ * A back edge used up its rounds (ADR-0004 §3): the step kept sending the work back. The card says
+ * why the last round failed and where the run's checkout is; the person fixes it there and runs the
+ * step again (`r`), or leaves it (`q`). Pilot: the gate left at once ("left waiting") with nothing to
+ * decide, and the only way on was knowing about `jarvis resume`.
+ */
+async function loopGate(ctx: CliContext, runtime: Runtime, run: Run, prompt: Prompt): Promise<GateResult> {
+  const st = ctx.out.style;
+  const record = runtime.artifacts.listLatest(run.id, "loop-exhausted")[0];
+  const doc = record ? parseDoc(runtime.artifacts.text(record)) : undefined;
+  const edge = typeof doc?.edge === "string" ? doc.edge : (run.waitingFor?.detail ?? "a back edge");
+  const reason = typeof doc?.reason === "string" ? doc.reason : "";
+  ctx.out.line();
+  ctx.out.line(
+    `  ${st.heading(`${run.currentStep ?? "the step"} sent the work back ${typeof doc?.iterations === "number" ? `${doc.iterations} times` : "too often"}`)} ${st.muted(`(${edge})`)}`,
+  );
+  if (reason)
+    for (const part of reason.split("; ").slice(0, 4)) ctx.out.line(`  ${st.warn("•")} ${cut(part, 300)}`);
+  ctx.out.line(`  ${st.muted("checkout:")} ${run.workspace.path}`);
+  ctx.out.line(`  ${st.muted("fix it there yourself, then run the step again")}`);
+  for (;;) {
+    ctx.out.line();
+    ctx.out.line(
+      `  ${[`${st.cmd("enter")} ${st.muted("read the reasons whole")}`, `${st.cmd("r")} ${st.muted(`run ${run.currentStep ?? "the step"} again`)}`, `${st.cmd("q")} ${st.muted("decide later")}`].join("    ")}`,
+    );
+    const input = await prompt.ask(`${st.cmd(">")} `);
+    if (input === undefined || input === "q") return "detached";
+    if (input === "") {
+      ctx.out.raw(reason || "(no reason recorded)");
+      continue;
+    }
+    if (input === "r") {
+      ctx.out.line(`${st.warn("↻")} running ${run.currentStep ?? "the step"} again`);
+      return "decided";
+    }
+    ctx.out.line(st.muted("  enter, r or q"));
+  }
+}
+
 export async function humanGate(
   ctx: CliContext,
   runtime: Runtime,
@@ -290,6 +329,7 @@ export async function humanGate(
       ? "decided"
       : "detached";
   }
+  if (run.waitingFor?.kind === "loop") return loopGate(ctx, runtime, run, prompt);
   const awaited = awaitedArtifact(runtime, run);
   if (!awaited) return "detached";
   const { type, artifact } = awaited;
