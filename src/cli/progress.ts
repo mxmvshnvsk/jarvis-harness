@@ -1,4 +1,4 @@
-import { activityOf, formatActivity, kilo, noticeOf } from "../app/activity.ts";
+import { activityOf, formatActivity, formatRecent, kilo, noticeOf } from "../app/activity.ts";
 import { duration, Journey, type LoopReport, type StepReport } from "../app/journey.ts";
 import type { Runtime } from "../app/runtime.ts";
 import type { ArtifactVersion } from "../core/domain/artifact.ts";
@@ -299,12 +299,17 @@ export function followRun(ctx: CliContext, runtime: Runtime, options: FollowOpti
     const modelId = activity.step?.modelId;
     const timeoutMs = modelId ? runtime.loaded.config.models[modelId]?.timeoutMs : undefined;
     const stepOutputTokens = runtime.loaded.config.budget.perStep.outputTokens;
+    const format = {
+      paint: st,
+      ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+      ...(stepOutputTokens !== undefined ? { stepOutputTokens } : {}),
+    };
+    // two lines while an agent works: where it is and what it waits for, then its last tool calls
+    const recent = formatRecent(activity, format);
     ctx.out.progress(
-      `${spinner} ${formatActivity(activity, {
-        paint: st,
-        ...(timeoutMs !== undefined ? { timeoutMs } : {}),
-        ...(stepOutputTokens !== undefined ? { stepOutputTokens } : {}),
-      })}`,
+      recent
+        ? [`${spinner} ${formatActivity(activity, { ...format, lastTool: false })}`, recent]
+        : `${spinner} ${formatActivity(activity, format)}`,
     );
   };
   draw();

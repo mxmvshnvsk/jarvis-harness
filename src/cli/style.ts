@@ -152,9 +152,55 @@ export const PLAIN: Style = createStyle(false);
 // biome-ignore lint/suspicious/noControlCharactersInRegex: matching ANSI escapes is the point
 const ANSI = /\u001b\[[0-9;]*m|\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)/g;
 
-/** Length as the terminal shows it (escapes do not take columns). */
+/** Columns a character takes: 0 for combining marks and joiners, 2 for wide (CJK, emoji), else 1. */
+export function charColumns(ch: string): number {
+  const c = ch.codePointAt(0) ?? 0;
+  if (c === 0x200d || (c >= 0xfe00 && c <= 0xfe0f) || (c >= 0x300 && c <= 0x36f)) return 0;
+  if (
+    (c >= 0x1100 && c <= 0x115f) ||
+    (c >= 0x2e80 && c <= 0xa4cf) ||
+    (c >= 0xac00 && c <= 0xd7a3) ||
+    (c >= 0xf900 && c <= 0xfaff) ||
+    (c >= 0xfe30 && c <= 0xfe4f) ||
+    (c >= 0xff00 && c <= 0xff60) ||
+    (c >= 0xffe0 && c <= 0xffe6) ||
+    (c >= 0x1f300 && c <= 0x1faff) ||
+    (c >= 0x20000 && c <= 0x3fffd)
+  )
+    return 2;
+  return 1;
+}
+
+/** Length as the terminal shows it: escapes take no columns, wide characters two. */
 export function visibleLength(text: string): number {
-  return [...text.replace(ANSI, "")].length;
+  let n = 0;
+  for (const ch of text.replace(ANSI, "")) n += charColumns(ch);
+  return n;
+}
+
+// biome-ignore lint/suspicious/noControlCharactersInRegex: matching ANSI escapes is the point
+const TOKEN = /\u001b\[[0-9;]*m|\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)|[\s\S]/gu;
+
+/**
+ * A styled line cut to `width` columns without breaking an escape: colours and links stay, the cut
+ * ends with `…` and a reset. A live line wider than the terminal would wrap and break the redraw.
+ */
+export function cutStyled(text: string, width: number): string {
+  if (visibleLength(text) <= width) return text;
+  let out = "";
+  let used = 0;
+  for (const token of text.match(TOKEN) ?? []) {
+    if (token.startsWith("\u001b")) {
+      out += token;
+      continue;
+    }
+    const w = charColumns(token);
+    if (used + w > width - 1) break;
+    out += token;
+    used += w;
+  }
+  // close what the cut left open: colours, a link
+  return text.includes("\u001b") ? `${out}…\u001b[0m\u001b]8;;\u0007` : `${out}…`;
 }
 
 export function stripAnsi(text: string): string {

@@ -31,6 +31,12 @@ export interface Activity {
   readonly toolCalls: number;
   readonly avgLatencyMs?: number;
   readonly lastTool?: { readonly capability: string; readonly detail?: string; readonly ok: boolean };
+  /** The last few tool calls of the current step, oldest first: what the agent is doing. */
+  readonly recentTools?: ReadonlyArray<{
+    readonly capability: string;
+    readonly detail?: string;
+    readonly ok: boolean;
+  }>;
   /** Inside an agent step: since when the agent waits for the model (the last thing that happened). */
   readonly waitingSince?: string;
   readonly waitingMs?: number;
@@ -70,6 +76,7 @@ export function activityOf(events: readonly StoredEvent[], now: Date = new Date(
   let toolCalls = 0;
   let latency = 0;
   let lastTool: Activity["lastTool"];
+  let recent: Array<NonNullable<Activity["lastTool"]>> = [];
   let agentActive = false;
   let waitingSince: string | undefined;
   let lastRetry: string | undefined;
@@ -89,6 +96,7 @@ export function activityOf(events: readonly StoredEvent[], now: Date = new Date(
         };
         agentActive = false;
         waitingSince = undefined;
+        recent = [];
         break;
       case "step.finish":
         agentActive = false;
@@ -137,6 +145,7 @@ export function activityOf(events: readonly StoredEvent[], now: Date = new Date(
         const capability = str(p.capability) ?? "?";
         const detail = detailOf(p.args);
         lastTool = { capability, ok: p.ok !== false, ...(detail ? { detail } : {}) };
+        recent = [...recent, lastTool].slice(-3);
         if (agentActive) waitingSince = e.ts;
         retrying = undefined;
         receiving = undefined;
@@ -174,6 +183,7 @@ export function activityOf(events: readonly StoredEvent[], now: Date = new Date(
     toolCalls,
     ...(modelCalls > 0 ? { avgLatencyMs: Math.round(latency / modelCalls) } : {}),
     ...(lastTool ? { lastTool } : {}),
+    ...(recent.length > 0 && !finished ? { recentTools: recent } : {}),
     ...(waitingMs !== undefined && waitingSince ? { waitingSince, waitingMs } : {}),
     ...(lastRetry ? { lastRetry } : {}),
     ...(retrying && waitingMs !== undefined ? { retrying } : {}),
@@ -238,6 +248,20 @@ export interface FormatOptions {
   readonly timeoutMs?: number;
   /** Per-step output token cap (budget.perStep.outputTokens). */
   readonly stepOutputTokens?: number;
+  /** Name the last tool at the end of the line (false when a line of its own shows the recent ones). */
+  readonly lastTool?: boolean;
+}
+
+/** The second line of the live region: the step's last tool calls, `↳ read src/a.ts · search foo ✗`. */
+export function formatRecent(a: Activity, options: FormatOptions = {}): string | undefined {
+  const st = options.paint ?? NO_PAINT;
+  if (!a.recentTools || a.recentTools.length === 0 || a.waitingMs === undefined) return undefined;
+  const calls = a.recentTools.map((t) => {
+    const name = t.capability.slice(t.capability.lastIndexOf(".") + 1);
+    const detail = t.detail ? ` ${tail(t.detail, 36)}` : "";
+    return `${name}${detail}${t.ok ? "" : ` ${st.bad("✗")}`}`;
+  });
+  return `  ${st.muted("↳")} ${st.muted(calls.join(" · "))}`;
 }
 
 /**
@@ -283,7 +307,7 @@ export function formatActivity(a: Activity, options: FormatOptions = {}): string
   const cap = options.stepOutputTokens ? `/${kilo(options.stepOutputTokens)}` : "";
   parts.push(`tokens in ${kilo(a.promptTokens)} out ${kilo(a.outputTokens)}${cap}`);
   if (a.retries > 0) parts.push(st.warn(`${a.retries} retr${a.retries === 1 ? "y" : "ies"}`));
-  if (a.lastTool) {
+  if (a.lastTool && options.lastTool !== false) {
     const detail = a.lastTool.detail ? ` ${tail(a.lastTool.detail, 40)}` : "";
     parts.push(st.muted(`last ${a.lastTool.capability}${detail}`) + (a.lastTool.ok ? "" : ` ${st.bad("✗")}`));
   }

@@ -164,7 +164,10 @@ describe("the progress line", () => {
     o.progress("⠋ 0:01 · map#1 onboard-mapper · model 0 calls");
     o.progress("⠙ 0:02");
     o.line("run run_1: COMPLETED");
-    expect(err.text()).toBe("\r\u001b[2K⠋ 0:01 · map#1 onboard-mappe…\r\u001b[2K⠙ 0:02\r\u001b[2K");
+    // each redraw is one synchronized frame (DEC 2026)
+    expect(err.text()).toBe(
+      "\u001b[?2026h\r\u001b[2K⠋ 0:01 · map#1 onboard-mappe…\u001b[?2026l\u001b[?2026h\r\u001b[2K⠙ 0:02\u001b[?2026l\r\u001b[2K",
+    );
     expect(out.text()).toBe("run run_1: COMPLETED\n");
   });
 

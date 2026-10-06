@@ -1,5 +1,5 @@
 import { supportsHyperlinks, terminalOf } from "./notify.ts";
-import { colorEnabled, createStyle, type Style, stripAnsi } from "./style.ts";
+import { colorEnabled, createStyle, cutStyled, type Style } from "./style.ts";
 
 /** Exit codes (ADR-0009 §3). */
 export const EXIT = {
@@ -31,8 +31,12 @@ export interface Output {
   result(value: unknown, render: () => void): void;
   /** Whether `progress` draws anything (a terminal on stderr, not `--json`, not JARVIS_PROGRESS=off). */
   readonly live: boolean;
-  /** Redraws the one-line progress on stderr; `undefined` clears it. Other output clears it first. */
-  progress(text?: string): void;
+  /**
+   * Redraws the live region on stderr — one line, or a few (`string[]`); `undefined` clears it. Other
+   * output clears it first. Each line is cut to the terminal's width (read on every draw, so a
+   * resize is followed); the redraw is one synchronized update, so it does not flicker.
+   */
+  progress(text?: string | readonly string[]): void;
   /** A control sequence for the terminal itself (title, notification), on stderr when it is one. */
   terminal(sequence: string): void;
 }
@@ -61,11 +65,13 @@ export function createOutput(
   const glyph = (text: string) =>
     text.replace(/^(⚠|⏸|✗)/, (g) => (g === "✗" ? errStyle.bad(g) : errStyle.warn(g)));
   const live = !json && options.progress !== false && err.isTTY === true;
-  let shown = false;
+  let shown = 0;
+  /** Erases the live region: the current line, then each line above it that belongs to it. */
+  const erase = () => `\r\u001b[2K${"\u001b[1A\u001b[2K".repeat(Math.max(0, shown - 1))}`;
   const clear = () => {
     if (!shown) return;
-    streams.err.write("\r\u001b[2K");
-    shown = false;
+    streams.err.write(erase());
+    shown = 0;
   };
   return {
     json,
@@ -101,12 +107,12 @@ export function createOutput(
     progress(text) {
       if (!live) return;
       if (text === undefined) return clear();
-      const width = Math.max(20, (err.columns ?? 120) - 1);
-      // a styled line that does not fit loses its colours rather than get an escape cut in half
-      const plain = stripAnsi(text);
-      const line = [...plain].length > width ? `${[...plain].slice(0, width - 1).join("")}…` : text;
-      streams.err.write(`\r\u001b[2K${line}`);
-      shown = true;
+      const lines = typeof text === "string" ? [text] : [...text];
+      const columns = Math.max(20, (err.columns ?? 120) - 1);
+      const body = lines.map((l) => cutStyled(l, columns)).join("\n");
+      // DEC 2026 synchronized output: terminals that know it paint the frame at once; others ignore it
+      streams.err.write(`\u001b[?2026h${erase()}${body}\u001b[?2026l`);
+      shown = lines.length;
     },
     terminal(sequence) {
       if (live) streams.err.write(sequence);
