@@ -8,11 +8,12 @@ import type { Actor } from "../core/domain/actor.ts";
 import type { ArtifactVersion } from "../core/domain/artifact.ts";
 import type { Run } from "../core/domain/run.ts";
 import { git } from "../tools/local/exec.ts";
+import { changesIn, checkoutLink, formatChanges, homePath, type ShellIn, systemShell } from "./checkout.ts";
 import { clarifyLoop } from "./commands/human.ts";
 import type { CliContext } from "./context.ts";
 import type { Prompt } from "./prompt.ts";
 import { documentToMarkdown, renderMarkdown } from "./render.ts";
-import { incompleteOf } from "./style.ts";
+import { cutStyled, incompleteOf } from "./style.ts";
 import { artifactLink } from "./view.ts";
 
 /**
@@ -157,6 +158,8 @@ export interface GateTools {
   readonly pager?: (text: string) => boolean;
   /** Opens a file in the person's editor and waits; false when it could not. */
   readonly editor?: (file: string) => boolean;
+  /** Opens a shell in the run's checkout and waits (a used-up loop, `s`). */
+  readonly shell?: ShellIn;
 }
 
 /** `$PAGER` (or `less`), with colours and quitting at once on a short text, as git does. */
@@ -272,41 +275,101 @@ async function changes(
 
 /**
  * A back edge used up its rounds (ADR-0004 §3): the step kept sending the work back. The card says
- * why the last round failed and where the run's checkout is; the person fixes it there and runs the
- * step again (`r`), or leaves it (`q`). Pilot: the gate left at once ("left waiting") with nothing to
- * decide, and the only way on was knowing about `jarvis resume`.
+ * why the last round failed, one reason a line, and where the run's checkout is; `s` opens a shell
+ * there, `r` runs the step again with the person's fix, `q` leaves it. Pilot: the gate left at once
+ * ("left waiting"), then a path of hashes and one long line of reasons.
  */
-async function loopGate(ctx: CliContext, runtime: Runtime, run: Run, prompt: Prompt): Promise<GateResult> {
+async function loopGate(
+  ctx: CliContext,
+  runtime: Runtime,
+  run: Run,
+  prompt: Prompt,
+  shell: ShellIn,
+): Promise<GateResult> {
   const st = ctx.out.style;
   const record = runtime.artifacts.listLatest(run.id, "loop-exhausted")[0];
   const doc = record ? parseDoc(runtime.artifacts.text(record)) : undefined;
   const edge = typeof doc?.edge === "string" ? doc.edge : (run.waitingFor?.detail ?? "a back edge");
-  const reason = typeof doc?.reason === "string" ? doc.reason : "";
+  const route = /^(.+)->(.+)#(.+)$/.exec(edge);
+  const reasons = reasonsOf(typeof doc?.reason === "string" ? doc.reason : "");
+  const step = run.currentStep ?? "the step";
+  const dir = run.workspace.path;
+  const width = ctx.out.columns - 1;
   ctx.out.line();
   ctx.out.line(
-    `  ${st.heading(`${run.currentStep ?? "the step"} sent the work back ${typeof doc?.iterations === "number" ? `${doc.iterations} times` : "too often"}`)} ${st.muted(`(${edge})`)}`,
+    `${st.warn("⏸")} ${st.heading(`${step} sent the work back ${typeof doc?.iterations === "number" ? `${doc.iterations} times` : "too often"}`)} ${st.muted(`— ${route ? `${route[1]} → ${route[2]}, ${route[3]}` : edge}; no rounds left`)}`,
   );
-  if (reason)
-    for (const part of reason.split("; ").slice(0, 4)) ctx.out.line(`  ${st.warn("•")} ${cut(part, 300)}`);
-  ctx.out.line(`  ${st.muted("checkout:")} ${run.workspace.path}`);
-  ctx.out.line(`  ${st.muted("fix it there yourself, then run the step again")}`);
+  // kinds in a column, so the reasons start at one place
+  const pad = Math.min(16, Math.max(0, ...reasons.map((r) => r.kind?.length ?? 0)));
+  const bullet = (r: Reason) =>
+    `  ${st.warn("•")} ${r.kind ? `${st.heading(r.kind)}${" ".repeat(Math.max(0, pad - r.kind.length))}  ` : ""}${r.text}`;
+  for (const r of reasons.slice(0, 4)) ctx.out.line(cutStyled(bullet(r), width));
+  if (reasons.length > 4) ctx.out.line(st.muted(`  +${reasons.length - 4} more — enter shows them`));
+  ctx.out.line();
+  ctx.out.line(
+    `  ${st.muted("fix it by hand in the run's checkout")}  ${checkoutLink(st, dir, ctx.homeDir)}`,
+  );
+  const keys: Array<[string, string, string]> = [
+    ["", "enter", "reasons in full"],
+    ["s", "s", "a shell in the checkout"],
+    ["r", "r", `run ${step} again`],
+    ["q", "q", "later"],
+  ];
   for (;;) {
     ctx.out.line();
-    ctx.out.line(
-      `  ${[`${st.cmd("enter")} ${st.muted("read the reasons whole")}`, `${st.cmd("r")} ${st.muted(`run ${run.currentStep ?? "the step"} again`)}`, `${st.cmd("q")} ${st.muted("decide later")}`].join("    ")}`,
-    );
-    const input = await prompt.ask(`${st.cmd(">")} `);
+    if (ctx.out.accessible) {
+      for (const [i, [, , what]] of keys.entries()) ctx.out.line(`  ${i + 1}. ${what}`);
+      ctx.out.bell();
+    } else ctx.out.line(`  ${keys.map(([, key, what]) => `${st.cmd(key)} ${st.muted(what)}`).join("    ")}`);
+    const answer = await prompt.ask(`${st.cmd(">")} `);
+    const picked = ctx.out.accessible && answer !== undefined ? keys[Number(answer) - 1]?.[0] : undefined;
+    const input = picked ?? answer;
     if (input === undefined || input === "q") return "detached";
     if (input === "") {
-      ctx.out.raw(reason || "(no reason recorded)");
+      if (reasons.length === 0) ctx.out.line(st.muted("  (no reason recorded)"));
+      for (const r of reasons) ctx.out.line(bullet(r));
+      continue;
+    }
+    if (input === "s") {
+      ctx.out.line(st.muted(`  a shell in ${homePath(dir, ctx.homeDir)} — exit (Ctrl-D) to come back`));
+      if (!shell(dir, run)) {
+        ctx.out.line(st.warn(`  could not start a shell; the checkout is ${dir}`));
+        continue;
+      }
+      const changes = changesIn(dir);
+      if (changes && changes.length > 0)
+        ctx.out.line(cutStyled(`  ${st.muted("changed:")} ${formatChanges(changes, st)}`, width));
+      else if (changes) ctx.out.line(st.muted("  nothing changed in the checkout"));
       continue;
     }
     if (input === "r") {
-      ctx.out.line(`${st.warn("↻")} running ${run.currentStep ?? "the step"} again`);
+      ctx.out.line(`${st.warn("↻")} running ${step} again`);
       return "decided";
     }
-    ctx.out.line(st.muted("  enter, r or q"));
+    ctx.out.line(st.muted(ctx.out.accessible ? "  1–4" : "  enter, s, r or q"));
   }
+}
+
+interface Reason {
+  readonly kind?: string;
+  readonly text: string;
+}
+
+/**
+ * `lint_error: …; stray_files: …` — the reasons agents return, joined with "; " (ADR-0004 §4). Split
+ * only before a `kind:`, so a "; " inside a reason stays.
+ */
+export function reasonsOf(text: string): Reason[] {
+  const parts = text
+    .split(/;\s+(?=[a-z][a-z0-9_]*:\s)/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  return parts.map((p) => {
+    const m = /^([a-z][a-z0-9_]*):\s+([\s\S]*)$/.exec(p);
+    return m
+      ? { kind: m[1] as string, text: (m[2] as string).replace(/\s+/g, " ") }
+      : { text: p.replace(/\s+/g, " ") };
+  });
 }
 
 export async function humanGate(
@@ -329,7 +392,8 @@ export async function humanGate(
       ? "decided"
       : "detached";
   }
-  if (run.waitingFor?.kind === "loop") return loopGate(ctx, runtime, run, prompt);
+  if (run.waitingFor?.kind === "loop")
+    return loopGate(ctx, runtime, run, prompt, tools.shell ?? systemShell(ctx));
   const awaited = awaitedArtifact(runtime, run);
   if (!awaited) return "detached";
   const { type, artifact } = awaited;

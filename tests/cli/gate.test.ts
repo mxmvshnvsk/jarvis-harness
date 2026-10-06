@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { changedFilesOf, commentFromTemplate, editorTemplate } from "../../src/cli/gate.ts";
+import { changedFilesOf, commentFromTemplate, editorTemplate, reasonsOf } from "../../src/cli/gate.ts";
 import type { Run } from "../../src/core/domain/run.ts";
 import { sandbox } from "../helpers/tmp.ts";
 
@@ -59,5 +59,18 @@ describe("the card of an implementation", () => {
     } finally {
       sb.cleanup();
     }
+  });
+});
+
+describe("the reasons of a used-up loop", () => {
+  it("one per kind; a '; ' inside a reason stays", () => {
+    expect(reasonsOf("lint_error: exit 1; eol-last at x.ts:113; stray_files: tmp-a.txt\n tmp-b.txt")).toEqual(
+      [
+        { kind: "lint_error", text: "exit 1; eol-last at x.ts:113" },
+        { kind: "stray_files", text: "tmp-a.txt tmp-b.txt" },
+      ],
+    );
+    expect(reasonsOf("tests failed")).toEqual([{ text: "tests failed" }]);
+    expect(reasonsOf("")).toEqual([]);
   });
 });

@@ -41,6 +41,7 @@ import {
   runFollow,
   runGc,
   runResume,
+  runShellIn,
   runShow,
   runWork,
 } from "./commands/run.ts";
@@ -311,6 +312,15 @@ export function buildProgram(options: RunOptions = {}): Command {
     .description("back to the run that waits for you (no id needed): decide right here and go on")
     .action(async (run: string | undefined) => {
       await runContinue(ctxFor(), run);
+    });
+  program
+    .command("shell [run]")
+    .description(
+      "a shell in the run's checkout, to fix something by hand (newest unfinished run here by default)",
+    )
+    .option("--print", 'print the checkout\'s path instead, for cd "$(jarvis shell --print)"')
+    .action(async (run: string | undefined, opts: { print?: boolean }) => {
+      await runShellIn(ctxFor(), run, opts);
     });
   program
     .command("follow [run]")

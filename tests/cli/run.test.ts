@@ -1,3 +1,5 @@
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { Readable, Writable } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createRuntime } from "../../src/app/runtime.ts";
@@ -356,7 +358,7 @@ steps:
       content: JSON.stringify({
         edge: "write->write#defects_found",
         iterations: 2,
-        reason: "lint: no newline at the end of a.test.ts; stray files: tmp-probe.txt",
+        reason: "lint: no newline at the end of a.test.ts; see the rule eol-last; stray_files: tmp-probe.txt",
       }),
       mediaType: "application/json",
       provenance: { kind: "tool", capability: "runtime.loop" },
@@ -369,13 +371,24 @@ steps:
     });
     rt.close();
 
-    const later = await jarvis(["c"], ON, ["q"]);
+    // a "shell" that fixes the checkout, as a person would
+    sb.write("project/tmp-probe.txt", "abc");
+    sb.write("fix.sh", `#!/bin/sh\nrm tmp-probe.txt && echo "$JARVIS_RUN" > fixed-by-shell\n`);
+    const SHELL = { ...ON, SHELL: `sh ${sb.root}/fix.sh`, HOME: sb.home };
+    const later = await jarvis(["c"], SHELL, ["", "s", "q"]);
     expect(later.code).toBe(10);
-    expect(later.out).toContain("write sent the work back 2 times (write->write#defects_found)");
-    expect(later.out).toContain("• lint: no newline at the end of a.test.ts");
-    expect(later.out).toContain("• stray files: tmp-probe.txt");
-    expect(later.out).toContain(`checkout: ${sb.project}`);
-    expect(later.out).toContain("r run write again");
+    expect(later.out).toContain(
+      "⏸ write sent the work back 2 times — write → write, defects_found; no rounds left",
+    );
+    expect(later.out).toContain("  • lint         no newline at the end of a.test.ts; see the rule eol-last");
+    expect(later.out).toContain("  • stray_files  tmp-probe.txt");
+    expect(later.out).toContain(`fix it by hand in the run's checkout  ${sb.project}`);
+    expect(later.out).toContain(
+      "enter reasons in full    s a shell in the checkout    r run write again    q later",
+    );
+    expect(later.out).toContain("a shell in");
+    expect(existsSync(join(sb.project, "tmp-probe.txt"))).toBe(false);
+    expect(readFileSync(join(sb.project, "fixed-by-shell"), "utf8").trim()).toMatch(/^[0-9a-f]{8}$/);
     expect(later.out).toContain("left waiting; come back with jarvis continue");
 
     const again = await jarvis(["c"], ON, ["r", "a"]);
@@ -383,6 +396,9 @@ steps:
     expect(again.out).toContain("↻ running write again");
     expect(again.out).toContain("✓ accepted spec/spec.md@1");
     expect(again.out).toContain("COMPLETED");
+
+    const path = await jarvis(["shell", "--print"], {});
+    expect(path.out.trim()).toBe(sb.project);
   });
 
   it("accessible mode: a numbered menu, answered with numbers", async () => {

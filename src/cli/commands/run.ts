@@ -21,6 +21,7 @@ import { LeaseHeldError } from "../../orchestration/types.ts";
 import { gitIdentityEnv, WorktreeError, WorktreeWorkspace } from "../../orchestration/worktree.ts";
 import { LeaseLostError, newRunId, shortRunId } from "../../storage/runStore.ts";
 import { git } from "../../tools/local/exec.ts";
+import { changesIn, checkoutLink, formatChanges, type ShellIn, systemShell } from "../checkout.ts";
 import type { CliContext } from "../context.ts";
 import { humanGate } from "../gate.ts";
 import { CliExit, EXIT } from "../output.ts";
@@ -1031,5 +1032,54 @@ function prettyJson(text: string): string {
     return JSON.stringify(JSON.parse(text), null, 2);
   } catch {
     return text;
+  }
+}
+
+/**
+ * `jarvis shell [run]`: a shell in a run's checkout (its worktree), so a person fixes something by
+ * hand without copying the path; `--print` (or no terminal) prints the path for `cd "$(…)"`. Without
+ * an id — the newest unfinished run of this repository.
+ */
+export async function runShellIn(
+  ctx: CliContext,
+  ref: string | undefined,
+  options: { print?: boolean; shell?: ShellIn } = {},
+): Promise<void> {
+  const loaded = await loadForCli(ctx);
+  const runtime = createRuntime(loaded, { env: ctx.env });
+  try {
+    const st = ctx.out.style;
+    const root = loaded.project?.root ?? ctx.cwd;
+    const here = runtime.runs
+      .list({ includeTerminal: true, limit: 50 })
+      .filter((r) => r.workspace.repoRoot === root || r.workspace.path === root);
+    const run = ref
+      ? requireRun(ctx, runtime, ref)
+      : (here.find((r) => !["COMPLETED", "FAILED", "CANCELLED"].includes(r.state)) ?? here[0]);
+    if (!run) {
+      ctx.out.error("no run here (`jarvis status --all` lists every run)");
+      throw new CliExit(EXIT.error);
+    }
+    const dir = run.workspace.path;
+    if (!existsSync(dir)) {
+      ctx.out.error(`the checkout of run ${shortRunId(run.id)} is gone: ${dir}`);
+      throw new CliExit(EXIT.error);
+    }
+    const prompt = promptFor(ctx, runtime);
+    prompt?.close();
+    if (options.print || !prompt) {
+      ctx.out.raw(`${dir}\n`);
+      return;
+    }
+    ctx.out.line(
+      `${st.muted("a shell in the checkout of run")} ${st.name(shortRunId(run.id))} ${checkoutLink(st, dir, ctx.homeDir)} ${st.muted("— exit (Ctrl-D) to come back")}`,
+    );
+    (options.shell ?? systemShell(ctx))(dir, run);
+    const changes = changesIn(dir);
+    if (changes && changes.length > 0) ctx.out.line(`${st.muted("changed:")} ${formatChanges(changes, st)}`);
+    if (run.state === "WAITING_HUMAN" || run.state === "SUSPENDED" || run.state === "WAITING_BUDGET")
+      ctx.out.line(`${st.muted("the run waits —")} ${st.cmd("jarvis continue")}`);
+  } finally {
+    await runtime.close();
   }
 }

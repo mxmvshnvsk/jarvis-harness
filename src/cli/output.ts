@@ -34,6 +34,8 @@ export interface Output {
   result(value: unknown, render: () => void): void;
   /** Whether `progress` draws anything (a terminal on stderr, not `--json`, not JARVIS_PROGRESS=off). */
   readonly live: boolean;
+  /** The width of stdout when it is a terminal (100 otherwise), read on every use. */
+  readonly columns: number;
   /**
    * How the course of a run is shown on stderr (`--progress`, JARVIS_PROGRESS): `live` — lines that
    * stay and a redrawn region (a terminal); `plain` — only lines, with a heartbeat (pipes, CI, nohup);
@@ -187,6 +189,10 @@ export function createOutput(
   return {
     json,
     live,
+    get columns() {
+      const c = (streams.out as { columns?: number }).columns;
+      return typeof c === "number" && c >= 40 ? c : 100;
+    },
     accessible,
     progressMode,
     event(value) {
