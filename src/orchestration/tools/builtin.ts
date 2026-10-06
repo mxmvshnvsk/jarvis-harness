@@ -1,6 +1,8 @@
+import { existsSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { CapabilityRegistry } from "../../capabilities/registry.ts";
 import { changedFiles, checkStandards } from "../../knowledge/check.ts";
-import { repoIdOf, updateGraph } from "../../knowledge/graph/update.ts";
+import { impactOf, repoIdOf, updateGraph } from "../../knowledge/graph/update.ts";
 import { loadStandards } from "../../knowledge/standards.ts";
 import type { DeterministicTool } from "../executors.ts";
 
@@ -8,6 +10,28 @@ import type { DeterministicTool } from "../executors.ts";
  * Deterministic tools that need nothing but the stores. Repository, git, test and typecheck
  * tools arrive with the Tool Platform (stage 4).
  */
+/** What makes a change too big or too wide for an impact analysis without a model. */
+export const QUICK_IMPACT = { maxFiles: 2, maxDependents: 15 } as const;
+/** The spec talks about telemetry or documentation: the agent decides what of it is affected. */
+const BEYOND_CODE =
+  /\b(telemetry|metrics?|analytics|tracking|logging|events?|docs|documentation|readme|changelog)\b|метрик|аналитик|событи|документац/i;
+const CODE_FILE = /\.(tsx?|jsx?|mjs|cjs|vue|svelte|py|go|rs|java|kt|cs|rb|php|swift)$/;
+const TEST_FILE = /(\.|_)(test|spec)\.[a-z]+$|(^|\/)(__tests__|tests?)\//;
+
+/** Repository files named in a text: `src/a.ts`, `src/a.ts:89`, `apps/web/src/x.tsx:12-20`. */
+export function filesNamedIn(text: string, workspace: string): string[] {
+  const found = new Set<string>();
+  for (const m of text.matchAll(
+    /(?:^|[\s`'"([])((?:[\w@.-]+\/)*[\w@.-]+\.[A-Za-z]{1,6})(?::\d+(?:-\d+)?)?/g,
+  )) {
+    const path = (m[1] as string).replace(/^\.\//, "");
+    if (path.includes("..") || path.startsWith("/")) continue;
+    const abs = join(workspace, path);
+    if (existsSync(abs) && statSync(abs).isFile()) found.add(path);
+  }
+  return [...found].sort();
+}
+
 export const BUILTIN_TOOLS: Record<string, DeterministicTool> = {
   noop: async () => ({ status: "success" }),
 
@@ -176,6 +200,96 @@ export const BUILTIN_TOOLS: Record<string, DeterministicTool> = {
    * implementation goes back with the evidence. Pilot: tests were "verified" by an agent, with no
    * plain run of jest or tsc.
    */
+  /**
+   * Impact of a small change without a model (`quick:` of the impact step): the files the approved
+   * spec names, their dependents from the project graph and the tests that cover them. Anything else
+   * — no file named, more than two, a wide reach, telemetry or documentation in the spec — is
+   * `needs_agent` and the impact agent does it. Pilot: impact was one more model call of up to five
+   * minutes for a one-line fix whose file the spec already named.
+   */
+  "impact.quick": async (ctx) => {
+    const latest = (type: string) => {
+      const a = ctx.runtime.artifacts.listLatest(ctx.run.id, type)[0];
+      // a name, not the artifact id: the document goes into later prompts and must not change from run to run
+      return a ? { ref: `${a.type}/${a.name}@${a.version}`, text: ctx.runtime.artifacts.text(a) } : undefined;
+    };
+    const spec = latest("spec");
+    if (!spec) return { status: "success", outcome: "needs_agent", reason: "no spec to take the files from" };
+    const research = latest("research");
+    const workspace = ctx.workspace.ref.path;
+    const named = filesNamedIn(spec.text, workspace);
+    const code = named.filter((f) => CODE_FILE.test(f) && !TEST_FILE.test(f));
+    const why =
+      code.length === 0
+        ? "the spec names no code file"
+        : code.length > QUICK_IMPACT.maxFiles
+          ? `the spec names ${code.length} code files`
+          : BEYOND_CODE.test(spec.text)
+            ? "the spec touches telemetry or documentation"
+            : undefined;
+    if (why) return { status: "success", outcome: "needs_agent", reason: why };
+    const extractors = (ctx.runtime.capabilities ?? new CapabilityRegistry())
+      .list()
+      .map((adapter) => adapter.graphExtractor?.())
+      .filter((e) => e !== undefined);
+    if (extractors.length === 0)
+      return { status: "success", outcome: "needs_agent", reason: "no project graph for this stack" };
+    const graph = await updateGraph({
+      workspace,
+      repoId: repoIdOf(workspace),
+      cacheRoot: ctx.runtime.loaded.home.cacheDir,
+      extractors,
+      store: ctx.runtime.graph,
+    });
+    const reach = impactOf(graph.snapshot, code, 2);
+    // a test that imports the code is a test of it, not a dependent
+    const dependents = reach.dependents.filter((d) => !TEST_FILE.test(d.file));
+    if (dependents.length > QUICK_IMPACT.maxDependents)
+      return {
+        status: "success",
+        outcome: "needs_agent",
+        reason: `${dependents.length} files depend on the change`,
+      };
+    const tests = [
+      ...new Set([
+        ...reach.tests,
+        ...reach.dependents.filter((d) => TEST_FILE.test(d.file)).map((d) => d.file),
+        ...named.filter((f) => TEST_FILE.test(f)),
+      ]),
+    ].sort();
+    const doc = {
+      summary: `Derived without a model from the files the approved spec names (${code.join(", ")}), their dependents in the project graph and the tests that cover them.`,
+      sources: [spec.ref, ...(research ? [research.ref] : []), ...code],
+      reasons: [],
+      affected: [
+        ...code.map((path) => ({ path, kind: "code" as const, reason: "named in the approved spec" })),
+        ...tests.map((path) => ({ path, kind: "test" as const, reason: "covers the changed code" })),
+      ],
+      dependencies: dependents.map((d) => (d.distance === 1 ? d.file : `${d.file} (via another file)`)),
+      risks:
+        dependents.length > 0
+          ? [`${dependents.length} file(s) import the changed code; their behaviour may change with it`]
+          : [],
+      unknowns: reach.unresolved.length > 0 ? [`unresolved imports: ${reach.unresolved.join(", ")}`] : [],
+      outcome: "ok",
+    };
+    const artifact = ctx.runtime.artifacts.put({
+      runId: ctx.run.id,
+      type: "impact",
+      name: "impact.json",
+      content: JSON.stringify(doc, null, 2),
+      mediaType: "application/json",
+      provenance: { kind: "tool", capability: "impact.quick" },
+      stepId: ctx.step.id,
+      iteration: ctx.iteration,
+    });
+    return {
+      status: "success",
+      outputs: [`${artifact.artifactId}@${artifact.version}`],
+      reason: `impact from the spec's ${code.length === 1 ? "file" : "files"} and the code graph, no model call`,
+    };
+  },
+
   "project.checks": async (ctx) => {
     const workspace = ctx.workspace.ref.path;
     const base = ctx.workspace.ref.baseCommit ?? ctx.workspace.ref.baseRef;

@@ -132,7 +132,8 @@ const docs: Record<string, (reviewRound: number) => unknown> = {
     goals: ["restart allowed"],
     nonGoals: [],
     requirements: [{ id: "R1", text: "canRestartOnboarding returns true", acceptance: ["unit test"] }],
-    risks: [],
+    // docs and telemetry are in play: the impact agent decides, not the quick path
+    risks: ["the docs and the restart counter in telemetry must follow"],
     openQuestions: [],
     outcome: "ok",
   }),

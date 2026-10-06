@@ -27,6 +27,8 @@ export interface StepReport {
   readonly maxToolCalls?: number;
   /** The agent stopped on a limit, not because it was done: its document may be incomplete. */
   readonly budgetExhausted?: string;
+  /** A `quick:` tool answered for the agent (no model call), or why it could not. */
+  readonly quick?: { readonly tool: string; readonly used: boolean; readonly reason?: string };
 }
 
 export interface LoopReport {
@@ -58,6 +60,7 @@ interface Open {
   outputTokens: number;
   retries: number;
   toolCalls: number;
+  quick?: { tool: string; used: boolean; reason?: string };
   maxToolCalls?: number;
   budgetExhausted?: string;
 }
@@ -110,6 +113,12 @@ export class Journey {
         // tool limit reached" after a Ctrl-C at 15)
         if (o) o.toolCalls = Math.max(o.toolCalls, num(p.restoredToolCalls));
         if (o && num(p.maxToolCalls) > 0) o.maxToolCalls = num(p.maxToolCalls);
+        return [];
+      }
+      case "step.quick": {
+        const tool = str(p.tool);
+        const reason = str(p.reason);
+        if (o && tool) o.quick = { tool, used: p.used === true, ...(reason ? { reason } : {}) };
         return [];
       }
       case "agent.finish": {
@@ -183,6 +192,7 @@ export class Journey {
       toolCalls: o.toolCalls,
       ...(o.maxToolCalls ? { maxToolCalls: o.maxToolCalls } : {}),
       ...(o.budgetExhausted ? { budgetExhausted: o.budgetExhausted } : {}),
+      ...(o.quick ? { quick: o.quick } : {}),
     };
     return [{ kind: "step", report }];
   }

@@ -81,7 +81,8 @@ export function formatStepReport(
   const label = `${r.stepId}${r.iteration > 1 ? `#${r.iteration}` : ""}`;
   const name = st.name(label) + " ".repeat(Math.max(0, width - label.length));
   const facts: string[] = [];
-  if (r.agent) facts.push(r.agent);
+  if (r.quick?.used) facts.push(`${r.quick.tool}, no model call`);
+  else if (r.agent) facts.push(r.agent);
   else if (r.kind) facts.push(r.kind);
   if (r.modelCalls > 0) {
     facts.push(`${r.modelCalls} call${r.modelCalls === 1 ? "" : "s"}`);

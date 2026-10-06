@@ -53,6 +53,17 @@ describe("journey", () => {
     );
   });
 
+  it("says when a quick tool answered for the agent", () => {
+    const j = new Journey(["impact"]);
+    j.push(ev("step.start", "00:00", { stepId: "impact", iteration: 1, kind: "agentic" }));
+    j.push(ev("step.quick", "00:01", { tool: "impact.quick", used: true }));
+    const [line] = j.push(ev("step.finish", "00:02", { stepId: "impact", iteration: 1, status: "success" }));
+    if (line?.kind !== "step") throw new Error("step");
+    expect(
+      formatStepReport(line.report, [{ name: "impact.json", version: 1 } as never], createStyle(false)),
+    ).toEqual(["✓ [1/1] impact  2.0s    impact.quick, no model call  → impact.json"]);
+  });
+
   it("reports an exception and a loop back", () => {
     const j = new Journey();
     j.push(ev("step.start", "00:00", { stepId: "spec", iteration: 2 }));

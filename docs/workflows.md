@@ -57,7 +57,7 @@ flowchart LR
 | requirements | agent `requirements` | research | `requirements` |
 | spec | agent `specification` | research, requirements | `spec` |
 | approve-spec | approval `spec` | | |
-| impact | agent `impact` | research, spec | `impact` |
+| impact | `impact.quick`, иначе agent `impact` | research, spec | `impact` |
 | plan | agent `plan` | spec, impact | `plan` |
 | implementation | agent `implementation` | spec, plan | `implementation` |
 | verify | composite | | |
@@ -69,6 +69,15 @@ flowchart LR
 | approve-impl | approval `implementation` | | |
 | review-analysis | agent `review-analysis` | review-package, spec, requirements, implementation | `review-analysis` |
 | release-notes | agent `release-notes` | spec, implementation, review | `release-notes` |
+
+`quick: <tool>` у агентного шага — детерминированный инструмент, который пробуется первым. Если он дал
+результат, агента не спрашивают; если ответил `needs_agent`, шаг делает агент как обычно (событие `step.quick`
+с причиной, строка шага — `impact.quick, no model call`). У `impact` это `impact.quick`. Он берёт файлы кода,
+которые называет одобренная spec, их зависимых из графа проекта (до двух уровней) и покрывающие их тесты, и
+пишет тот же документ `impact`. Агенту остаётся случай, когда spec не называет ни одного файла кода или
+называет больше двух, когда зависимых больше 15, когда графа для стека нет или когда в spec есть телеметрия,
+метрики, события или документация: что из них затронуто, решает агент. Для правки в одну строку impact
+раньше был ещё одним вызовом модели (на пилоте — до пяти минут).
 
 ## Агенты (ADR-0001 §6)
 

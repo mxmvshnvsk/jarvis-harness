@@ -43,6 +43,8 @@ steps:
   - id: impact
     kind: agentic
     agent: impact
+    # a small change whose files the spec names: the graph answers, no model call
+    quick: impact.quick
     phase: impact
     inputs: [research, spec]
     outputs: [impact]

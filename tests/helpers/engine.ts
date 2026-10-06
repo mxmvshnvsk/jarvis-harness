@@ -48,7 +48,7 @@ export function engineFor(
     workflows: new Map(workflows.map((w) => [w.name, w])),
     executors: {
       deterministic: new DeterministicExecutor(BUILTIN_TOOLS),
-      agentic: new AgenticExecutor(fakeAgentRunner(agents)),
+      agentic: new AgenticExecutor(fakeAgentRunner(agents), BUILTIN_TOOLS),
     },
     leaseOptions: { heartbeatMs: 0 },
     ...(clock ? { clock } : {}),

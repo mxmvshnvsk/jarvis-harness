@@ -19,7 +19,7 @@ export function createEngine(
     workflows: loadWorkflows(runtime.loaded.project?.root),
     executors: {
       deterministic: new DeterministicExecutor(BUILTIN_TOOLS),
-      agentic: new AgenticExecutor(new AgentRuntimeRunner(agents)),
+      agentic: new AgenticExecutor(new AgentRuntimeRunner(agents), BUILTIN_TOOLS),
       ...executors,
     },
   });

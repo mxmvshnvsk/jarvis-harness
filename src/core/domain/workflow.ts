@@ -45,6 +45,11 @@ export const StepDefinitionSchema = z.strictObject({
    * ran on a one-line UI fix and found nothing.
    */
   when: z.strictObject({ affects: z.enum(["code", "test", "docs", "telemetry", "config"]) }).optional(),
+  /**
+   * Agentic steps: a deterministic tool tried first (`impact.quick`). When it produces the result,
+   * the agent is not asked; when it answers `needs_agent`, the agent does the step as usual.
+   */
+  quick: z.string().min(1).optional(),
 });
 export type StepDefinition = z.infer<typeof StepDefinitionSchema>;
 

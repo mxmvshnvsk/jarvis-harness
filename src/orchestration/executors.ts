@@ -58,15 +58,36 @@ export interface AgentRunner {
   run(ctx: StepContext): Promise<StepOutcome>;
 }
 
+/** What a `quick:` tool answers when the step needs its agent after all. */
+export const NEEDS_AGENT = "needs_agent";
+
 export class AgenticExecutor implements StepExecutor {
   readonly kind = "agentic" as const;
   private readonly runner: AgentRunner | undefined;
+  private readonly quickTools: ReadonlyMap<string, DeterministicTool>;
 
-  constructor(runner?: AgentRunner) {
+  constructor(runner?: AgentRunner, quickTools: Record<string, DeterministicTool> = {}) {
     this.runner = runner;
+    this.quickTools = new Map(Object.entries(quickTools));
   }
 
   async execute(ctx: StepContext): Promise<StepOutcome> {
+    const quick = ctx.step.quick ? this.quickTools.get(ctx.step.quick) : undefined;
+    if (quick && ctx.step.quick) {
+      const tried = await quick(ctx, ctx.step.args);
+      ctx.runtime.events.emit({
+        kind: "step.quick",
+        runId: ctx.run.id,
+        stepId: ctx.step.id,
+        iteration: ctx.iteration,
+        payload: {
+          tool: ctx.step.quick,
+          used: tried.status === "success" && tried.outcome !== NEEDS_AGENT,
+          ...(tried.reason ? { reason: tried.reason } : {}),
+        },
+      });
+      if (tried.status === "success" && tried.outcome !== NEEDS_AGENT) return tried;
+    }
     if (!this.runner)
       return { status: "failure", reason: `no agent runner registered for agent "${ctx.step.agent}"` };
     const outcome = await this.runner.run(ctx);
