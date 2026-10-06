@@ -1,5 +1,5 @@
 import type { ModuleFacts, ScanReport } from "./scan.ts";
-import type { VerifiedModuleMap } from "./verify.ts";
+import { isSweeping, type VerifiedModuleMap } from "./verify.ts";
 
 /**
  * Knowledge skeletons rendered from a scan (`jarvis onboard`): facts only, short, no prose that a
@@ -128,6 +128,30 @@ export const MODULE_MARKER =
 const oneLine = (s: string) => s.replace(/\s+/g, " ").trim();
 
 /** Knowledge document for one module: front matter `paths` scopes it to the module's files. */
+/** Marks a claim the reviewer checks against the code before promoting. */
+export const CHECK_MARK = "**[check: a generalisation; the excerpt shows one place]**";
+
+/**
+ * Statements of a rendered module document (Responsibilities, Rules to keep) that generalise
+ * beyond their excerpts, and the document with each of them marked. Documents rendered before
+ * the marker existed get it here, so `candidates show` and `promote` show what to check
+ * (pilot: seven maps were promoted without a single marker).
+ */
+export function markSweeping(markdown: string): { markdown: string; sweeping: string[] } {
+  const sweeping: string[] = [];
+  let inClaims = false;
+  const lines = markdown.split("\n").map((line) => {
+    if (line.startsWith("## ")) inClaims = /^## (Responsibilities|Rules to keep)/.test(line);
+    if (!inClaims || !line.startsWith("- ")) return line;
+    const statement = line.slice(2).replace(/\s*\*\*\[check:.*$/, "");
+    const marked = line.includes("**[check:");
+    if (!marked && !isSweeping(statement)) return line;
+    sweeping.push(statement);
+    return marked ? line : `${line} ${CHECK_MARK}`;
+  });
+  return { markdown: lines.join("\n"), sweeping };
+}
+
 export function renderModuleDoc(map: VerifiedModuleMap, facts?: ModuleFacts): string {
   const lines: string[] = [
     "---",
@@ -155,7 +179,7 @@ export function renderModuleDoc(map: VerifiedModuleMap, facts?: ModuleFacts): st
     lines.push("", `## ${title}`, "");
     for (const c of items) {
       // a generalisation the excerpts cannot prove: the reviewer checks it before promoting
-      const review = c.sweeping ? " **[check: a generalisation; the excerpt shows one place]**" : "";
+      const review = c.sweeping ? ` ${CHECK_MARK}` : "";
       lines.push(`- ${oneLine(c.statement)}${review}`);
       for (const e of c.evidence) lines.push(`  - ${code(`${e.file}:${e.line}`)}: ${code(e.quote)}`);
     }

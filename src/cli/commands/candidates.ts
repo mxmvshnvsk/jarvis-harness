@@ -4,7 +4,7 @@ import { stringify } from "yaml";
 import { createRuntime, type Runtime } from "../../app/runtime.ts";
 import { resolveActor } from "../../core/actor/resolve.ts";
 import type { ArtifactVersion } from "../../core/domain/artifact.ts";
-import { isSweeping } from "../../onboarding/verify.ts";
+import { markSweeping } from "../../onboarding/render.ts";
 import { shortRunId } from "../../storage/runStore.ts";
 import type { CliContext } from "../context.ts";
 import { CliExit, EXIT } from "../output.ts";
@@ -65,17 +65,15 @@ export function nameOf(doc: Pick<CandidateDoc, "title" | "module" | "kind">): st
 /** Statements of a rendered module document that generalise (for candidates made before the marker). */
 function reviewOf(doc: CandidateDoc): string[] {
   if (doc.review) return doc.review;
-  if (!doc.proposal) return [];
-  const out: string[] = [];
-  let inClaims = false;
-  for (const line of doc.proposal.split("\n")) {
-    if (line.startsWith("## ")) inClaims = /^## (Responsibilities|Rules to keep)/.test(line);
-    else if (inClaims && line.startsWith("- ")) {
-      const statement = line.slice(2).replace(/\s*\*\*\[check:.*$/, "");
-      if (isSweeping(statement)) out.push(statement);
-    }
-  }
-  return out;
+  return doc.proposal ? markSweeping(doc.proposal).sweeping : [];
+}
+
+/** The document `promote` writes: a module map gets the check markers it may predate. */
+function documentOf(doc: CandidateDoc): string {
+  const text = doc.proposal ?? doc.rationale;
+  return doc.kind === "knowledge" && (doc.module || /^module\s/.test(doc.title))
+    ? markSweeping(text).markdown
+    : text;
 }
 
 function claimsOf(doc: CandidateDoc): Candidate["claims"] {
@@ -247,7 +245,7 @@ export async function runCandidatesShow(ctx: CliContext, ref: string): Promise<v
         review: c.review,
         files: c.files,
         target: targetOf(loaded.project?.root ?? ctx.cwd, c, undefined),
-        proposal: c.doc.proposal ?? c.doc.rationale,
+        proposal: documentOf(c.doc),
       },
       () => {
         const st = ctx.out.style;
@@ -272,7 +270,7 @@ export async function runCandidatesShow(ctx: CliContext, ref: string): Promise<v
         }
         ctx.out.line();
         ctx.out.line(st.muted("─".repeat(60)));
-        ctx.out.raw(renderMarkdown((c.doc.proposal ?? c.doc.rationale).trimEnd(), st));
+        ctx.out.raw(renderMarkdown(documentOf(c.doc).trimEnd(), st));
         ctx.out.line(st.muted("─".repeat(60)));
         ctx.out.line(`${st.muted("accept ")} ${st.cmd(`jarvis candidates promote ${c.name}`)}`);
         ctx.out.line(`${st.muted("decline")} ${st.cmd(`jarvis candidates reject ${c.name}`)}`);
@@ -340,7 +338,7 @@ export async function runCandidatesPromote(
       const source = `${artifact.artifactId}@${artifact.version}`;
       if (doc.proposal?.startsWith("---\n")) {
         // a ready document (agent-mapped module): keep its front matter, record where it came from
-        writeIfAbsent(ctx, file, doc.proposal.replace(/^---\n/, `---\nsource: ${source}\n`));
+        writeIfAbsent(ctx, file, documentOf(doc).replace(/^---\n/, `---\nsource: ${source}\n`));
       } else {
         const front = stringify({ tags: [], ...(doc.paths ? { paths: doc.paths } : {}), source });
         writeIfAbsent(ctx, file, `---\n${front}---\n# ${doc.title}\n\n${doc.proposal ?? doc.rationale}\n`);

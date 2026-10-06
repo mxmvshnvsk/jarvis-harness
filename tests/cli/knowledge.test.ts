@@ -207,11 +207,11 @@ describe("jarvis candidates: names", () => {
           title: `module ${module}`,
           module,
           claims: { proposed: 5, kept: 4, dropped: 1 },
-          review,
+          // made before the check marker: no `review`, no [check] in the document
           rationale:
             "Mapped by the onboarding agent; 4 of 5 claims were confirmed against the code, 1 dropped.",
           evidence: [`${module}/a.ts:1`, `${module}/a.ts:9`, `${module}/b.ts:3`],
-          proposal: `---\nkind: module\n---\n# ${module}\n\n## Responsibilities\n- Does things.\n`,
+          proposal: `---\nkind: module\n---\n# ${module}\n\n## Responsibilities\n- Does things.\n${review.map((r) => `- ${r}\n`).join("")}`,
           status: "proposed",
         }),
         mediaType: "application/json",
@@ -257,5 +257,13 @@ describe("jarvis candidates: names", () => {
     const rest = await jarvis(["candidates", "reject", "billing"]);
     expect(rest.code).toBe(0);
     expect(rest.out).toContain(`rejected shared-lib/billing@${shortRunId(older.id)}`);
+
+    // promote writes the check marker the old map lacked
+    expect((await jarvis(["candidates", "promote", "plugins"])).code).toBe(0);
+    const doc = readFileSync(join(sb.project, ".jarvis", "knowledge", "module-server-plugins.md"), "utf8");
+    expect(doc).toContain(
+      "- Every request is logged by this plugin. **[check: a generalisation; the excerpt shows one place]**",
+    );
+    expect(doc).toContain("- Does things.\n");
   });
 });
