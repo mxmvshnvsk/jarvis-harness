@@ -138,7 +138,11 @@ const docs: Record<string, (reviewRound: number) => unknown> = {
   }),
   impact: () => ({
     ...base,
-    affected: [{ path: "src/onboarding.ts", kind: "code", reason: "flag" }],
+    affected: [
+      { path: "src/onboarding.ts", kind: "code", reason: "flag" },
+      { path: "docs/onboarding.md", kind: "docs", reason: "documented behaviour" },
+      { path: "src/onboarding.ts", kind: "telemetry", reason: "counter" },
+    ],
     dependencies: [],
     risks: [],
     unknowns: [],
@@ -265,6 +269,7 @@ describe("sdd end to end", () => {
       "verify",
       "tests",
       "standards",
+      "checks",
       "docs",
       "telemetry",
       "review",
@@ -272,6 +277,7 @@ describe("sdd end to end", () => {
       "verify",
       "tests",
       "standards",
+      "checks",
       "docs",
       "telemetry",
       "review",

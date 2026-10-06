@@ -156,6 +156,59 @@ describe("worktree workspace end to end (ADR-0003)", () => {
     expect(branchNameFor("¿…?", "run_6e744e0a434e")).toBe("jarvis/task/6e744e0a");
   });
 
+  it("project.checks runs the package's test/typecheck commands for what changed, without a model", async () => {
+    sb.write(
+      "project/.jarvis/project.yaml",
+      [
+        "version: 1",
+        "workspace: { mode: cwd, allowWrites: true }",
+        "tools:",
+        "  local:",
+        '    test-pkg: "cd pkg && echo tests ran in pkg && exit 3"',
+        '    typecheck-other: "cd other && echo never"',
+        '    lint: "echo not a check"',
+      ].join("\n"),
+    );
+    sb.write(
+      "project/.jarvis/workflows/chk.yaml",
+      `name: chk
+entry: change
+steps:
+  - id: change
+    kind: deterministic
+    tool: repo.write
+    args: { path: "pkg/a.ts", content: "export const a = 1;\\n" }
+    transitions: { onSuccess: checks }
+  - id: checks
+    kind: deterministic
+    tool: project.checks
+    outputs: [checks]
+    transitions: { onSuccess: DONE, onOutcome: { defects_found: { to: change, maxIterations: 1 } } }
+`,
+    );
+    sh(sb.project, ["add", "-A"]);
+    sh(sb.project, ["commit", "-q", "-m", "checks"]);
+    const r = await jarvis(["work", "T-2", "--workflow", "chk"]);
+    expect(r.err).toContain("✓ [2/2] checks");
+    const loaded = await loadConfig({ cwd: sb.project, homeDir: sb.home, env: {} });
+    const rt = createRuntime(loaded, { env: {} });
+    const runId = rt.runs.list({ includeTerminal: true })[0]?.id as string;
+    const checks = JSON.parse(rt.artifacts.text(rt.artifacts.listLatest(runId, "checks")[0] as never)) as {
+      changed: string[];
+      results: Array<{ check: string; ok: boolean; skipped?: string; tail?: string }>;
+      reasons: Array<{ summary: string }>;
+    };
+    rt.close();
+    expect(checks.changed).toEqual(["pkg/a.ts"]);
+    expect(checks.results.map((r) => [r.check, r.ok, r.skipped ?? ""])).toEqual([
+      ["test-pkg", false, ""],
+      ["typecheck-other", true, "no changed code in its scope"],
+    ]);
+    expect(checks.reasons[0]?.summary).toContain(
+      "test-pkg failed: $ cd pkg && echo tests ran in pkg && exit 3 | tests ran in pkg",
+    );
+  });
+
   it("restores the worktree to the last checkpoint on resume", async () => {
     const loaded = await loadConfig({ cwd: sb.project, homeDir: sb.home, env: {} });
     const wt = await WorktreeWorkspace.create({

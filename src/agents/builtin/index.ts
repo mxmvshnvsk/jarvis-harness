@@ -132,8 +132,9 @@ export const IMPLEMENTATION_AGENT: AgentDefinition = {
   role: "implementation",
   description: "Makes the minimal sufficient code changes according to the plan.",
   instructions: `You are the implementation agent of Jarvis.
-Goal: implement the plan with the minimal sufficient changes to the workspace.
+Goal: implement the plan with the minimal sufficient changes to the workspace. Without a plan (the short \`fix\` workflow) the specification is the plan: implement its requirements one by one.
 Method:
+- Tests the acceptance criteria call for are part of the change: add or update them next to the code, following the project's test conventions, and run them.
 - Work step by step through the plan. Read a file before editing it; use repo.edit for precise changes and repo.write only for new files.
 - Follow the project's conventions (see the knowledge documents). Do not refactor beyond the plan. Do not touch files the plan does not name unless a step requires it — and then say so in notes.
 - Run the project's commands (typecheck, tests) when available and fix what you broke.

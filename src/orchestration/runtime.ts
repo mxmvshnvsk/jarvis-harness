@@ -211,6 +211,14 @@ export class LocalWorkflowEngine {
     workspace: Workspace,
   ): Promise<StepOutcome> {
     lease.check();
+    const skip = this.skipReason(run, step);
+    if (skip) {
+      const historyId = this.rt.history.start(run.id, step.id, iteration, []);
+      this.emit(run, "step.start", { stepId: step.id, iteration, kind: step.kind, inputs: [] });
+      this.rt.history.finish(historyId, "success", "skipped", []);
+      this.emit(run, "step.finish", { stepId: step.id, iteration, status: "skipped", reason: skip });
+      return { status: "success" };
+    }
     const inputs = this.inputsFor(run, step);
     const restored = this.restoredState(run, step, iteration);
     const historyId = this.rt.history.start(run.id, step.id, iteration, inputs);
@@ -261,6 +269,22 @@ export class LocalWorkflowEngine {
       const suspend = this.toSuspension(error);
       this.rt.history.finish(historyId, suspend ? "suspended" : "failure", suspend?.state);
       throw error;
+    }
+  }
+
+  /** Why a conditional step (`when:`) has nothing to do in this run; undefined when it runs. */
+  private skipReason(run: Run, step: StepDefinition): string | undefined {
+    const affects = step.when?.affects;
+    if (!affects) return undefined;
+    const impact = this.rt.artifacts.listLatest(run.id, "impact")[0];
+    if (!impact) return undefined;
+    try {
+      const doc = JSON.parse(this.rt.artifacts.text(impact)) as { affected?: Array<{ kind?: string }> };
+      return (doc.affected ?? []).some((a) => a.kind === affects)
+        ? undefined
+        : `the impact analysis names nothing of kind ${affects}`;
+    } catch {
+      return undefined;
     }
   }
 

@@ -329,7 +329,7 @@ async function prepareWorkspace(
       if (answer === "y" || answer === "yes" || answer === "д" || answer === "да") return cwd;
     } else {
       ctx.out.note(
-        `${st.muted("fix workspace.setup in .jarvis/project.yaml, or work in your checkout:")} ${st.cmd("JARVIS_WORKSPACE__MODE=cwd jarvis …")}`,
+        `${st.muted("fix workspace.setup in .jarvis/project.yaml, or work in your checkout:")} ${st.cmd("JARVIS_WORKSPACE__MODE=cwd JARVIS_WORKSPACE__ALLOW_WRITES=true jarvis …")}`,
       );
     }
     throw new CliExit(EXIT.error);

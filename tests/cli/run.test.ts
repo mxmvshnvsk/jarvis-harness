@@ -147,6 +147,32 @@ describe("jarvis work / resume / approve / daemon", () => {
     expect(stolen.out).toContain("COMPLETED");
   });
 
+  it("`jarvis fix` is the short workflow: no requirements, impact, plan, docs, telemetry, release notes", async () => {
+    const { createEngine } = await import("../../src/app/engine.ts");
+    const loaded = await loadConfig({ cwd: sb.project, homeDir: sb.home, env: {} });
+    const rt = createRuntime(loaded, { env: {} });
+    const steps = createEngine(rt)
+      .workflow("fix")
+      .steps.map((s) => s.id);
+    rt.close();
+    expect(steps).toEqual([
+      "discover",
+      "research",
+      "spec",
+      "approve-spec",
+      "implementation",
+      "verify",
+      "standards",
+      "checks",
+      "review",
+      "approve-impl",
+      "review-analysis",
+    ]);
+    const created = await jarvis(["--json", "fix", "ABC-11"], { JARVIS_INTERACTIVE: "off" });
+    expect(created.code).not.toBe(0); // no model configured: the research agent cannot run
+    expect(created.err).toContain("▶ fix · ABC-11");
+  });
+
   it("reports unknown workflows and runs", async () => {
     const r = await jarvis(["work", "X", "--workflow", "nope"]);
     expect(r.code).toBe(1);
@@ -339,5 +365,43 @@ steps:
       const again = await jarvis(["continue", id], OFF);
       expect(again.out).toMatch(new RegExp(`run ${id} went on as [0-9a-f]{8}`));
     });
+  });
+
+  it("skips a step with nothing to do: `when: { affects: docs }` and an impact without docs", async () => {
+    sb.write(
+      "project/.jarvis/workflows/cond.yaml",
+      `name: cond
+entry: impact
+steps:
+  - id: impact
+    kind: deterministic
+    tool: artifact.write
+    args:
+      type: impact
+      name: impact.json
+      content: '{"affected":[{"path":"src/a.ts","kind":"code","reason":"r"}]}'
+    outputs: [impact]
+    transitions: { onSuccess: verify }
+  - id: verify
+    kind: composite
+    children: [docs, notes]
+    transitions: { onSuccess: DONE }
+  - id: docs
+    kind: deterministic
+    tool: fail
+    when: { affects: docs }
+  - id: notes
+    kind: deterministic
+    tool: artifact.write
+    when: { affects: code }
+    args: { type: note, name: n.md, content: "n" }
+`,
+    );
+    const r = await jarvis(["work", "C-1", "--workflow", "cond"], { JARVIS_INTERACTIVE: "off" });
+    expect(r.code).toBe(0);
+    expect(r.err).toContain("– [3/4] docs  skipped: the impact analysis names nothing of kind docs");
+    expect(r.err).toMatch(/✓ \[4\/4\] notes/);
+    expect(r.err).toMatch(/✓ \[2\/4\] verify/);
+    expect(r.out).toContain("COMPLETED");
   });
 });

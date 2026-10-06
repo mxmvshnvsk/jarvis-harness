@@ -69,6 +69,12 @@ export function formatStepReport(
   st: Style,
   width = 0,
 ): string[] {
+  if (r.status === "skipped") {
+    const pos = r.index ? st.muted(`[${r.index}/${r.total}] `) : "";
+    return [
+      `${st.muted("–")} ${pos}${st.muted(r.stepId)}  ${st.muted(`skipped: ${r.reason ?? "nothing to do"}`)}`,
+    ];
+  }
   const ok = r.status === "success";
   const glyph = ok ? st.ok("✓") : st.bad("✗");
   const pos = r.index ? st.muted(`[${r.index}/${r.total}] `) : "";

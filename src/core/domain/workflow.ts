@@ -39,6 +39,12 @@ export const StepDefinitionSchema = z.strictObject({
   transitions: StepTransitionsSchema.prefault({}),
   /** Only for composite steps: independent children run in parallel with a shared budget. */
   children: z.array(z.string().min(1)).default([]),
+  /**
+   * Run only when it has something to do: `affects: docs` — the run's impact analysis names an
+   * affected item of that kind (no impact analysis: the step runs). Pilot: docs and telemetry agents
+   * ran on a one-line UI fix and found nothing.
+   */
+  when: z.strictObject({ affects: z.enum(["code", "test", "docs", "telemetry", "config"]) }).optional(),
 });
 export type StepDefinition = z.infer<typeof StepDefinitionSchema>;
 

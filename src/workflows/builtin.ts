@@ -70,7 +70,7 @@ steps:
   # ADR-0019 §8 DAG: implementation → {tests, docs, telemetry} → review; children run in parallel.
   - id: verify
     kind: composite
-    children: [tests, standards, docs, telemetry]
+    children: [tests, standards, checks, docs, telemetry]
     transitions:
       onSuccess: review
       onOutcome:
@@ -80,13 +80,19 @@ steps:
   - id: docs
     kind: agentic
     agent: docs
+    when: { affects: docs }
     inputs: [spec, implementation]
     outputs: [docs]
   - id: telemetry
     kind: agentic
     agent: telemetry
+    when: { affects: telemetry }
     inputs: [spec, impact, implementation]
     outputs: [telemetry]
+  - id: checks
+    kind: deterministic
+    tool: project.checks
+    outputs: [checks]
   - id: standards
     kind: deterministic
     tool: standards.check
@@ -268,8 +274,103 @@ steps:
       onSuccess: DONE
 `;
 
+/**
+ * `jarvis fix`: the short way for a bug. Pilot: `sdd` ran eleven agent steps for a one-line fix —
+ * requirements, impact, plan, docs, telemetry and release notes re-read the same files and added
+ * nothing. Kept: research, a specification a person approves, the change with its test, the
+ * project's own checks without a model, review, and the final approval.
+ */
+export const FIX_WORKFLOW = `
+name: fix
+version: 1
+description: A bug fix — research, a specification to approve, the change with its test, the project's checks, review (jarvis fix)
+entry: discover
+steps:
+  - id: discover
+    kind: deterministic
+    tool: project.discover
+    outputs: [project-capabilities]
+    transitions: { onSuccess: research }
+  - id: research
+    kind: agentic
+    agent: research
+    phase: research
+    outputs: [research]
+    transitions: { onSuccess: spec }
+  - id: spec
+    kind: agentic
+    agent: specification
+    phase: spec
+    inputs: [research]
+    outputs: [spec]
+    transitions: { onSuccess: approve-spec }
+  - id: approve-spec
+    kind: approval
+    artifactType: spec
+    transitions:
+      onSuccess: implementation
+      onOutcome:
+        request_changes: { to: spec, maxIterations: 3 }
+  - id: implementation
+    kind: agentic
+    agent: implementation
+    phase: implementation
+    inputs: [research, spec]
+    outputs: [implementation]
+    transitions: { onSuccess: verify }
+  - id: verify
+    kind: composite
+    children: [standards, checks]
+    transitions:
+      onSuccess: review
+      onOutcome:
+        defects_found: { to: implementation, maxIterations: 2 }
+        standards_violation: { to: implementation, maxIterations: 2 }
+  - id: standards
+    kind: deterministic
+    tool: standards.check
+    outputs: [standards-check]
+  - id: checks
+    kind: deterministic
+    tool: project.checks
+    outputs: [checks]
+  - id: review
+    kind: agentic
+    agent: review
+    phase: review
+    inputs: [spec, implementation, checks, standards-check]
+    outputs: [review]
+    transitions:
+      onSuccess: approve-impl
+      onOutcome:
+        fix_required: { to: implementation, maxIterations: 3 }
+        plan_wrong: { to: implementation, maxIterations: 1 }
+        requirements_wrong: { to: spec, maxIterations: 1 }
+  - id: approve-impl
+    kind: approval
+    artifactType: implementation
+    transitions:
+      onSuccess: DONE
+      onOutcome:
+        request_changes: { to: implementation, maxIterations: 3 }
+        review_submitted: { to: review-analysis, maxIterations: 5 }
+  - id: review-analysis
+    kind: agentic
+    agent: review-analysis
+    phase: review
+    inputs: [review-package, spec, implementation]
+    outputs: [review-analysis]
+    transitions:
+      onSuccess: approve-impl
+      onOutcome:
+        fix_required: { to: implementation, maxIterations: 3 }
+        spec_wrong: { to: spec, maxIterations: 1 }
+        requirements_wrong: { to: spec, maxIterations: 1 }
+`;
+
 export const BUILTIN_WORKFLOWS: Readonly<Record<string, string>> = {
   sdd: SDD_WORKFLOW,
+  fix: FIX_WORKFLOW,
   smoke: SMOKE_WORKFLOW,
   research: RESEARCH_WORKFLOW,
   spec: SPEC_WORKFLOW,

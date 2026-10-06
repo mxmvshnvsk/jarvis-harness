@@ -147,6 +147,15 @@ export function buildProgram(options: RunOptions = {}): Command {
       await runWork(ctxFor(), task, { workflow: "research", ...(opts.base ? { base: opts.base } : {}) });
     });
   program
+    .command("fix <task>")
+    .description(
+      "a bug fix, the short way: research, a spec to approve, the change with its test, the project's checks, review (built-in workflow `fix`)",
+    )
+    .option("--base <ref>", "base ref for the run's worktree (default: HEAD)")
+    .action(async (task: string, opts: { base?: string }) => {
+      await runWork(ctxFor(), task, { workflow: "fix", ...(opts.base ? { base: opts.base } : {}) });
+    });
+  program
     .command("spec <task>")
     .description("research, requirements and a specification up to its approval (built-in workflow `spec`)")
     .option("--base <ref>", "base ref for the run's worktree (default: HEAD)")

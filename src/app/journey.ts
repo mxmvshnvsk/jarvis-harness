@@ -64,20 +64,34 @@ interface Open {
 
 /** Feeds events in journal order; returns the lines each event completes. */
 export class Journey {
-  private open: Open | undefined;
+  /** Steps in flight by id: the children of a composite step run side by side (verify). */
+  private readonly open = new Map<string, Open>();
+  private last: string | undefined;
   private readonly plan: readonly string[];
 
   constructor(plan: readonly string[] = []) {
     this.plan = plan;
   }
 
+  /** The step an event belongs to: by its stepId, else the one step in flight, else the latest. */
+  private at(e: StoredEvent, p: Record<string, unknown>): Open | undefined {
+    // the payload names the step exactly (step.finish of a composite child); the event field may be the parent
+    const id = str(p.stepId) ?? e.stepId;
+    if (id && this.open.has(id)) return this.open.get(id);
+    if (this.open.size === 1) return [...this.open.values()][0];
+    return this.last ? this.open.get(this.last) : undefined;
+  }
+
   push(e: StoredEvent): JourneyLine[] {
     const p = (e.payload ?? {}) as Record<string, unknown>;
+    const o = e.kind === "step.start" ? undefined : this.at(e, p);
     switch (e.kind) {
       case "step.start": {
         const kind = str(p.kind);
-        this.open = {
-          stepId: str(p.stepId) ?? e.stepId ?? "?",
+        const stepId = str(p.stepId) ?? e.stepId ?? "?";
+        this.last = stepId;
+        this.open.set(stepId, {
+          stepId,
           iteration: num(p.iteration) || (e.iteration ?? 1),
           startedAt: e.ts,
           modelCalls: 0,
@@ -86,38 +100,38 @@ export class Journey {
           retries: 0,
           toolCalls: 0,
           ...(kind ? { kind } : {}),
-        };
+        });
         return [];
       }
       case "agent.start": {
         const agent = str(p.agent);
-        if (this.open && agent) this.open.agent = agent;
+        if (o && agent) o.agent = agent;
         // a resumed step goes on from its checkpoint: count the tool calls made before (pilot: "5/20 tools ·
         // tool limit reached" after a Ctrl-C at 15)
-        if (this.open) this.open.toolCalls = Math.max(this.open.toolCalls, num(p.restoredToolCalls));
-        if (this.open && num(p.maxToolCalls) > 0) this.open.maxToolCalls = num(p.maxToolCalls);
+        if (o) o.toolCalls = Math.max(o.toolCalls, num(p.restoredToolCalls));
+        if (o && num(p.maxToolCalls) > 0) o.maxToolCalls = num(p.maxToolCalls);
         return [];
       }
       case "agent.finish": {
         const exhausted = str(p.budgetExhausted);
-        if (this.open && exhausted) this.open.budgetExhausted = exhausted;
+        if (o && exhausted) o.budgetExhausted = exhausted;
         return [];
       }
       case "model.call":
-        if (this.open) {
-          this.open.modelCalls += 1;
-          this.open.promptTokens += num(p.promptTokens);
-          this.open.outputTokens += num(p.outputTokens);
-          this.open.retries += num(p.retries);
+        if (o) {
+          o.modelCalls += 1;
+          o.promptTokens += num(p.promptTokens);
+          o.outputTokens += num(p.outputTokens);
+          o.retries += num(p.retries);
         }
         return [];
       case "tool.call":
-        if (this.open) this.open.toolCalls += 1;
+        if (o) o.toolCalls += 1;
         return [];
       case "step.finish":
-        return this.close(e, str(p.status) ?? "success", str(p.outcome), str(p.reason));
+        return this.close(o, e, str(p.status) ?? "success", str(p.outcome), str(p.reason));
       case "step.error":
-        return this.close(e, "error", undefined, str(p.message) ?? str(p.error));
+        return this.close(o, e, "error", undefined, str(p.message) ?? str(p.error));
       case "workflow.loop": {
         const reasons = str(p.reasons);
         const edge = str(p.edge) ?? "?";
@@ -142,10 +156,15 @@ export class Journey {
     }
   }
 
-  private close(e: StoredEvent, status: string, outcome?: string, reason?: string): JourneyLine[] {
-    const o = this.open;
+  private close(
+    o: Open | undefined,
+    e: StoredEvent,
+    status: string,
+    outcome?: string,
+    reason?: string,
+  ): JourneyLine[] {
     if (!o) return [];
-    this.open = undefined;
+    this.open.delete(o.stepId);
     const at = this.plan.indexOf(o.stepId);
     const report: StepReport = {
       stepId: o.stepId,

@@ -152,7 +152,11 @@ const docs: Record<string, () => unknown> = {
   }),
   impact: () => ({
     ...base,
-    affected: [{ path: "src/onboarding.ts", kind: "code", reason: "flag" }],
+    affected: [
+      { path: "src/onboarding.ts", kind: "code", reason: "flag" },
+      { path: "docs/onboarding.md", kind: "docs", reason: "documented behaviour" },
+      { path: "src/onboarding.ts", kind: "telemetry", reason: "counter" },
+    ],
     outcome: "ok",
   }),
   plan: () => ({
@@ -540,7 +544,7 @@ describe("review mode v1", () => {
       "approve-impl->review-analysis#review_submitted": 1,
       "review-analysis->implementation#fix_required": 1,
     });
-    expect(detail.steps.map((s) => s.stepId).slice(-11)).toEqual([
+    expect(detail.steps.map((s) => s.stepId).slice(-12)).toEqual([
       "approve-impl",
       "approve-impl",
       "review-analysis",
@@ -548,6 +552,7 @@ describe("review mode v1", () => {
       "verify",
       "tests",
       "standards",
+      "checks",
       "docs",
       "telemetry",
       "review",

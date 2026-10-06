@@ -167,4 +167,65 @@ export const BUILTIN_TOOLS: Record<string, DeterministicTool> = {
         .join("; "),
     };
   },
+
+  /**
+   * The project's own checks on what the run changed, without a model (stage of `verify`): every
+   * `tools.local` command named `test*` or `typecheck*` whose package (`cd <dir> && …`) holds a
+   * changed file; jest runs only the tests related to the changed files (`--findRelatedTests`).
+   * A failing check → outcome `defects_found` with the command and the tail of its output, so the
+   * implementation goes back with the evidence. Pilot: tests were "verified" by an agent, with no
+   * plain run of jest or tsc.
+   */
+  "project.checks": async (ctx) => {
+    const workspace = ctx.workspace.ref.path;
+    const base = ctx.workspace.ref.baseCommit ?? ctx.workspace.ref.baseRef;
+    const changed = await changedFiles(workspace, base);
+    const results: Array<{ check: string; command: string; ok: boolean; skipped?: string; tail?: string }> =
+      [];
+    for (const [name, command] of Object.entries(ctx.runtime.loaded.config.tools.local)) {
+      if (!/^(test|typecheck)/.test(name)) continue;
+      const dir = /^\s*cd\s+([^\s&;]+)\s*&&/.exec(command)?.[1]?.replace(/\/+$/, "");
+      const inScope = dir ? changed.filter((f) => f === dir || f.startsWith(`${dir}/`)) : changed;
+      const code = inScope.filter((f) => /\.(tsx?|jsx?|mjs|cjs)$/.test(f));
+      if (code.length === 0) {
+        results.push({ check: name, command, ok: true, skipped: "no changed code in its scope" });
+        continue;
+      }
+      const related =
+        name.startsWith("test") && /\bjest\b/.test(command)
+          ? ` --findRelatedTests ${code.map((f) => (dir ? f.slice(dir.length + 1) : f)).join(" ")}`
+          : "";
+      const r = await ctx.tools.invoke(`project.${name}`, related ? { args: related.trim() } : {});
+      results.push({
+        check: name,
+        command: `${command}${related}`,
+        ok: r.ok,
+        ...(r.ok ? {} : { tail: (r.text ?? r.denied ?? "").split("\n").slice(-40).join("\n") }),
+      });
+    }
+    const failed = results.filter((r) => !r.ok);
+    const reasons = failed.map((r) => ({
+      kind: "defects_found",
+      summary: `${r.check} failed: ${(r.tail ?? "").split("\n").filter(Boolean).slice(-3).join(" | ").slice(0, 400)}`,
+      sourceRefs: [`check:${r.check}`],
+    }));
+    const artifact = ctx.runtime.artifacts.put({
+      runId: ctx.run.id,
+      type: "checks",
+      name: "checks.json",
+      content: JSON.stringify({ changed, results, reasons }, null, 2),
+      mediaType: "application/json",
+      provenance: { kind: "tool", capability: "project.checks" },
+      stepId: ctx.step.id,
+      iteration: ctx.iteration,
+    });
+    const outputs = [`${artifact.artifactId}@${artifact.version}`];
+    if (failed.length === 0) return { status: "success", outputs };
+    return {
+      status: "success",
+      outcome: "defects_found",
+      outputs,
+      reason: reasons.map((r) => r.summary).join("; "),
+    };
+  },
 };
