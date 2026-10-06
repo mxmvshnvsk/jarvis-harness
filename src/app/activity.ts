@@ -22,6 +22,9 @@ export interface Activity {
     readonly maxModelCalls?: number;
     readonly modelCalls: number;
     readonly toolCalls: number;
+    /** Tokens of this step: what the per-step output cap is compared with. */
+    readonly promptTokens?: number;
+    readonly outputTokens?: number;
   };
   /** Totals over the run. */
   readonly modelCalls: number;
@@ -65,10 +68,22 @@ export function activityOf(events: readonly StoredEvent[], now: Date = new Date(
   const first = events[0];
   if (!first?.runId) return undefined;
   const runId = first.runId;
+  type StepView = { -readonly [K in keyof NonNullable<Activity["step"]>]: NonNullable<Activity["step"]>[K] };
+  /**
+   * One per step in flight: the children of a composite step run side by side, and a skipped sibling
+   * must not take the live line over (pilot: "telemetry#1 test" while the test agent worked).
+   */
+  interface Live {
+    step: StepView;
+    agentActive: boolean;
+    waitingSince?: string | undefined;
+    recent: Array<NonNullable<Activity["lastTool"]>>;
+    retrying?: { attempt: number; reason: string } | undefined;
+    receiving?: { outputChars: number; reasoningChars: number } | undefined;
+  }
+  const open = new Map<string, Live>();
+  let last: Live | undefined;
   let finished = false;
-  let step:
-    | { -readonly [K in keyof NonNullable<Activity["step"]>]: NonNullable<Activity["step"]>[K] }
-    | undefined;
   let modelCalls = 0;
   let promptTokens = 0;
   let outputTokens = 0;
@@ -76,48 +91,60 @@ export function activityOf(events: readonly StoredEvent[], now: Date = new Date(
   let toolCalls = 0;
   let latency = 0;
   let lastTool: Activity["lastTool"];
-  let recent: Array<NonNullable<Activity["lastTool"]>> = [];
-  let agentActive = false;
-  let waitingSince: string | undefined;
   let lastRetry: string | undefined;
-  let retrying: { attempt: number; reason: string } | undefined;
-  let receiving: { outputChars: number; reasoningChars: number } | undefined;
+  /** The step an event belongs to: by the payload's step, the event's, or the one started last. */
+  const at = (e: StoredEvent, p: Record<string, unknown>): Live | undefined =>
+    open.get(str(p.stepId) ?? "") ?? open.get(e.stepId ?? "") ?? [...open.values()].at(-1);
   for (const e of events) {
     if (e.runId !== runId) continue;
     const p = (e.payload ?? {}) as Record<string, unknown>;
+    const live = at(e, p);
     switch (e.kind) {
-      case "step.start":
-        step = {
-          id: str(p.stepId) ?? e.stepId ?? "?",
-          iteration: num(p.iteration) || (e.iteration ?? 1),
-          startedAt: e.ts,
-          modelCalls: 0,
-          toolCalls: 0,
+      case "step.start": {
+        const id = str(p.stepId) ?? e.stepId ?? "?";
+        const fresh: Live = {
+          step: {
+            id,
+            iteration: num(p.iteration) || (e.iteration ?? 1),
+            startedAt: e.ts,
+            modelCalls: 0,
+            toolCalls: 0,
+            promptTokens: 0,
+            outputTokens: 0,
+          },
+          agentActive: false,
+          recent: [],
         };
-        agentActive = false;
-        waitingSince = undefined;
-        recent = [];
+        open.delete(id);
+        open.set(id, fresh);
+        last = fresh;
         break;
+      }
       case "step.finish":
-        agentActive = false;
-        waitingSince = undefined;
+        if (live) {
+          live.agentActive = false;
+          live.waitingSince = undefined;
+          open.delete(live.step.id);
+        }
         break;
       case "agent.start":
-        agentActive = true;
-        waitingSince = e.ts;
-        if (step) {
+        if (live) {
+          live.agentActive = true;
+          live.waitingSince = e.ts;
           const agent = str(p.agent);
           const modelId = str(p.modelId);
-          if (agent) step.agent = agent;
-          if (modelId) step.modelId = modelId;
-          if (num(p.maxToolCalls) > 0) step.maxToolCalls = num(p.maxToolCalls);
-          if (num(p.maxModelCalls) > 0) step.maxModelCalls = num(p.maxModelCalls);
-          step.toolCalls = num(p.restoredToolCalls);
+          if (agent) live.step.agent = agent;
+          if (modelId) live.step.modelId = modelId;
+          if (num(p.maxToolCalls) > 0) live.step.maxToolCalls = num(p.maxToolCalls);
+          if (num(p.maxModelCalls) > 0) live.step.maxModelCalls = num(p.maxModelCalls);
+          live.step.toolCalls = num(p.restoredToolCalls);
         }
         break;
       case "agent.finish":
-        agentActive = false;
-        waitingSince = undefined;
+        if (live) {
+          live.agentActive = false;
+          live.waitingSince = undefined;
+        }
         break;
       case "model.call":
         modelCalls += 1;
@@ -125,39 +152,51 @@ export function activityOf(events: readonly StoredEvent[], now: Date = new Date(
         outputTokens += num(p.outputTokens);
         retries += num(p.retries);
         latency += num(p.latencyMs);
-        if (step) step.modelCalls += 1;
-        if (agentActive) waitingSince = e.ts;
-        retrying = undefined;
-        receiving = undefined;
+        if (live) {
+          live.step.modelCalls += 1;
+          live.step.promptTokens = (live.step.promptTokens ?? 0) + num(p.promptTokens);
+          live.step.outputTokens = (live.step.outputTokens ?? 0) + num(p.outputTokens);
+          if (live.agentActive) live.waitingSince = e.ts;
+          live.retrying = undefined;
+          live.receiving = undefined;
+        }
         break;
       case "model.progress":
-        receiving = { outputChars: num(p.outputChars), reasoningChars: num(p.reasoningChars) };
+        if (live) live.receiving = { outputChars: num(p.outputChars), reasoningChars: num(p.reasoningChars) };
         break;
       case "model.retry":
         // the wait keeps counting from the first attempt: the answer is still the same one
-        receiving = undefined;
         lastRetry = str(p.message);
-        retrying = { attempt: num(p.attempt) || (retrying?.attempt ?? 0) + 1, reason: reasonOf(lastRetry) };
+        if (live) {
+          live.receiving = undefined;
+          live.retrying = {
+            attempt: num(p.attempt) || (live.retrying?.attempt ?? 0) + 1,
+            reason: reasonOf(lastRetry),
+          };
+        }
         break;
       case "tool.call": {
         toolCalls += 1;
-        if (step) step.toolCalls += 1;
         const capability = str(p.capability) ?? "?";
         const detail = detailOf(p.args);
         lastTool = { capability, ok: p.ok !== false, ...(detail ? { detail } : {}) };
-        recent = [...recent, lastTool].slice(-3);
-        if (agentActive) waitingSince = e.ts;
-        retrying = undefined;
-        receiving = undefined;
+        if (live) {
+          live.step.toolCalls += 1;
+          live.recent = [...live.recent, lastTool].slice(-3);
+          if (live.agentActive) live.waitingSince = e.ts;
+          live.retrying = undefined;
+          live.receiving = undefined;
+        }
         break;
       }
       case "run.state": {
         // the run left the step loop: finished, or parked for a human or a quota window
         const state = str(p.state);
-        if (state !== "RUNNING") {
-          agentActive = false;
-          waitingSince = undefined;
-        }
+        if (state !== "RUNNING")
+          for (const l of open.values()) {
+            l.agentActive = false;
+            l.waitingSince = undefined;
+          }
         if (state === "COMPLETED" || state === "FAILED" || state === "CANCELLED") finished = true;
         break;
       }
@@ -165,29 +204,34 @@ export function activityOf(events: readonly StoredEvent[], now: Date = new Date(
         break;
     }
   }
+  // the step to show: the newest one whose agent works, else the newest in flight, else the last
+  const inFlight = [...open.values()];
+  const current = inFlight.filter((l) => l.agentActive).at(-1) ?? inFlight.at(-1) ?? last;
   const startedAt = first.ts;
+  const waitingSince = current?.waitingSince;
   const waitingMs =
-    !finished && agentActive && waitingSince
+    !finished && current?.agentActive && waitingSince
       ? Math.max(0, now.getTime() - Date.parse(waitingSince))
       : undefined;
+  const recent = current?.recent ?? [];
   return {
     runId,
     startedAt,
     elapsedMs: Math.max(0, now.getTime() - Date.parse(startedAt)),
     finished,
-    ...(step ? { step } : {}),
+    ...(current ? { step: current.step } : {}),
     modelCalls,
     promptTokens,
     outputTokens,
     retries,
     toolCalls,
     ...(modelCalls > 0 ? { avgLatencyMs: Math.round(latency / modelCalls) } : {}),
-    ...(lastTool ? { lastTool } : {}),
+    ...(lastTool ? { lastTool: current?.recent.at(-1) ?? lastTool } : {}),
     ...(recent.length > 0 && !finished ? { recentTools: recent } : {}),
     ...(waitingMs !== undefined && waitingSince ? { waitingSince, waitingMs } : {}),
     ...(lastRetry ? { lastRetry } : {}),
-    ...(retrying && waitingMs !== undefined ? { retrying } : {}),
-    ...(receiving && waitingMs !== undefined ? { receiving } : {}),
+    ...(current?.retrying && waitingMs !== undefined ? { retrying: current.retrying } : {}),
+    ...(current?.receiving && waitingMs !== undefined ? { receiving: current.receiving } : {}),
   };
 }
 
@@ -304,7 +348,11 @@ export function formatActivity(a: Activity, options: FormatOptions = {}): string
         : `tools ${a.step.toolCalls}`,
     );
   }
-  const cap = options.stepOutputTokens ? `/${kilo(options.stepOutputTokens)}` : "";
+  // the run's totals; the per-step cap is compared with the step's own output (pilot: "out 80k/60k")
+  const cap =
+    options.stepOutputTokens && a.step
+      ? ` ${st.muted(`(step ${kilo(a.step.outputTokens ?? 0)}/${kilo(options.stepOutputTokens)})`)}`
+      : "";
   parts.push(`tokens in ${kilo(a.promptTokens)} out ${kilo(a.outputTokens)}${cap}`);
   if (a.retries > 0) parts.push(st.warn(`${a.retries} retr${a.retries === 1 ? "y" : "ies"}`));
   if (a.lastTool && options.lastTool !== false) {

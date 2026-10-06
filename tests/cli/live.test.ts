@@ -126,3 +126,39 @@ describe("accessible mode", () => {
     );
   });
 });
+
+describe("parallel steps in the live line", () => {
+  it("keeps showing the step whose agent works when a sibling is skipped", () => {
+    let seq = 0;
+    const ev = (kind: string, stepId: string, payload: Record<string, unknown>, at: number): StoredEvent =>
+      ({
+        seq: ++seq,
+        ts: new Date(Date.parse("2026-10-06T10:00:00Z") + at * 1000).toISOString(),
+        runId: "run_1",
+        stepId,
+        kind,
+        payload,
+      }) as StoredEvent;
+    const events = [
+      ev("step.start", "verify", { stepId: "verify", iteration: 1 }, 0),
+      ev("step.start", "tests", { stepId: "tests", iteration: 1 }, 1),
+      ev("agent.start", "tests", { agent: "test", maxToolCalls: 40 }, 1),
+      ev("model.call", "tests", { promptTokens: 1000, outputTokens: 300 }, 5),
+      // a sibling with nothing to do starts and finishes after the agent's step started
+      ev("step.start", "telemetry", { stepId: "telemetry", iteration: 1 }, 6),
+      ev("step.finish", "telemetry", { stepId: "telemetry", iteration: 1, status: "skipped" }, 6),
+      ev("tool.call", "tests", { capability: "repo.read", ok: true, args: '{"path":"a.test.ts"}' }, 7),
+    ];
+    const a = activityOf(events, new Date(Date.parse("2026-10-06T10:00:20Z"))) as NonNullable<
+      ReturnType<typeof activityOf>
+    >;
+    expect(a.step).toMatchObject({
+      id: "tests",
+      agent: "test",
+      modelCalls: 1,
+      toolCalls: 1,
+      outputTokens: 300,
+    });
+    expect(a.waitingMs).toBe(13_000);
+  });
+});

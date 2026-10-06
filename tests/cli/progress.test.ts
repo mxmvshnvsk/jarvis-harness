@@ -68,7 +68,7 @@ describe("live activity of a run", () => {
     });
     const line = formatActivity(a as NonNullable<typeof a>, { stepOutputTokens: 60000 });
     expect(line).toBe(
-      "3:20 · map#1 onboard-mapper · model call 3, avg 1:00, waiting 1:17 · tools 2/40 [█░░░░░░░░░] · tokens in 9.0k out 344/60k · last repo.search defineInvoiceEvents",
+      "3:20 · map#1 onboard-mapper · model call 3, avg 1:00, waiting 1:17 · tools 2/40 [█░░░░░░░░░] · tokens in 9.0k out 344 (step 344/60k) · last repo.search defineInvoiceEvents",
     );
   });
 
