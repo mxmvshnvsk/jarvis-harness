@@ -42,6 +42,10 @@ export const RESERVED_ENV = new Set([
   // Pilot: `jarvis c` typed in that shell failed with `Unrecognized key: "run"`.
   "JARVIS_RUN",
   "JARVIS_SHELL",
+  "JARVIS_SHELL_REQUEST",
+  "JARVIS_SHELL_PARENT",
+  // the editor a run's checkout opens in (`o`, `jarvis open`; src/cli/checkout.ts)
+  "JARVIS_EDITOR",
 ]);
 
 function normalizeKey(key: string): string {

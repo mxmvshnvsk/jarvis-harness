@@ -26,6 +26,11 @@ export interface Output {
   raw(text: string): void;
   /** A prompt: written without a line break, the answer is typed after it. */
   ask(text: string): void;
+  /**
+   * A line put above a question that is waiting for an answer: the question's line is cleared, the
+   * text written, the question asked again (the card's live "changed" line).
+   */
+  interject(text: string, question: string): void;
   /** A failure on stderr, `error: …` (the prefix red when coloured). */
   error(text: string): void;
   /** Informational stderr: progress notices (⚠ retry, ✗ gave up), "skipped", "written to". */
@@ -211,6 +216,11 @@ export function createOutput(
     ask(text) {
       clear();
       outWrite(text);
+    },
+    interject(text, question) {
+      clear();
+      const wipe = (streams.out as { isTTY?: boolean }).isTTY ? "\r\u001b[2K" : "\n";
+      outWrite(`${wipe}${accessible ? glyph(style.inline(text)) : style.inline(text)}\n${question}`);
     },
     error(text) {
       clear();

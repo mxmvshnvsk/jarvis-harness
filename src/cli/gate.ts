@@ -9,7 +9,18 @@ import type { ArtifactVersion } from "../core/domain/artifact.ts";
 import type { Run } from "../core/domain/run.ts";
 import { shortRunId } from "../storage/runStore.ts";
 import { git } from "../tools/local/exec.ts";
-import { changesIn, checkoutLink, formatChanges, homePath, type ShellIn, systemShell } from "./checkout.ts";
+import {
+  type Change,
+  changesIn,
+  checkoutLink,
+  formatChanges,
+  homePath,
+  type OpenIn,
+  type ShellIn,
+  systemOpener,
+  systemShell,
+  watchCheckout,
+} from "./checkout.ts";
 import { clarifyLoop } from "./commands/human.ts";
 import type { CliContext } from "./context.ts";
 import { passthrough, titleSequence } from "./notify.ts";
@@ -130,14 +141,28 @@ const KEYS: ReadonlyArray<[string, string, string]> = [
   ["?", "help", "what each key does"],
 ];
 
-/** Accessible mode: numbers instead of keys, one per line. */
-const NUMBERED: Record<string, string> = { "1": "", "2": "a", "3": "c", "4": "e", "5": "q", "6": "?" };
+/** `o` on a gate of a run with its own checkout (a worktree): the changes in the person's editor. */
+const OPEN_KEY: [string, string, string] = [
+  "o",
+  "open in editor",
+  "the run's checkout in your editor ($JARVIS_EDITOR, else code, webstorm, idea…); the card stays",
+];
 
-function menu(ctx: CliContext): void {
+function keysFor(withOpen: boolean): ReadonlyArray<[string, string, string]> {
+  return withOpen ? [...KEYS.slice(0, 4), OPEN_KEY, ...KEYS.slice(4)] : KEYS;
+}
+
+/** Accessible mode: numbers instead of keys, one per line. */
+function numbered(keys: ReadonlyArray<[string, string, string]>, answer: string): string | undefined {
+  const key = keys[Number(answer) - 1]?.[0];
+  return key === undefined ? undefined : key === "enter" ? "" : key;
+}
+
+function menu(ctx: CliContext, withOpen: boolean): void {
   const st = ctx.out.style;
   if (ctx.out.accessible) {
     ctx.out.line();
-    KEYS.forEach(([, what], i) => {
+    keysFor(withOpen).forEach(([, what], i) => {
       ctx.out.line(`  ${i + 1}. ${what}`);
     });
     return;
@@ -145,14 +170,15 @@ function menu(ctx: CliContext): void {
   const item = (key: string, what: string) => `${st.cmd(key)} ${st.muted(what)}`;
   ctx.out.line();
   ctx.out.line(
-    `  ${[item("enter", "read it whole"), item("a", "accept"), item("c", "send back with changes"), item("e", "…in $EDITOR"), item("q", "decide later"), item("?", "help")].join("    ")}`,
+    `  ${[item("enter", "read it whole"), item("a", "accept"), item("c", "send back with changes"), item("e", "…in $EDITOR"), ...(withOpen ? [item("o", "open in editor")] : []), item("q", "decide later"), item("?", "help")].join("    ")}`,
   );
 }
 
-function help(ctx: CliContext): void {
+function help(ctx: CliContext, withOpen: boolean): void {
   const st = ctx.out.style;
-  const w = Math.max(...KEYS.map(([k]) => k.length));
-  for (const [key, , what] of KEYS) ctx.out.line(`  ${st.cmd(key.padEnd(w))}  ${st.inline(what)}`);
+  const keys = keysFor(withOpen);
+  const w = Math.max(...keys.map(([k]) => k.length));
+  for (const [key, , what] of keys) ctx.out.line(`  ${st.cmd(key.padEnd(w))}  ${st.inline(what)}`);
 }
 
 export interface GateTools {
@@ -162,6 +188,8 @@ export interface GateTools {
   readonly editor?: (file: string) => boolean;
   /** Opens a shell in the run's checkout and waits (a used-up loop, `s`). */
   readonly shell?: ShellIn;
+  /** Opens the run's checkout in the person's editor, without waiting (`o`). */
+  readonly open?: OpenIn;
 }
 
 /** `$PAGER` (or `less`), with colours and quitting at once on a short text, as git does. */
@@ -287,6 +315,7 @@ async function loopGate(
   run: Run,
   prompt: Prompt,
   shell: ShellIn,
+  open: OpenIn,
 ): Promise<GateResult> {
   const st = ctx.out.style;
   const record = runtime.artifacts.listLatest(run.id, "loop-exhausted")[0];
@@ -312,68 +341,98 @@ async function loopGate(
   ctx.out.line(
     `  ${st.muted("fix it by hand in the run's checkout")}  ${checkoutLink(st, dir, ctx.homeDir)}`,
   );
+  const changedLine = (changes: readonly Change[]) =>
+    cutStyled(
+      `  ${st.muted("changed")}  ${formatChanges(changes, st)}  ${st.muted(`· r runs ${step} again with them`)}`,
+      width,
+    );
+  const already = changesIn(dir);
+  if (already && already.length > 0) ctx.out.line(changedLine(already));
   const keys: Array<[string, string, string]> = [
-    ["", "enter", "reasons in full"],
-    ["s", "s", "a shell in the checkout"],
+    ["", "enter", "reasons"],
+    ["o", "o", "open in your editor"],
+    ["s", "s", "a shell there"],
     ["r", "r", `run ${step} again`],
     ["q", "q", "later"],
   ];
-  for (;;) {
-    ctx.out.line();
-    if (ctx.out.accessible) {
-      for (const [i, [, , what]] of keys.entries()) ctx.out.line(`  ${i + 1}. ${what}`);
-      ctx.out.bell();
-    } else ctx.out.line(`  ${keys.map(([, key, what]) => `${st.cmd(key)} ${st.muted(what)}`).join("    ")}`);
-    const answer = await prompt.ask(`${st.cmd(">")} `);
-    const picked = ctx.out.accessible && answer !== undefined ? keys[Number(answer) - 1]?.[0] : undefined;
-    const input = picked ?? answer;
-    if (input === undefined || input === "q") return "detached";
-    if (input === "") {
-      if (reasons.length === 0) ctx.out.line(st.muted("  (no reason recorded)"));
-      for (const r of reasons) ctx.out.line(bullet(r));
-      continue;
-    }
-    if (input === "s") {
-      const rule = st.muted("─".repeat(Math.max(10, Math.min(width, 72) - 4)));
+  const question = `${st.cmd(">")} `;
+  // what the person does in the editor shows up on the card by itself
+  const watch = () => watchCheckout(dir, (changes) => ctx.out.interject(changedLine(changes), question));
+  let stopWatching = watch();
+  try {
+    for (;;) {
       ctx.out.line();
-      ctx.out.line(`  ${rule}`);
-      ctx.out.line(
-        `  ${st.heading(`a shell in the run's checkout`)} ${st.muted(homePath(dir, ctx.homeDir))}`,
-      );
-      ctx.out.line(
-        `  fix what is listed above, then type ${st.cmd("jarvis c")} — ${step} runs again from here`,
-      );
-      ctx.out.line(st.muted(`  exit (Ctrl-D) — back to this card without going on`));
-      ctx.out.line(`  ${rule}`);
-      if (env.JARVIS_TITLE !== "off")
-        ctx.out.terminal(
-          passthrough(titleSequence(`jarvis ${shortRunId(run.id)} · fix, then jarvis c`), env),
-        );
-      prompt.pause?.();
-      const end = await shell(dir, run).finally(() => prompt.resume?.());
-      if (end === "failed") {
-        ctx.out.line(st.warn(`  could not start a shell; the checkout is ${dir}`));
+      if (ctx.out.accessible) {
+        for (const [i, [, , what]] of keys.entries()) ctx.out.line(`  ${i + 1}. ${what}`);
+        ctx.out.bell();
+      } else
+        ctx.out.line(`  ${keys.map(([, key, what]) => `${st.cmd(key)} ${st.muted(what)}`).join("    ")}`);
+      const answer = await prompt.ask(question);
+      const picked = ctx.out.accessible && answer !== undefined ? keys[Number(answer) - 1]?.[0] : undefined;
+      const input = picked ?? answer;
+      if (input === undefined || input === "q") return "detached";
+      if (input === "") {
+        if (reasons.length === 0) ctx.out.line(st.muted("  (no reason recorded)"));
+        for (const r of reasons) ctx.out.line(bullet(r));
         continue;
       }
-      ctx.out.line();
-      const changes = changesIn(dir);
-      if (changes && changes.length > 0)
-        ctx.out.line(cutStyled(`  ${st.muted("changed:")} ${formatChanges(changes, st)}`, width));
-      else if (changes) ctx.out.line(st.muted("  nothing changed in the checkout"));
-      if (end === "go-on") {
+      if (input === "o") {
+        const editor = open(dir);
+        ctx.out.line(
+          editor
+            ? `  ${st.ok("↗")} opened in ${editor} ${st.muted(`· this card watches the checkout — save there, then r here`)}`
+            : st.warn(
+                `  no editor found — set JARVIS_EDITOR (code, idea, webstorm…); the checkout is ${homePath(dir, ctx.homeDir)}`,
+              ),
+        );
+        continue;
+      }
+      if (input === "s") {
+        const rule = st.muted("─".repeat(Math.max(10, Math.min(width, 72) - 4)));
+        ctx.out.line();
+        ctx.out.line(`  ${rule}`);
+        ctx.out.line(
+          `  ${st.heading(`a shell in the run's checkout`)} ${st.muted(homePath(dir, ctx.homeDir))}`,
+        );
+        ctx.out.line(
+          `  fix what is listed above, then type ${st.cmd("jarvis c")} — ${step} runs again from here`,
+        );
+        ctx.out.line(st.muted(`  exit (Ctrl-D) — back to this card without going on`));
+        ctx.out.line(`  ${rule}`);
+        if (env.JARVIS_TITLE !== "off")
+          ctx.out.terminal(
+            passthrough(titleSequence(`jarvis ${shortRunId(run.id)} · fix, then jarvis c`), env),
+          );
+        stopWatching(); // the shell owns the terminal
+        prompt.pause?.();
+        const end = await shell(dir, run).finally(() => prompt.resume?.());
+        if (end === "failed") {
+          ctx.out.line(st.warn(`  could not start a shell; the checkout is ${dir}`));
+          stopWatching = watch();
+          continue;
+        }
+        ctx.out.line();
+        const changes = changesIn(dir);
+        if (changes && changes.length > 0) ctx.out.line(changedLine(changes));
+        else if (changes) ctx.out.line(st.muted("  nothing changed in the checkout"));
+        if (end === "go-on") {
+          ctx.out.line(`${st.warn("↻")} running ${step} again`);
+          return "decided";
+        }
+        if (env.JARVIS_TITLE !== "off")
+          ctx.out.terminal(passthrough(titleSequence(`⏸ jarvis ${shortRunId(run.id)}`), env));
+        ctx.out.line(st.muted(`  back from the shell — r runs ${step} again with what you changed`));
+        stopWatching = watch();
+        continue;
+      }
+      if (input === "r") {
         ctx.out.line(`${st.warn("↻")} running ${step} again`);
         return "decided";
       }
-      if (env.JARVIS_TITLE !== "off")
-        ctx.out.terminal(passthrough(titleSequence(`⏸ jarvis ${shortRunId(run.id)}`), env));
-      ctx.out.line(st.muted(`  back from the shell — r runs ${step} again with what you changed`));
-      continue;
+      ctx.out.line(st.muted(ctx.out.accessible ? "  1–5" : "  enter, o, s, r or q"));
     }
-    if (input === "r") {
-      ctx.out.line(`${st.warn("↻")} running ${step} again`);
-      return "decided";
-    }
-    ctx.out.line(st.muted(ctx.out.accessible ? "  1–4" : "  enter, s, r or q"));
+  } finally {
+    stopWatching();
   }
 }
 
@@ -419,20 +478,23 @@ export async function humanGate(
       ? "decided"
       : "detached";
   }
+  const open = tools.open ?? systemOpener(ctx);
   if (run.waitingFor?.kind === "loop")
-    return loopGate(ctx, runtime, run, prompt, tools.shell ?? systemShell(ctx));
+    return loopGate(ctx, runtime, run, prompt, tools.shell ?? systemShell(ctx), open);
   const awaited = awaitedArtifact(runtime, run);
   if (!awaited) return "detached";
   const { type, artifact } = awaited;
   const text = runtime.artifacts.text(artifact);
   const doc = await brief(ctx, runtime, run, type, artifact, text);
   const label = `${type}/${artifact.name}@${artifact.version}`;
+  // a run with a checkout of its own: its changes open in the person's editor from the card
+  const withOpen = run.workspace.mode === "worktree";
   for (;;) {
-    menu(ctx);
+    menu(ctx, withOpen);
     if (ctx.out.accessible) ctx.out.bell(); // a decision is waiting
     const answer = await prompt.ask(`${st.cmd(">")} `);
     const input =
-      ctx.out.accessible && answer !== undefined && answer in NUMBERED ? NUMBERED[answer] : answer;
+      ctx.out.accessible && answer !== undefined ? (numbered(keysFor(withOpen), answer) ?? answer) : answer;
     if (input === undefined || input === "q") return "detached";
     if (input === "") {
       const whole = renderMarkdown((doc ? documentToMarkdown(doc) : text).trimEnd(), st);
@@ -443,7 +505,16 @@ export async function humanGate(
       continue;
     }
     if (input === "?") {
-      help(ctx);
+      help(ctx, withOpen);
+      continue;
+    }
+    if (input === "o" && withOpen) {
+      const editor = open(run.workspace.path);
+      ctx.out.line(
+        editor
+          ? `  ${st.ok("↗")} opened the run's checkout in ${editor}`
+          : st.warn(`  no editor found — set JARVIS_EDITOR (code, idea, webstorm…)`),
+      );
       continue;
     }
     if (input === "e") {

@@ -40,6 +40,7 @@ import {
   runDiff,
   runFollow,
   runGc,
+  runOpen,
   runResume,
   runShellIn,
   runShow,
@@ -312,6 +313,12 @@ export function buildProgram(options: RunOptions = {}): Command {
     .description("back to the run that waits for you (no id needed): decide right here and go on")
     .action(async (run: string | undefined) => {
       await runContinue(ctxFor(), run);
+    });
+  program
+    .command("open [run]")
+    .description("the run's checkout in your editor (JARVIS_EDITOR, else code, webstorm, idea…)")
+    .action(async (run: string | undefined) => {
+      await runOpen(ctxFor(), run);
     });
   program
     .command("shell [run]")

@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { Readable, Writable } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -34,6 +34,14 @@ steps:
   );
 });
 afterEach(() => sb.cleanup());
+
+async function waitFor(ok: () => boolean, ms = 3000): Promise<void> {
+  const until = Date.now() + ms;
+  while (!ok()) {
+    if (Date.now() > until) throw new Error("timed out");
+    await new Promise((r) => setTimeout(r, 20));
+  }
+}
 
 async function jarvis(args: string[], env: NodeJS.ProcessEnv = {}, input?: string[]) {
   let out = "";
@@ -373,7 +381,13 @@ steps:
 
     // a "shell" left with exit: back on the card, which says what changed and what r does
     sb.write("leave.sh", "#!/bin/sh\nexit 0\n");
-    const later = await jarvis(["c"], { ...ON, SHELL: `sh ${sb.root}/leave.sh` }, ["", "s", "q"]);
+    // an "editor" that notes which folder it was asked to open
+    sb.write("editor.sh", `#!/bin/sh\necho "$1" > "${sb.root}/opened"\n`);
+    const later = await jarvis(
+      ["c"],
+      { ...ON, SHELL: `sh ${sb.root}/leave.sh`, JARVIS_EDITOR: `sh ${sb.root}/editor.sh` },
+      ["", "o", "s", "q"],
+    );
     expect(later.code).toBe(10);
     expect(later.out).toContain(
       "⏸ write sent the work back 2 times — write → write, defects_found; no rounds left",
@@ -382,8 +396,11 @@ steps:
     expect(later.out).toContain("  • stray_files  tmp-probe.txt");
     expect(later.out).toContain(`fix it by hand in the run's checkout  ${sb.project}`);
     expect(later.out).toContain(
-      "enter reasons in full    s a shell in the checkout    r run write again    q later",
+      "enter reasons    o open in your editor    s a shell there    r run write again    q later",
     );
+    expect(later.out).toContain("↗ opened in sh · this card watches the checkout — save there, then r here");
+    await waitFor(() => existsSync(join(sb.root, "opened")));
+    expect(readFileSync(join(sb.root, "opened"), "utf8").trim()).toBe(sb.project);
     expect(later.out).toContain("fix what is listed above, then type jarvis c — write runs again from here");
     expect(later.out).toContain("back from the shell — r runs write again with what you changed");
     expect(later.out).toContain("left waiting; come back with jarvis continue");
@@ -414,7 +431,16 @@ steps:
     expect(inShell.code).toBe(0);
     expect(inShell.out).toContain("↩ back to the card of run 4c3b2a1d — it goes on");
     expect(readFileSync(request, "utf8")).toBe("go-on");
-    expect((await jarvis(["config", "show"], { JARVIS_RUN: "4c3b2a1d" })).code).toBe(0);
+    expect((await jarvis(["config", "show"], { JARVIS_RUN: "4c3b2a1d", JARVIS_EDITOR: "idea" })).code).toBe(
+      0,
+    );
+
+    // `jarvis open`: the same from anywhere
+    rmSync(join(sb.root, "opened"));
+    const opened = await jarvis(["open"], { JARVIS_EDITOR: `sh ${sb.root}/editor.sh` });
+    expect(opened.code).toBe(0);
+    expect(opened.out).toMatch(/↗ run [0-9a-f]{8} opened in sh/);
+    await waitFor(() => existsSync(join(sb.root, "opened")));
 
     const path = await jarvis(["shell", "--print"], {});
     expect(path.out.trim()).toBe(sb.project);

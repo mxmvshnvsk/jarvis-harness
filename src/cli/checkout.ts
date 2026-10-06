@@ -1,7 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { homedir, tmpdir } from "node:os";
+import { basename, delimiter, join } from "node:path";
 import type { Run } from "../core/domain/run.ts";
 import { shortRunId } from "../storage/runStore.ts";
 import type { CliContext } from "./context.ts";
@@ -133,4 +133,111 @@ export function formatChanges(changes: readonly Change[], st: Style, shown = 5):
   };
   const more = changes.length > shown ? `  ${st.muted(`+${changes.length - shown}`)}` : "";
   return `${changes.slice(0, shown).map(label).join("  ")}${more}`;
+}
+
+/** Opens the run's checkout in the person's editor without waiting; the editor's name, or undefined. */
+export type OpenIn = (dir: string) => string | undefined;
+
+const EDITORS: ReadonlyArray<readonly [string, string]> = [
+  ["code", "VS Code"],
+  ["cursor", "Cursor"],
+  ["webstorm", "WebStorm"],
+  ["idea", "IntelliJ IDEA"],
+  ["zed", "Zed"],
+  ["subl", "Sublime Text"],
+];
+
+/** macOS apps that open a folder with `open -a`, when their command is not on PATH. */
+const MAC_APPS: ReadonlyArray<readonly [string, string]> = [
+  ["Visual Studio Code", "VS Code"],
+  ["Cursor", "Cursor"],
+  ["WebStorm", "WebStorm"],
+  ["IntelliJ IDEA", "IntelliJ IDEA"],
+  ["IntelliJ IDEA Ultimate", "IntelliJ IDEA"],
+  ["IntelliJ IDEA CE", "IntelliJ IDEA"],
+  ["Zed", "Zed"],
+];
+
+function onPath(command: string, env: NodeJS.ProcessEnv): boolean {
+  if (command.includes("/")) return existsSync(command);
+  return (env.PATH ?? "").split(delimiter).some((dir) => dir.length > 0 && existsSync(join(dir, command)));
+}
+
+/**
+ * The editor a checkout opens in: `JARVIS_EDITOR` (a command, may carry arguments: `idea`,
+ * `code -n`), else the first known editor command on PATH, else (macOS) an installed editor app,
+ * else the system's file opener. Pilot: "fix it there yourself" sent people to copy a path.
+ */
+export function editorFor(
+  env: NodeJS.ProcessEnv,
+  options: { platform?: NodeJS.Platform; home?: string } = {},
+): { readonly command: readonly string[]; readonly label: string } | undefined {
+  const own = env.JARVIS_EDITOR?.trim();
+  if (own) {
+    const command = own.split(/\s+/);
+    const name = basename(command[0] as string);
+    return { command, label: EDITORS.find(([c]) => c === name)?.[1] ?? name };
+  }
+  for (const [command, label] of EDITORS) if (onPath(command, env)) return { command: [command], label };
+  const platform = options.platform ?? process.platform;
+  if (platform === "darwin") {
+    const home = options.home ?? homedir();
+    for (const [app, label] of MAC_APPS)
+      if ([`/Applications/${app}.app`, join(home, "Applications", `${app}.app`)].some((p) => existsSync(p)))
+        return { command: ["open", "-a", app], label };
+    return { command: ["open"], label: "Finder" };
+  }
+  if (platform !== "win32" && onPath("xdg-open", env))
+    return { command: ["xdg-open"], label: "the file manager" };
+  return undefined;
+}
+
+export function systemOpener(ctx: CliContext): OpenIn {
+  return (dir) => {
+    const env = ctx.env ?? {};
+    const editor = editorFor(env, { home: ctx.homeDir });
+    if (!editor) return undefined;
+    const [command, ...args] = editor.command;
+    try {
+      const child = spawn(command as string, [...args, dir], {
+        detached: true,
+        stdio: "ignore",
+        env: { ...process.env, ...env },
+      });
+      child.on("error", () => {});
+      child.unref();
+    } catch {
+      return undefined;
+    }
+    return editor.label;
+  };
+}
+
+/**
+ * Calls `onChange` whenever the checkout's uncommitted changes differ from the last ones seen: the
+ * card shows what the person did in the editor without being asked. Returns the stop function.
+ */
+export function watchCheckout(
+  dir: string,
+  onChange: (changes: readonly Change[]) => void,
+  options: { everyMs?: number; read?: (dir: string) => Change[] | undefined } = {},
+): () => void {
+  const read = options.read ?? changesIn;
+  const signature = (c: readonly Change[] | undefined) =>
+    c
+      ? c
+          .map((x) => `${x.code} ${x.file}`)
+          .sort()
+          .join("\n")
+      : undefined;
+  let last = signature(read(dir));
+  const timer = setInterval(() => {
+    const now = read(dir);
+    const sig = signature(now);
+    if (now === undefined || sig === last) return;
+    last = sig;
+    onChange(now);
+  }, options.everyMs ?? 1500);
+  timer.unref?.();
+  return () => clearInterval(timer);
 }

@@ -26,7 +26,9 @@ import {
   changesIn,
   checkoutLink,
   formatChanges,
+  type OpenIn,
   type ShellIn,
+  systemOpener,
   systemShell,
 } from "../checkout.ts";
 import type { CliContext } from "../context.ts";
@@ -1056,38 +1058,80 @@ export async function runShellIn(
 ): Promise<void> {
   const loaded = await loadForCli(ctx);
   const runtime = createRuntime(loaded, { env: ctx.env });
+  let goOn: string | undefined;
   try {
     const st = ctx.out.style;
-    const root = loaded.project?.root ?? ctx.cwd;
-    const here = runtime.runs
-      .list({ includeTerminal: true, limit: 50 })
-      .filter((r) => r.workspace.repoRoot === root || r.workspace.path === root);
-    const run = ref
-      ? requireRun(ctx, runtime, ref)
-      : (here.find((r) => !["COMPLETED", "FAILED", "CANCELLED"].includes(r.state)) ?? here[0]);
-    if (!run) {
-      ctx.out.error("no run here (`jarvis status --all` lists every run)");
-      throw new CliExit(EXIT.error);
-    }
+    const run = checkoutRun(ctx, runtime, loaded.project?.root ?? ctx.cwd, ref);
     const dir = run.workspace.path;
-    if (!existsSync(dir)) {
-      ctx.out.error(`the checkout of run ${shortRunId(run.id)} is gone: ${dir}`);
-      throw new CliExit(EXIT.error);
-    }
     const prompt = promptFor(ctx, runtime);
     prompt?.close();
     if (options.print || !prompt) {
       ctx.out.raw(`${dir}\n`);
       return;
     }
+    const waits = ["WAITING_HUMAN", "SUSPENDED", "WAITING_BUDGET"].includes(run.state);
     ctx.out.line(
-      `${st.muted("a shell in the checkout of run")} ${st.name(shortRunId(run.id))} ${checkoutLink(st, dir, ctx.homeDir)} ${st.muted("— exit (Ctrl-D) to come back")}`,
+      `${st.muted("a shell in the checkout of run")} ${st.name(shortRunId(run.id))} ${checkoutLink(st, dir, ctx.homeDir)}`,
     );
-    await (options.shell ?? systemShell(ctx))(dir, run);
+    ctx.out.line(
+      st.muted(
+        waits
+          ? "  fix, then type `jarvis c` — the run goes on; exit (Ctrl-D) leaves it waiting"
+          : "  exit (Ctrl-D) to come back",
+      ),
+    );
+    const end = await (options.shell ?? systemShell(ctx))(dir, run);
     const changes = changesIn(dir);
     if (changes && changes.length > 0) ctx.out.line(`${st.muted("changed:")} ${formatChanges(changes, st)}`);
-    if (run.state === "WAITING_HUMAN" || run.state === "SUSPENDED" || run.state === "WAITING_BUDGET")
-      ctx.out.line(`${st.muted("the run waits —")} ${st.cmd("jarvis continue")}`);
+    if (end === "go-on") goOn = run.id;
+    else if (waits) ctx.out.line(`${st.muted("the run waits —")} ${st.cmd("jarvis continue")}`);
+  } finally {
+    await runtime.close();
+  }
+  // `jarvis c` typed in the shell: the run goes on here, as if typed after leaving it
+  if (goOn) await runContinue(ctx, goOn);
+}
+
+/** The run whose checkout `shell`/`open` go to: by id, else the newest unfinished run here, else the newest. */
+function checkoutRun(ctx: CliContext, runtime: Runtime, root: string, ref: string | undefined): Run {
+  const here = runtime.runs
+    .list({ includeTerminal: true, limit: 50 })
+    .filter((r) => r.workspace.repoRoot === root || r.workspace.path === root);
+  const run = ref
+    ? requireRun(ctx, runtime, ref)
+    : (here.find((r) => !["COMPLETED", "FAILED", "CANCELLED"].includes(r.state)) ?? here[0]);
+  if (!run) {
+    ctx.out.error("no run here (`jarvis status --all` lists every run)");
+    throw new CliExit(EXIT.error);
+  }
+  if (!existsSync(run.workspace.path)) {
+    ctx.out.error(`the checkout of run ${shortRunId(run.id)} is gone: ${run.workspace.path}`);
+    throw new CliExit(EXIT.error);
+  }
+  return run;
+}
+
+/** `jarvis open [run]`: the run's checkout in the person's editor (the card's `o`). */
+export async function runOpen(
+  ctx: CliContext,
+  ref: string | undefined,
+  options: { open?: OpenIn } = {},
+): Promise<void> {
+  const loaded = await loadForCli(ctx);
+  const runtime = createRuntime(loaded, { env: ctx.env });
+  try {
+    const st = ctx.out.style;
+    const run = checkoutRun(ctx, runtime, loaded.project?.root ?? ctx.cwd, ref);
+    const editor = (options.open ?? systemOpener(ctx))(run.workspace.path);
+    if (!editor) {
+      ctx.out.error(
+        `no editor found — set JARVIS_EDITOR (code, idea, webstorm…); the checkout is ${run.workspace.path}`,
+      );
+      throw new CliExit(EXIT.error);
+    }
+    ctx.out.line(
+      `${st.ok("↗")} run ${st.name(shortRunId(run.id))} opened in ${editor}  ${checkoutLink(st, run.workspace.path, ctx.homeDir)}`,
+    );
   } finally {
     await runtime.close();
   }
