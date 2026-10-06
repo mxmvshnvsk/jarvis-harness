@@ -14,6 +14,8 @@ export interface CommandOptions {
   readonly env?: NodeJS.ProcessEnv;
   readonly maxBytes?: number;
   readonly input?: string;
+  /** Each non-empty output line as it comes (stdout and stderr), e.g. for a progress line. */
+  readonly onLine?: (line: string) => void;
 }
 
 const DEFAULT_MAX = 8 * 1024 * 1024;
@@ -41,11 +43,21 @@ export function runCommand(
           child.kill("SIGKILL");
         }, options.timeoutMs)
       : undefined;
+    const lines = (chunk: Buffer) => {
+      if (!options.onLine) return;
+      for (const line of chunk.toString("utf8").split(/\r?\n|\r/)) {
+        // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escapes
+        const plain = line.replace(/\u001b\[[0-9;?]*[A-Za-z]/g, "").trim();
+        if (plain) options.onLine(plain);
+      }
+    };
     child.stdout.on("data", (chunk: Buffer) => {
       if (stdout.length < max) stdout += chunk.toString("utf8");
+      lines(chunk);
     });
     child.stderr.on("data", (chunk: Buffer) => {
       if (stderr.length < max) stderr += chunk.toString("utf8");
+      lines(chunk);
     });
     child.on("error", (error) => {
       if (timer) clearTimeout(timer);

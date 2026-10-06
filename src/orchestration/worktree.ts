@@ -27,6 +27,8 @@ export interface CreateWorktreeOptions {
   readonly env?: NodeJS.ProcessEnv;
   /** Told when the worktree exists and before `setup` runs (it can take minutes: say so). */
   readonly onStage?: (stage: "worktree" | "setup", detail: string) => void;
+  /** Output of `setup`, line by line: what it is doing right now. */
+  readonly onSetupLine?: (line: string) => void;
 }
 
 export function projectHash(repoRoot: string): string {
@@ -153,6 +155,7 @@ export class WorktreeWorkspace implements Workspace {
         cwd: path,
         timeoutMs: options.setupTimeoutMs ?? 600_000,
         env: options.env ?? process.env,
+        ...(options.onSetupLine ? { onLine: options.onSetupLine } : {}),
       });
       if (r.code !== 0 || r.timedOut) {
         // a failed setup leaves no half-made worktree or branch behind (pilot: `jarvis c` failed silently)

@@ -272,6 +272,7 @@ async function prepareWorkspace(
   const started = Date.now();
   let timer: ReturnType<typeof setInterval> | undefined;
   let frame = 0;
+  let lastLine = "";
   const frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
   const stop = () => {
     if (timer) clearInterval(timer);
@@ -287,6 +288,9 @@ async function prepareWorkspace(
       ...(loaded.config.workspace.setup ? { setup: loaded.config.workspace.setup } : {}),
       setupTimeoutMs: loaded.config.tools.commandTimeoutMs,
       env: ctx.env,
+      onSetupLine: (line) => {
+        lastLine = line;
+      },
       onStage: (stage, detail) => {
         if (stage === "worktree") {
           ctx.out.note(`${st.muted("◌")} own checkout ${st.muted(detail)}`);
@@ -295,7 +299,7 @@ async function prepareWorkspace(
         ctx.out.note(`${st.muted("◌")} workspace.setup ${st.cmd(detail)}`);
         const draw = () =>
           ctx.out.progress(
-            `${st.cmd(frames[frame++ % frames.length] as string)} ${st.muted(clock(Date.now() - started))} workspace.setup ${st.muted("(installing and building in the new checkout)")}`,
+            `${st.cmd(frames[frame++ % frames.length] as string)} ${st.muted(clock(Date.now() - started))} workspace.setup ${st.muted(lastLine ? `· ${lastLine}` : "(installing and building in the new checkout)")}`,
           );
         draw();
         timer = setInterval(draw, 1000);
