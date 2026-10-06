@@ -172,7 +172,7 @@ export function activityOf(events: readonly StoredEvent[], now: Date = new Date(
 }
 
 /** "model x: provider error (500): {…}" → "provider error (500)". */
-function reasonOf(message: string | undefined): string {
+export function reasonOf(message: string | undefined): string {
   if (!message) return "an error";
   const rest = message.replace(/^model [^:]+:\s*/, "");
   return rest.split(/:\s/)[0]?.trim() || rest.slice(0, 40);

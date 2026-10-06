@@ -114,6 +114,30 @@ knowledge/, standards/, skills/ с README, записи в `.gitignore`). Сущ
 reasoning, prefix cache. Результат записывается и сравнивается с `supports:` конфигурации — расхождения
 показывает `doctor` (ADR-0007).
 
+### `jarvis models stats [modelId] [--since <age>]`
+
+Как ведут себя модели за окно (по умолчанию 24h; `30m`, `2h`, `7d`) — из журнала событий (`model.call`,
+`model.retry`, `model.error`), без запросов к модели:
+
+```
+deepseek-flash  last 24h · 32 answered, 0 failed (100%) · 2 retries
+  latency    p50 41s · p90 2m 05s · max 4m 58s   timeout 10m 00s
+  speed      p50 38 tok/s · p90 61 tok/s · max 95 tok/s
+  prompt     avg 33k · max 152k · total 1.0M · cached 0%
+  output     avg 780 · max 3.2k · total 25k
+  finish     tool_calls 24 · stop 8
+  failures
+    ⚠ network error · UND_ERR_HEADERS_TIMEOUT  2 retried  every attempt ran 5m 01s — a cut-off, not the model  last 10-06 07:10
+  by agent   research      22 calls · p50 25s · prompt avg 38k
+             requirements   7 calls · p50 1m 12s · prompt avg 21k
+```
+
+Отвеченные и сорвавшиеся (после всех повторов) запросы и доля успеха; задержка ответа (p50/p90/max) рядом с
+`timeoutMs` модели; скорость — выходные токены в секунду ответа; токены запроса и ответа, доля из кэша;
+`finishReason` (`length` — ответ обрезан на `maxOutput`); причины сбоев — причина, HTTP-статус, низкоуровневый
+код, сколько повторено и сколько сдалось, сколько шли неудачные попытки. Одинаковая длительность у всех
+попыток помечается как обрыв по времени (клиент или шлюз), а не проблема модели. `--json` — всё структурой.
+
 ### `jarvis auth set <id> | status | remove <id>`
 
 Credential для ссылки `keychain:<id>` под текущим актором: ввод без эха или через stdin

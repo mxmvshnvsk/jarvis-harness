@@ -30,7 +30,7 @@ import {
 } from "./commands/knowledgeGraph.ts";
 import { runLogs } from "./commands/logs.ts";
 import { runMcpList, runMcpServe } from "./commands/mcp.ts";
-import { runModelsList, runModelsProbe } from "./commands/models.ts";
+import { runModelsList, runModelsProbe, runModelsStats } from "./commands/models.ts";
 import { runOnboard } from "./commands/onboard.ts";
 import {
   runApply,
@@ -357,6 +357,13 @@ export function buildProgram(options: RunOptions = {}): Command {
     .description("models, egress, pools, window usage and probe state")
     .action(async () => {
       await runModelsList(ctxFor());
+    });
+  models
+    .command("stats [modelId]")
+    .description("how the models behave: answered/failed, retries and why, latency, speed, tokens")
+    .option("--since <age>", "window, e.g. 2h, 1d (default 24h)")
+    .action(async (modelId: string | undefined, opts: { since?: string }) => {
+      await runModelsStats(ctxFor(), modelId, opts.since ? { since: opts.since } : {});
     });
   models
     .command("probe <modelId>")

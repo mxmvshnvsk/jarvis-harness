@@ -100,6 +100,10 @@ Remaining commands of ADR-0001 §15:
   the answers become the comment), or leave it — and goes on in the same process; clarifications use the attach
   mini-chat; `jarvis continue` (`c`) finds the waiting run without its id. Pilot: the way on was
   `jarvis approve 1a2b3c4d --request-changes --resume --comment "…"`
+- `jarvis models stats [model] [--since]` (`src/app/modelStats.ts`): per model from the journal — answered/failed,
+  success rate, retries, latency and output speed percentiles, tokens and cache share, finish reasons, failures
+  grouped by reason/status/code with the length of the failed attempts (the same length every time is flagged as
+  a cut-off), calls by agent
 
 ADR-0001 §20 stage 12 (git hooks) — `f11ca47`:
 

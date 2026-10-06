@@ -62,7 +62,9 @@ export class SqliteEventStore implements EventSink {
   }
 
   /** Events after `afterSeq`, oldest first (used by `status --watch` and the TUI). */
-  list(options: { runId?: string; afterSeq?: number; kind?: string; limit?: number } = {}): StoredEvent[] {
+  list(
+    options: { runId?: string; afterSeq?: number; kind?: string; since?: string; limit?: number } = {},
+  ): StoredEvent[] {
     const clauses: string[] = ["seq > ?"];
     const params: Array<string | number> = [options.afterSeq ?? 0];
     if (options.runId) {
@@ -72,6 +74,10 @@ export class SqliteEventStore implements EventSink {
     if (options.kind) {
       clauses.push("kind = ?");
       params.push(options.kind);
+    }
+    if (options.since) {
+      clauses.push("ts >= ?");
+      params.push(options.since);
     }
     params.push(options.limit ?? 1000);
     const rows = this.db

@@ -114,4 +114,48 @@ describe("jarvis models", () => {
     const r = await jarvis(["models", "probe", "flash"]);
     expect(r.code).toBe(11);
   });
+
+  it("stats: answered and failed requests, latency, speed, why requests fail (pilot: the 5:00 cut-off)", async () => {
+    const { loadConfig } = await import("../../src/core/config/load.ts");
+    const { createRuntime } = await import("../../src/app/runtime.ts");
+    const loaded = await loadConfig({ cwd: sb.project, homeDir: sb.home, env: { TOK: "x" } });
+    const rt = createRuntime(loaded, { env: { TOK: "x" } });
+    for (const latencyMs of [20_000, 40_000])
+      rt.events.emit({
+        kind: "model.call",
+        payload: {
+          modelId: "flash",
+          agentId: "research",
+          latencyMs,
+          promptTokens: 30_000,
+          outputTokens: 800,
+          finishReason: "stop",
+        },
+      });
+    for (const attemptMs of [300_972, 300_983])
+      rt.events.emit({
+        kind: "model.retry",
+        payload: {
+          modelId: "flash",
+          attemptMs,
+          message:
+            "model flash: network error: fetch failed (UND_ERR_HEADERS_TIMEOUT: Headers Timeout Error)",
+        },
+      });
+    await rt.close();
+    const r = await jarvis(["models", "stats"], { TOK: "x" });
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("flash  last 24h · 2 answered, 0 failed (100%) · 2 retries");
+    expect(r.out).toMatch(/latency +p50 20s · p90 40s · max 40s +timeout 2m 00s/);
+    expect(r.out).toContain("prompt     avg 30k · max 30k · total 60k · cached 0%");
+    expect(r.out).toContain(
+      "⚠ network error · UND_ERR_HEADERS_TIMEOUT  2 retried  every attempt ran 5m 01s — a cut-off, not the model",
+    );
+    expect(r.out).toMatch(/by agent +research +2 calls · p50 20s · prompt avg 30k/);
+    const json = JSON.parse(
+      (await jarvis(["--json", "models", "stats", "flash", "--since", "2h"], { TOK: "x" })).out,
+    );
+    expect(json.models[0]).toMatchObject({ modelId: "flash", calls: 2, retries: 2 });
+    expect((await jarvis(["models", "stats", "--since", "soon"], { TOK: "x" })).code).toBe(1);
+  });
 });
