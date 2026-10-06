@@ -2,7 +2,16 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { awaitedArtifact, recordDecision } from "../app/decide.ts";
+import {
+  awaitedArtifact,
+  DecisionTakenError,
+  decisionOn,
+  openCard,
+  recordDecision,
+  requestRerun,
+  rerunRequested,
+  whereFrom,
+} from "../app/decide.ts";
 import type { Runtime } from "../app/runtime.ts";
 import type { Actor } from "../core/domain/actor.ts";
 import type { ArtifactVersion } from "../core/domain/artifact.ts";
@@ -36,8 +45,88 @@ import { artifactLink } from "./view.ts";
  * document in brief, then a choice — read it whole, accept, send it back with answers to its open
  * questions, or leave it for later (`jarvis continue`). Pilot: the way on was
  * `jarvis approve 1a2b3c4d --request-changes --resume --comment "…"`.
+ *
+ * `elsewhere`: the run went on in another process (`jarvis resume`, `approve --resume` in another
+ * tab) — the terminal follows it instead of taking its lease (ADR-0023 §4, ADR-0002 §5).
  */
-export type GateResult = "decided" | "detached";
+export type GateResult = "decided" | "detached" | "elsewhere";
+
+/** What the card learns from the journal while it waits for a key (ADR-0023 §4). */
+interface Pickup {
+  /** The line the card prints instead of the answer. */
+  readonly line: string;
+  /** The run is no longer waiting: another process drives it. */
+  readonly moved: boolean;
+}
+
+/**
+ * Watches the run while the card asks: a decision recorded elsewhere, a "run again" asked from the
+ * page, or the run moving on. `signal` aborts the question that waits for a key.
+ */
+function watchRun(
+  check: () => Pickup | undefined,
+  everyMs: number,
+): { readonly signal: AbortSignal; seen(): Pickup | undefined; stop(): void } {
+  const abort = new AbortController();
+  let seen: Pickup | undefined;
+  let once = false;
+  const timer = setInterval(() => {
+    if (seen) return;
+    let now: Pickup | undefined;
+    try {
+      now = check();
+    } catch {
+      return; // a busy database: look again on the next tick
+    }
+    // a decision on a run that still waits: one more tick, so an `approve --resume` elsewhere takes
+    // the run first and this terminal follows it instead of racing it for the lease
+    if (now && !now.moved && !once) {
+      once = true;
+      return;
+    }
+    seen = now;
+    if (seen) abort.abort();
+  }, everyMs);
+  timer.unref?.();
+  return {
+    signal: abort.signal,
+    seen: () => seen,
+    stop: () => clearInterval(timer),
+  };
+}
+
+/** How often the card looks at the journal (JARVIS_CARD_POLL_MS: tests). */
+function pollMs(ctx: CliContext): number {
+  const ms = Number(ctx.env?.JARVIS_CARD_POLL_MS);
+  return Number.isFinite(ms) && ms > 0 ? ms : 1000;
+}
+
+/** The card's line for a decision made elsewhere: `✓ accepted in the browser by dev@example.com`. */
+function decisionLine(
+  ctx: CliContext,
+  runtime: Runtime,
+  artifact: ArtifactVersion,
+  label: string,
+  before = false,
+): string | undefined {
+  const st = ctx.out.style;
+  const d = decisionOn(runtime, artifact);
+  if (!d) return undefined;
+  const where = whereFrom(d.channel, before);
+  const who = `by ${d.approval.actor.id}`;
+  if (d.approval.decision === "approve") return `${st.ok("✓")} accepted ${where} ${who} ${st.muted(label)}`;
+  if (d.approval.decision === "reject") return `${st.bad("✗")} rejected ${where} ${who} ${st.muted(label)}`;
+  return `${st.warn("↻")} sent back ${where} ${who} ${st.muted(label)}`;
+}
+
+/** The run moved on without this card: who knows where, so say it and follow. */
+function movedLine(ctx: CliContext, run: Run | undefined): string {
+  const st = ctx.out.style;
+  if (!run) return st.warn("  the run is gone");
+  if (run.state === "RUNNING")
+    return `${st.warn("↻")} the run went on elsewhere ${st.muted("— following it here")}`;
+  return `${st.warn("↻")} the run is ${run.state} now ${st.muted("(changed elsewhere)")}`;
+}
 
 function parseDoc(text: string): Record<string, unknown> | undefined {
   try {
@@ -131,6 +220,17 @@ async function brief(
   if (st.links)
     ctx.out.line(`  ${st.muted("whole:")} ${artifactLink(st, runtime, a, `${type}/${a.name}@${a.version}`)}`);
   return doc;
+}
+
+/** Prints what was picked up over the waiting question and says how the gate ends. */
+function pickedUp(ctx: CliContext, runtime: Runtime, runId: string, p: Pickup): GateResult {
+  ctx.out.interject(p.line, "");
+  const now = runtime.runs.get(runId);
+  if (p.moved || (now && now.state !== "WAITING_HUMAN")) {
+    if (!p.moved) ctx.out.line(movedLine(ctx, now));
+    return "elsewhere";
+  }
+  return "decided";
 }
 
 /** Keys of the gate; Enter never accepts. */
@@ -277,7 +377,9 @@ async function changes(
   ctx: CliContext,
   prompt: Prompt,
   doc: Record<string, unknown> | undefined,
+  signal?: AbortSignal,
 ): Promise<string | undefined> {
+  const at = signal ? { signal } : {};
   const st = ctx.out.style;
   const questions = strings(doc?.openQuestions);
   const answers: string[] = [];
@@ -285,7 +387,7 @@ async function changes(
     ctx.out.line(`  ${st.muted("answer the open questions (empty line skips one):")}`);
     for (const [i, q] of questions.entries()) {
       ctx.out.line(`  ${st.warn(`${i + 1}/${questions.length}`)} ${q}`);
-      const a = await prompt.ask(`  ${st.cmd(">")} `);
+      const a = await prompt.ask(`  ${st.cmd(">")} `, at);
       if (a === undefined) return undefined;
       if (a) answers.push(`${i + 1}) ${q}\n   → ${a}`);
     }
@@ -293,7 +395,7 @@ async function changes(
   ctx.out.line(`  ${st.muted("what else to change? (empty line sends)")}`);
   const extra: string[] = [];
   for (;;) {
-    const line = await prompt.ask(`  ${st.cmd(">")} `);
+    const line = await prompt.ask(`  ${st.cmd(">")} `, at);
     if (line === undefined) return undefined;
     if (!line) break;
     extra.push(line);
@@ -318,6 +420,7 @@ async function loopGate(
   prompt: Prompt,
   shell: ShellIn,
   open: OpenIn,
+  actor: Actor,
 ): Promise<GateResult> {
   const st = ctx.out.style;
   const record = runtime.artifacts.listLatest(run.id, "loop-exhausted")[0];
@@ -359,9 +462,35 @@ async function loopGate(
     ["q", "q", "later"],
   ];
   const question = `${st.cmd(">")} `;
+  // asked from the page before this card opened (`jarvis ui`, no terminal waiting): do it now
+  const asked = rerunRequested(runtime, run.id);
+  if (asked) {
+    ctx.out.line(
+      `${st.warn("↻")} running ${step} again ${st.muted(`(asked ${whereFrom(asked.channel, true)}${asked.actor ? ` by ${asked.actor}` : ""})`)}`,
+    );
+    return "decided";
+  }
   // what the person does in the editor shows up on the card by itself
   const watch = () => watchCheckout(dir, (changes) => ctx.out.interject(changedLine(changes), question));
   let stopWatching = watch();
+  // and what is decided elsewhere: "Run again" on the page, a `jarvis resume` in another tab
+  const elsewhere = watchRun(() => {
+    const now = runtime.runs.get(run.id);
+    if (now?.state !== "WAITING_HUMAN") return { line: movedLine(ctx, now), moved: true };
+    const again = rerunRequested(runtime, run.id);
+    return again
+      ? {
+          line: `${st.warn("↻")} ${step} runs again ${st.muted(`(asked ${whereFrom(again.channel, false)}${again.actor ? ` by ${again.actor}` : ""})`)}`,
+          moved: false,
+        }
+      : undefined;
+  }, pollMs(ctx));
+  const closeCard = openCard(runtime, run, "loop");
+  const rerun = () => {
+    requestRerun(runtime, run, actor, "cli");
+    ctx.out.line(`${st.warn("↻")} running ${step} again`);
+    return "decided" as const;
+  };
   try {
     for (;;) {
       ctx.out.line();
@@ -370,7 +499,9 @@ async function loopGate(
         ctx.out.bell();
       } else
         ctx.out.line(`  ${keys.map(([, key, what]) => `${st.cmd(key)} ${st.muted(what)}`).join("    ")}`);
-      const answer = await prompt.ask(question);
+      const answer = await prompt.ask(question, { signal: elsewhere.signal });
+      const seen = elsewhere.seen();
+      if (seen) return pickedUp(ctx, runtime, run.id, seen);
       const picked = ctx.out.accessible && answer !== undefined ? keys[Number(answer) - 1]?.[0] : undefined;
       const input = picked ?? answer;
       if (input === undefined || input === "q") return "detached";
@@ -420,24 +551,20 @@ async function loopGate(
         const changes = changesIn(dir);
         if (changes && changes.length > 0) ctx.out.line(changedLine(changes));
         else if (changes) ctx.out.line(st.muted("  nothing changed in the checkout"));
-        if (end === "go-on") {
-          ctx.out.line(`${st.warn("↻")} running ${step} again`);
-          return "decided";
-        }
+        if (end === "go-on") return rerun();
         if (env.JARVIS_TITLE !== "off")
           ctx.out.terminal(passthrough(titleSequence(`⏸ jarvis ${shortRunId(run.id)}`), env));
         ctx.out.line(st.muted(`  back from the shell — r runs ${step} again with what you changed`));
         stopWatching = watch();
         continue;
       }
-      if (input === "r") {
-        ctx.out.line(`${st.warn("↻")} running ${step} again`);
-        return "decided";
-      }
+      if (input === "r") return rerun();
       ctx.out.line(st.muted(ctx.out.accessible ? "  1–5" : "  enter, o, s, r or q"));
     }
   } finally {
     stopWatching();
+    elsewhere.stop();
+    closeCard();
   }
 }
 
@@ -485,84 +612,128 @@ export async function humanGate(
   }
   const open = tools.open ?? systemOpener(ctx);
   if (run.waitingFor?.kind === "loop")
-    return loopGate(ctx, runtime, run, prompt, tools.shell ?? systemShell(ctx), open);
+    return loopGate(ctx, runtime, run, prompt, tools.shell ?? systemShell(ctx), open, actor);
   const awaited = awaitedArtifact(runtime, run);
   if (!awaited) return "detached";
   const { type, artifact } = awaited;
+  const label = `${type}/${artifact.name}@${artifact.version}`;
+  // decided before this card opened (`jarvis approve`, the page): go on with that decision
+  const before = decisionLine(ctx, runtime, artifact, label, true);
+  if (before) {
+    ctx.out.line();
+    ctx.out.line(before);
+    return "decided";
+  }
   const text = runtime.artifacts.text(artifact);
   const doc = await brief(ctx, runtime, run, type, artifact, text);
-  const label = `${type}/${artifact.name}@${artifact.version}`;
   // a run with a checkout of its own: its changes open in the person's editor from the card
   const withOpen = run.workspace.mode === "worktree";
-  for (;;) {
-    menu(ctx, withOpen);
-    if (ctx.out.accessible) ctx.out.bell(); // a decision is waiting
-    const answer = await prompt.ask(`${st.cmd(">")} `);
-    const input =
-      ctx.out.accessible && answer !== undefined ? (numbered(keysFor(withOpen), answer) ?? answer) : answer;
-    if (input === undefined || input === "q") return "detached";
-    if (input === "") {
-      const whole = renderMarkdown((doc ? documentToMarkdown(doc) : text).trimEnd(), st);
-      if (pager(`${whole}\n`)) continue;
-      ctx.out.line(st.muted("─".repeat(60)));
-      ctx.out.raw(whole);
-      ctx.out.line(st.muted("─".repeat(60)));
-      continue;
+  // the same decision may come from the page or another terminal while the card waits (ADR-0023 §4)
+  const elsewhere = watchRun(() => {
+    const now = runtime.runs.get(run.id);
+    const line = decisionLine(ctx, runtime, artifact, label);
+    if (now?.state !== "WAITING_HUMAN") {
+      const moved = movedLine(ctx, now);
+      return { line: line ? `${line}\n${moved}` : moved, moved: true };
     }
-    if (input === "?") {
-      help(ctx, withOpen);
-      continue;
+    return line ? { line, moved: false } : undefined;
+  }, pollMs(ctx));
+  const closeCard = openCard(runtime, run, "approval");
+  const at = { signal: elsewhere.signal };
+  /** Records the person's decision; one made meanwhile elsewhere wins and is followed. */
+  const decide = (
+    decision: "approve" | "request_changes",
+    comment: string | undefined,
+    done: string,
+  ): GateResult => {
+    try {
+      recordDecision(runtime, run, {
+        actor,
+        artifact,
+        type,
+        decision,
+        ...(comment ? { comment } : {}),
+        channel: "cli",
+      });
+    } catch (error) {
+      if (!(error instanceof DecisionTakenError)) throw error;
+      ctx.out.line(st.warn(`  ${error.message} — yours is not recorded`));
+      return pickedUp(ctx, runtime, run.id, {
+        line: decisionLine(ctx, runtime, artifact, label) ?? "",
+        moved: false,
+      });
     }
-    if (input === "o" && withOpen) {
-      const files = reviewFiles(run.workspace.path, run.workspace.baseCommit ?? run.workspace.baseRef);
-      const editor = open(run.workspace.path, files);
-      ctx.out.line(
-        editor
-          ? `  ${st.ok("↗")} opened the run's changes in ${editor}${files.length > 0 ? `: ${describeFiles(files)}` : ""}`
-          : st.warn(`  no editor found — set JARVIS_EDITOR (code, idea, webstorm…)`),
-      );
-      continue;
-    }
-    if (input === "e") {
-      const questions = strings(doc?.openQuestions);
-      const dir = mkdtempSync(join(tmpdir(), "jarvis-comment-"));
-      const file = join(dir, "COMMENT.md");
-      try {
-        writeFileSync(file, editorTemplate(label, questions));
-        if (!editor(file)) {
-          ctx.out.line(st.muted("  the editor did not finish; choose again (c asks here)"));
-          continue;
+    ctx.out.line(done);
+    return "decided";
+  };
+  try {
+    for (;;) {
+      menu(ctx, withOpen);
+      if (ctx.out.accessible) ctx.out.bell(); // a decision is waiting
+      const answer = await prompt.ask(`${st.cmd(">")} `, at);
+      const seen = elsewhere.seen();
+      if (seen) return pickedUp(ctx, runtime, run.id, seen);
+      const input =
+        ctx.out.accessible && answer !== undefined ? (numbered(keysFor(withOpen), answer) ?? answer) : answer;
+      if (input === undefined || input === "q") return "detached";
+      if (input === "") {
+        const whole = renderMarkdown((doc ? documentToMarkdown(doc) : text).trimEnd(), st);
+        if (pager(`${whole}\n`)) continue;
+        ctx.out.line(st.muted("─".repeat(60)));
+        ctx.out.raw(whole);
+        ctx.out.line(st.muted("─".repeat(60)));
+        continue;
+      }
+      if (input === "?") {
+        help(ctx, withOpen);
+        continue;
+      }
+      if (input === "o" && withOpen) {
+        const files = reviewFiles(run.workspace.path, run.workspace.baseCommit ?? run.workspace.baseRef);
+        const editor = open(run.workspace.path, files);
+        ctx.out.line(
+          editor
+            ? `  ${st.ok("↗")} opened the run's changes in ${editor}${files.length > 0 ? `: ${describeFiles(files)}` : ""}`
+            : st.warn(`  no editor found — set JARVIS_EDITOR (code, idea, webstorm…)`),
+        );
+        continue;
+      }
+      if (input === "e") {
+        const questions = strings(doc?.openQuestions);
+        const dir = mkdtempSync(join(tmpdir(), "jarvis-comment-"));
+        const file = join(dir, "COMMENT.md");
+        try {
+          writeFileSync(file, editorTemplate(label, questions));
+          if (!editor(file)) {
+            ctx.out.line(st.muted("  the editor did not finish; choose again (c asks here)"));
+            continue;
+          }
+          const comment = commentFromTemplate(readFileSync(file, "utf8"), questions);
+          if (!comment) {
+            ctx.out.line(st.muted("  nothing to send; choose again"));
+            continue;
+          }
+          return decide("request_changes", comment, `${st.warn("↻")} sent back ${label} with your changes`);
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
         }
-        const comment = commentFromTemplate(readFileSync(file, "utf8"), questions);
+      }
+      if (input === "a") return decide("approve", undefined, `${st.ok("✓")} accepted ${label}`);
+      if (input === "c") {
+        const comment = await changes(ctx, prompt, doc, elsewhere.signal);
+        const meanwhile = elsewhere.seen();
+        if (meanwhile) return pickedUp(ctx, runtime, run.id, meanwhile);
+        if (comment === undefined) return "detached";
         if (!comment) {
           ctx.out.line(st.muted("  nothing to send; choose again"));
           continue;
         }
-        recordDecision(runtime, run, { actor, artifact, type, decision: "request_changes", comment });
-        ctx.out.line(`${st.warn("↻")} sent back ${label} with your changes`);
-        return "decided";
-      } finally {
-        rmSync(dir, { recursive: true, force: true });
+        return decide("request_changes", comment, `${st.warn("↻")} sent back ${label} with your changes`);
       }
+      ctx.out.line(st.muted("  enter, a, c, e, q or ? for help"));
     }
-    if (input === "a") {
-      recordDecision(runtime, run, { actor, artifact, type, decision: "approve" });
-      ctx.out.line(`${st.ok("✓")} accepted ${type}/${artifact.name}@${artifact.version}`);
-      return "decided";
-    }
-    if (input === "c") {
-      const comment = await changes(ctx, prompt, doc);
-      if (comment === undefined) return "detached";
-      if (!comment) {
-        ctx.out.line(st.muted("  nothing to send; choose again"));
-        continue;
-      }
-      recordDecision(runtime, run, { actor, artifact, type, decision: "request_changes", comment });
-      ctx.out.line(
-        `${st.warn("↻")} sent back ${type}/${artifact.name}@${artifact.version} with your changes`,
-      );
-      return "decided";
-    }
-    ctx.out.line(st.muted("  enter, a, c, e, q or ? for help"));
+  } finally {
+    elsewhere.stop();
+    closeCard();
   }
 }

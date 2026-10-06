@@ -1,13 +1,14 @@
 import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { clock } from "../../app/activity.ts";
-import { awaitedArtifact, recordDecision } from "../../app/decide.ts";
+import { awaitedArtifact, DecisionTakenError, recordDecision } from "../../app/decide.ts";
 import { createEngine } from "../../app/engine.ts";
 import { continuationStep, continuedBy, handOff } from "../../app/handoff.ts";
 import { duration } from "../../app/journey.ts";
 import { preflightMcp } from "../../app/preflight.ts";
 import { createRuntime, type Runtime } from "../../app/runtime.ts";
 import { runDetail } from "../../app/status.ts";
+import type { Approval } from "../../artifacts/store.ts";
 import { resolveActor } from "../../core/actor/resolve.ts";
 import type { Actor } from "../../core/domain/actor.ts";
 import type { ApprovalDecision } from "../../core/domain/artifact.ts";
@@ -76,6 +77,8 @@ async function executeAndReport(
   shared?: Prompt,
   /** false when the caller has shown the run already. */
   showHeader = true,
+  /** The run goes on in another process (the card saw it move): follow it, do not execute. */
+  followFirst = false,
 ): Promise<never> {
   const owner = leaseOwner(runtime.loaded.config.interactive ? "cli" : "ci");
   const plan = planOf(engine, run);
@@ -85,20 +88,52 @@ async function executeAndReport(
   try {
     let header = showHeader;
     let stealLease = steal;
+    let following = followFirst;
+    /** A card let the run go on: another process may have taken it meanwhile (ADR-0023 §4). */
+    let afterCard = false;
     for (;;) {
-      const progress = followRun(ctx, runtime, { runId: run.id, plan, header });
-      const result = await engine
-        .execute(run.id, { owner, steal: stealLease })
-        .finally(() => progress.stop());
+      let result: { run: Run; exitCode: number };
+      if (following) {
+        following = false;
+        const followed = await followElsewhere(ctx, runtime, run.id, plan, { header: false, graceTicks: 3 });
+        if (followed.detached) {
+          ctx.out.note(`detached; the run goes on — \`jarvis follow ${shortRunId(run.id)}\` to come back`);
+          throw new CliExit(EXIT.ok);
+        }
+        result = { run: followed.run, exitCode: exitCodeFor(followed.run.state, followed.run.stateReason) };
+      } else {
+        const progress = followRun(ctx, runtime, { runId: run.id, plan, header });
+        try {
+          result = await engine.execute(run.id, { owner, steal: stealLease }).finally(() => progress.stop());
+        } catch (error) {
+          // the decision came with a `--resume` elsewhere, and that process won the lease: follow it
+          if (!(afterCard && error instanceof LeaseHeldError)) throw error;
+          ctx.out.line(
+            `${ctx.out.style.warn("↻")} the run went on elsewhere ${ctx.out.style.muted("— following it here")}`,
+          );
+          following = true;
+          afterCard = false;
+          continue;
+        }
+      }
       header = false;
       stealLease = false;
+      afterCard = false;
       // a model that is down or a quota window: wait here and go on (Ctrl-C leaves it parked)
       if (prompt && result.run.state === "WAITING_BUDGET") {
         if ((await waitParked(ctx, runtime, result.run)) === "ready") continue;
       }
       if (prompt && result.exitCode === EXIT.waitingHuman) {
         const actor = await actorFor(ctx, runtime);
-        if ((await humanGate(ctx, runtime, result.run, actor, prompt)) === "decided") continue;
+        const gate = await humanGate(ctx, runtime, result.run, actor, prompt);
+        if (gate === "decided") {
+          afterCard = true;
+          continue;
+        }
+        if (gate === "elsewhere") {
+          following = true;
+          continue;
+        }
         ctx.out.line(
           `${ctx.out.style.muted("left waiting; come back with")} ${ctx.out.style.cmd("jarvis continue")}`,
         );
@@ -147,6 +182,55 @@ async function executeAndReport(
   } finally {
     if (!shared) prompt?.close();
   }
+}
+
+/**
+ * Follows a run another process drives (another terminal, the daemon) until it stops running —
+ * parked, finished, failed, or its process died; Ctrl-C only detaches. `jarvis follow`, and a card
+ * that saw its run go on elsewhere (ADR-0023 §4): the terminal never takes a lease it did not win.
+ */
+async function followElsewhere(
+  ctx: CliContext,
+  runtime: Runtime,
+  runId: string,
+  plan: readonly string[],
+  options: { header: boolean; pollMs?: number; graceTicks?: number },
+): Promise<{ run: Run; detached: boolean }> {
+  const alive = (r: Run) => r.lease !== undefined && Date.parse(r.lease.until) >= Date.now();
+  // the course since the run last stopped for a person: the step lines of what ran meanwhile
+  const parks = runtime.events
+    .list({ runId, kind: "run.state", limit: 100_000 })
+    .filter((e) => e.payload?.state === "WAITING_HUMAN");
+  const progress = followRun(ctx, runtime, {
+    runId,
+    plan,
+    header: options.header,
+    signals: false,
+    fromSeq: options.header ? 0 : (parks.at(-1)?.seq ?? 0),
+  });
+  let detached = false;
+  const onInterrupt = () => {
+    detached = true;
+  };
+  process.once("SIGINT", onInterrupt);
+  let run = runtime.runs.require(runId);
+  try {
+    // a run handed over a moment ago may still show WAITING_HUMAN: give it a few polls to start
+    let grace = options.graceTicks ?? 0;
+    for (;;) {
+      run = runtime.runs.require(runId);
+      const runs = run.state === "RUNNING" && alive(run);
+      if (!runs && (run.state !== "WAITING_HUMAN" || grace-- <= 0)) break;
+      await new Promise((resolve) =>
+        setTimeout(resolve, options.pollMs ?? (Number(ctx.env.JARVIS_CARD_POLL_MS) || 1000)),
+      );
+      if (detached) break;
+    }
+  } finally {
+    progress.stop();
+    process.removeListener("SIGINT", onInterrupt);
+  }
+  return { run, detached };
 }
 
 /** The workflow's step ids, for `[k/N]` and the plan under the header. */
@@ -252,7 +336,10 @@ export async function runContinue(ctx: CliContext, ref: string | undefined): Pro
         throw new CliExit(EXIT.waitingHuman);
       }
       const actor = await actorFor(ctx, runtime);
-      if ((await humanGate(ctx, runtime, run, actor, prompt)) !== "decided") {
+      const gate = await humanGate(ctx, runtime, run, actor, prompt);
+      if (gate === "elsewhere")
+        await executeAndReport(ctx, runtime, engine, run, false, {}, prompt, false, true);
+      if (gate !== "decided") {
         ctx.out.line(`${st.muted("left waiting; come back with")} ${st.cmd("jarvis continue")}`);
         throw new CliExit(EXIT.waitingHuman);
       }
@@ -559,13 +646,21 @@ export async function runApprove(ctx: CliContext, ref: string, options: ApproveO
       throw new CliExit(EXIT.error);
     }
     const decision = options.decision ?? "approve";
-    const approval = recordDecision(runtime, run, {
-      actor,
-      artifact: latest,
-      type,
-      decision,
-      ...(options.comment ? { comment: options.comment } : {}),
-    });
+    let approval: Approval;
+    try {
+      approval = recordDecision(runtime, run, {
+        actor,
+        artifact: latest,
+        type,
+        decision,
+        ...(options.comment ? { comment: options.comment } : {}),
+        channel: "cli",
+      });
+    } catch (error) {
+      if (!(error instanceof DecisionTakenError)) throw error;
+      ctx.out.error(error.message);
+      throw new CliExit(EXIT.error);
+    }
     let committed: string | undefined;
     if (options.commit) {
       const root = loaded.project?.root ?? ctx.cwd;
@@ -863,33 +958,12 @@ export async function runFollow(
       ctx.out.line(`nothing runs here now ${ctx.out.style.muted("(`jarvis status` lists the runs)")}`);
       return;
     }
-    const progress = followRun(ctx, runtime, {
-      runId: run.id,
-      plan: planOf(engine, run),
+    const followed = await followElsewhere(ctx, runtime, run.id, planOf(engine, run), {
       header: true,
-      signals: false,
-      fromSeq: 0,
+      ...(options.pollMs !== undefined ? { pollMs: options.pollMs } : {}),
     });
-    let detached = false;
-    const onInterrupt = () => {
-      detached = true;
-    };
-    process.once("SIGINT", onInterrupt);
-    try {
-      for (;;) {
-        const now = runtime.runs.require(run.id);
-        if (now.state !== "RUNNING" || !alive(now)) {
-          run = now;
-          break;
-        }
-        await new Promise((resolve) => setTimeout(resolve, options.pollMs ?? 1000));
-        if (detached) break;
-      }
-    } finally {
-      progress.stop();
-      process.removeListener("SIGINT", onInterrupt);
-    }
-    if (detached) {
+    run = followed.run;
+    if (followed.detached) {
       ctx.out.note(`detached; the run goes on — \`jarvis follow ${shortRunId(run.id)}\` to come back`);
       return;
     }

@@ -187,7 +187,10 @@ steps:
 
 Каждое действие — строка в `events` с `runId`, `stepId`, `iteration`, `payload`:
 `run.created|steal|cancel|applied|imported|gc`, `model.call|retry|error`, `tool.call|denied`,
-`effect.done|failed|verified|replayed|unresolved`, `approval.recorded|skipped|committed`,
+`effect.done|failed|verified|replayed|unresolved`, `approval.recorded|skipped|committed` (у
+`recorded` — `channel`: `cli` или `ui`), `loop.rerun` (повтор шага исчерпанной петли: `r` на карточке,
+кнопка `jarvis ui`), `card.open|closed` (карточка в терминале ждёт решения: так страница знает, пойдёт ли
+прогон дальше сразу),
 `interaction.opened|turn|resolved|rejected`, `review.submitted|classified|resolved`,
 `standards.checked`, `retrieval.knowledge`, `graph.update`, `security.redaction`,
 `context.pressure|trimmed|compacted|reset|tightened|compaction_failed|overflow`, `prepush.checked`,

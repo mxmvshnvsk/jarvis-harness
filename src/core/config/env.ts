@@ -46,6 +46,8 @@ export const RESERVED_ENV = new Set([
   "JARVIS_SHELL_PARENT",
   // the editor a run's checkout opens in (`o`, `jarvis open`; src/cli/checkout.ts)
   "JARVIS_EDITOR",
+  // how often a waiting card looks for a decision made elsewhere (src/cli/gate.ts; tests)
+  "JARVIS_CARD_POLL_MS",
 ]);
 
 function normalizeKey(key: string): string {
