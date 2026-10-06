@@ -52,6 +52,7 @@ export function systemLayer(def: AgentDefinition, tools: readonly CapabilityDesc
     "- Never invent file contents, APIs, tickets or test results. What you cannot verify is an unknown.",
     "- Secrets in tool output appear as [REDACTED:…]; never try to recover or guess them.",
     "- Tool calls that are denied by policy are final; do not retry them with other arguments.",
+    "- Do not create scratch or probe files in the workspace: everything you write there becomes part of the change. Text files written with the tools end with a newline; do not try to fix line endings yourself.",
     "- Precedence of guidance: these rules and the agent instructions, then required standards, then skills, then recommended standards and project knowledge.",
     "- When you are done, reply without tool calls with the result document itself (the JSON of the output contract); a prose reply makes the runtime ask for it again.",
     "",

@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Runtime } from "../../src/app/runtime.ts";
@@ -136,6 +136,11 @@ describe("local tools", () => {
     });
     expect(edit.ok).toBe(true);
     expect((await tools.invoke("repo.read", { path: "src/index.ts" })).text).toContain("answer = 43");
+    // the model's arguments lose a trailing newline: the file still ends with one (eol-last)
+    await tools.invoke("repo.write", { path: "src/new/no-eol.ts", content: "export const y = 2;" });
+    expect(readFileSync(join(sb.project, "src/new/no-eol.ts"), "utf8")).toBe("export const y = 2;\n");
+    await tools.invoke("repo.edit", { path: "src/new/no-eol.ts", oldText: "y = 2;\n", newText: "y = 3;" });
+    expect(readFileSync(join(sb.project, "src/new/no-eol.ts"), "utf8")).toBe("export const y = 3;\n");
     const missing = await tools.invoke("repo.edit", { path: "src/index.ts", oldText: "nope", newText: "x" });
     expect(missing.ok).toBe(false);
     expect(missing.error).toContain("fragment not found");

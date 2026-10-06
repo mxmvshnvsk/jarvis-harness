@@ -20,6 +20,18 @@ function fail(error: unknown): ToolOutput {
   return { ok: false, error: error instanceof Error ? error.message : String(error) };
 }
 
+/**
+ * Text files end with a newline, as nearly every linter wants (`eol-last`). A model's tool arguments
+ * can lose a string's trailing newline — the pilot model never delivered one, and an agent spent two
+ * rounds and a dozen probe files failing to satisfy the linter. A file that ended with a newline
+ * keeps one; a new file gets one; a file that existed without one stays so.
+ */
+export function withFinalNewline(content: string, before: string | undefined): string {
+  if (content === "" || content.endsWith("\n")) return content;
+  if (before !== undefined && before !== "" && !before.endsWith("\n")) return content;
+  return `${content}\n`;
+}
+
 function str(args: Record<string, unknown>, key: string, fallback?: string): string {
   const v = args[key];
   if (v === undefined || v === null) {
@@ -287,7 +299,7 @@ export class LocalToolProvider implements ToolProvider {
       },
       {
         name: "repo.write",
-        description: "Create or overwrite a file inside the workspace.",
+        description: "Create or overwrite a file inside the workspace. A text file is ended with a newline.",
         network: "none",
         access: "write",
         effect: false,
@@ -300,7 +312,8 @@ export class LocalToolProvider implements ToolProvider {
           try {
             const { absolute, relative: rel } = resolveInWorkspace(ctx, str(args, "path"));
             mkdirSync(dirname(absolute), { recursive: true });
-            const content = str(args, "content");
+            const before = existsSync(absolute) ? readFileSync(absolute, "utf8") : undefined;
+            const content = withFinalNewline(str(args, "content"), before);
             writeFileSync(absolute, content, "utf8");
             return {
               ok: true,
@@ -342,10 +355,13 @@ export class LocalToolProvider implements ToolProvider {
                 ok: false,
                 error: `fragment occurs ${occurrences} times in ${rel}; pass replaceAll=true or make it unique`,
               };
-            const next =
+            const replaced =
               args.replaceAll === true
                 ? current.split(oldText).join(newText)
                 : current.replace(oldText, () => newText);
+            // an edited text file ends with a newline (see withFinalNewline): an edit at the end must not
+            // take it away, and a file written without one is mended by the next edit
+            const next = withFinalNewline(replaced, undefined);
             writeFileSync(absolute, next, "utf8");
             return {
               ok: true,
