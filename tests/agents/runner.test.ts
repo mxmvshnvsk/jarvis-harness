@@ -516,6 +516,73 @@ context: { maxContext: 8000 }
     );
   });
 
+  it("gives an agent sent back by a human its previous version and the review (pilot: a dead loop)", async () => {
+    sb.write("project/.jarvis/project.yaml", "version: 1\nworkspace: { mode: cwd }\n");
+    rt = await testRuntime(sb, { PATH: process.env.PATH ?? "" });
+    const wf = workflowOf({
+      name: "s",
+      entry: "spec",
+      steps: [
+        {
+          id: "spec",
+          kind: "agentic",
+          agent: "specification",
+          outputs: ["spec"],
+          transitions: { onSuccess: "approve" },
+        },
+        {
+          id: "approve",
+          kind: "approval",
+          artifactType: "spec",
+          transitions: {
+            onSuccess: "DONE",
+            onOutcome: { request_changes: { to: "spec", maxIterations: 3 } },
+          },
+        },
+      ],
+    });
+    const engine = engineWith(rt, wf);
+    const doc = (title: string, openQuestions: string[]) => ({
+      summary: "Hide the delivery fields in compact mode.",
+      title,
+      goals: ["Hide them"],
+      requirements: [{ id: "R1", text: "Hide", acceptance: ["not rendered"] }],
+      openQuestions,
+      outcome: "ok",
+    });
+    let round = 0;
+    server.respond(() => {
+      round += 1;
+      return completion(
+        JSON.stringify(round === 1 ? doc("First draft", ["Ever show them?"]) : doc("Second draft", [])),
+      );
+    });
+    const run = createRun(rt, "s");
+    const parked = await engine.execute(run.id, { owner: "cli:t" });
+    expect(parked.run.state).toBe("WAITING_HUMAN");
+    const v1 = rt.artifacts.listLatest(run.id, "spec")[0];
+    rt.artifacts.approve({
+      runId: run.id,
+      stepId: "approve",
+      artifactId: v1?.artifactId as string,
+      version: 1,
+      actor: ACTOR,
+      decision: "request_changes",
+      comment: "Answers to the open questions:\n1) Ever show them?\n   → never",
+    });
+    await engine.execute(run.id, { owner: "cli:t" });
+
+    const first = JSON.stringify(server.requests[0]?.body.messages);
+    expect(first).not.toContain("Human review");
+    const second = JSON.stringify(server.requests.at(-1)?.body.messages);
+    expect(second).toContain("# Human review of your previous version spec/spec.json@1 (binding)");
+    expect(second).toContain("→ never");
+    expect(second).toContain("## Your previous version spec/spec.json@1 (sent back)");
+    expect(second).toContain("First draft");
+    expect(second).toContain("never ask it again");
+    expect(rt.artifacts.listLatest(run.id, "spec")[0]?.version).toBe(2);
+  });
+
   it("stores invalid structured output as an artifact and fails the step", async () => {
     sb.write("project/.jarvis/project.yaml", "version: 1\nworkspace: { mode: cwd }\n");
     rt = await testRuntime(sb, { PATH: process.env.PATH ?? "" });

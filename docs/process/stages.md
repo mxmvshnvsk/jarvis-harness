@@ -104,6 +104,12 @@ Remaining commands of ADR-0001 §15:
   success rate, retries, latency and output speed percentiles, tokens and cache share, finish reasons, failures
   grouped by reason/status/code with the length of the failed attempts (the same length every time is flagged as
   a cut-off), calls by agent
+- the human loop closes: an agent sent back by `request_changes` gets the review (the decision's comment — answers
+  to its open questions, what to change) as a binding section and its previous version as the first input, with
+  the rule to revise it, take answered questions out of the open ones and use tools only for what the review raises.
+  Pilot: the second pass of `spec` got the same inputs as the first, re-researched for 13 minutes, hit its tool
+  limit and asked the answered questions again; a resumed step's report counts the tool calls made before the
+  interruption
 
 ADR-0001 §20 stage 12 (git hooks) — `f11ca47`:
 

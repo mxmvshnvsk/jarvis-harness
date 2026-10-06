@@ -94,8 +94,10 @@ export function buildBaseMessages(input: BuildInput): Message[] {
     outputContract(def),
   ].join("\n");
   const clarifications = describeClarifications(ctx);
+  const review = humanReviewOf(ctx, def);
   const l2 = [
     loopReasons ? `# Why this step runs again\n${loopReasons}` : "",
+    review ? review.instructions : "",
     clarifications ? `# Clarifications decided with a human (binding)\n${clarifications}` : "",
   ]
     .filter(Boolean)
@@ -117,6 +119,8 @@ export function buildBaseMessages(input: BuildInput): Message[] {
         `- ${i.artifact.type}/${i.artifact.name}@${i.artifact.version}${incompleteNote(i.artifact) ? " (incomplete: its agent ran out of budget)" : ""}`,
     );
   if (named.length > 0) l3.push(`## Other inputs (available on request)\n${named.join("\n")}`);
+  // the version the human sent back comes first: the agent revises it rather than starting over
+  if (review) l3.unshift(review.previous(perInput > 0 ? perInput : inputBudget));
 
   const l4 = renderPackage(input.pkg, knowledgeBudget, input.knowledgeConfig);
 
@@ -128,6 +132,49 @@ export function buildBaseMessages(input: BuildInput): Message[] {
     { role: "system", content: systemLayer(def, input.tools) },
     { role: "user", content: user },
   ];
+}
+
+/**
+ * A human sent this agent's previous result back (`request_changes`, ADR-0005 §4): the decision's
+ * comment — answers to the document's open questions, what to change — and that version itself.
+ * Pilot: the second pass of `spec` got neither, re-researched the code for 13 minutes, spent its tool
+ * limit and asked the answered questions again.
+ */
+export function humanReviewOf(
+  ctx: StepContext,
+  def: AgentDefinition,
+): { instructions: string; previous: (chars: number) => string } | undefined {
+  if (ctx.iteration <= 1) return undefined;
+  const previous = ctx.runtime.artifacts.listLatest(ctx.run.id, def.output.type)[0];
+  if (!previous) return undefined;
+  const decisions = ctx.runtime.artifacts
+    .approvalsFor(previous.artifactId, previous.version)
+    .filter((a) => a.decision !== "approve");
+  if (decisions.length === 0) return undefined;
+  const lines = decisions.map(
+    (a) =>
+      `- ${a.decision} by ${a.actor.id}${
+        a.comment
+          ? `:\n${a.comment
+              .split("\n")
+              .map((l) => `  ${l}`)
+              .join("\n")}`
+          : " (no comment)"
+      }`,
+  );
+  const ref = `${previous.type}/${previous.name}@${previous.version}`;
+  return {
+    instructions: [
+      `# Human review of your previous version ${ref} (binding)`,
+      ...lines,
+      "",
+      `Revise ${ref} (below, under Inputs) instead of starting over: apply every point of the review and keep what it does not touch.`,
+      "A question the review answers is decided: put the answer into the document (requirements, non-goals, decisions) and remove it from the open questions; never ask it again.",
+      "Use tools only to check something the review raises; the research is done.",
+    ].join("\n"),
+    previous: (chars) =>
+      `## Your previous version ${ref} (sent back)\n${clip(ctx.runtime.artifacts.text(previous), chars)}`,
+  };
 }
 
 /** Resolved clarification threads of the run (ADR-0019 §4): rules agents must follow. */

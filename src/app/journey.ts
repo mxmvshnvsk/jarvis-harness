@@ -92,6 +92,9 @@ export class Journey {
       case "agent.start": {
         const agent = str(p.agent);
         if (this.open && agent) this.open.agent = agent;
+        // a resumed step goes on from its checkpoint: count the tool calls made before (pilot: "5/20 tools ·
+        // tool limit reached" after a Ctrl-C at 15)
+        if (this.open) this.open.toolCalls = Math.max(this.open.toolCalls, num(p.restoredToolCalls));
         if (this.open && num(p.maxToolCalls) > 0) this.open.maxToolCalls = num(p.maxToolCalls);
         return [];
       }

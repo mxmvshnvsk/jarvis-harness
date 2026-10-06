@@ -87,6 +87,17 @@ describe("journey", () => {
     ]);
   });
 
+  it("counts the tool calls a resumed step made before it was interrupted (pilot: 5/20 · limit reached)", () => {
+    const j = new Journey();
+    j.push(ev("step.start", "00:00", { stepId: "spec", iteration: 2 }));
+    j.push(ev("agent.start", "00:00", { agent: "specification", maxToolCalls: 20, restoredToolCalls: 15 }));
+    for (const t of ["00:01", "00:02", "00:03", "00:04", "00:05"]) j.push(ev("tool.call", t));
+    j.push(ev("agent.finish", "00:06", { budgetExhausted: "tools" }));
+    const [line] = j.push(ev("step.finish", "00:07", { status: "success" }));
+    if (line?.kind !== "step") throw new Error("step");
+    expect(line.report.toolCalls).toBe(20);
+  });
+
   it("formats durations for people", () => {
     expect([400, 42_000, 192_000, 3_840_000].map(duration)).toEqual(["0.4s", "42s", "3m 12s", "1h 04m"]);
   });
