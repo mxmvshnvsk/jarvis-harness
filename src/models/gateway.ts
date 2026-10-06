@@ -1,5 +1,6 @@
 import { BudgetManager } from "../budget/admission.ts";
 import { MemoryUsageStore, type UsageStore } from "../budget/usage.ts";
+import { prefixReuse } from "../context/serialize.ts";
 import type { ModelConfig, ResolvedConfig } from "../core/config/schema.ts";
 import { EnvSecretResolver, type SecretRef, type SecretResolver } from "../core/config/secrets.ts";
 import { modelAllowed } from "../security/policy/egress.ts";
@@ -9,7 +10,7 @@ import { type CassetteMode, type CassetteStore, cassetteKey, cassetteRequest } f
 import { ModelError } from "./errors.ts";
 import { type AdapterRegistry, adapterFor, defaultAdapters } from "./providers/index.ts";
 import { charsOfMessages, TokenEstimator } from "./tokens.ts";
-import type { ModelRequest, ModelResponse, ProviderResult, StreamProgress } from "./types.ts";
+import type { Message, ModelRequest, ModelResponse, ProviderResult, StreamProgress } from "./types.ts";
 
 /** The one method executors need; the budgeted wrapper (ADR-0018 §4) implements it too. */
 export interface ModelCaller {
@@ -97,6 +98,8 @@ export class ModelGateway implements ModelCaller {
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly clock: () => Date;
   private readonly semaphores = new Map<string, Semaphore>();
+  /** The last prompt of each step (run, step, iteration, model): what the next call can reuse. */
+  private readonly lastPrompts = new Map<string, readonly Message[]>();
 
   constructor(options: GatewayOptions) {
     this.config = options.config;
@@ -144,6 +147,7 @@ export class ModelGateway implements ModelCaller {
       );
     }
 
+    const reuse = this.observePrefix(request);
     const estimatedPrompt = this.estimator.estimateMessages(
       modelId,
       model.tokenizer,
@@ -164,7 +168,7 @@ export class ModelGateway implements ModelCaller {
         );
       }
       const response = this.finish(request, entry.response, 0, 0, "replay");
-      this.emitCall(request, response, estimatedPrompt);
+      this.emitCall(request, response, estimatedPrompt, reuse);
       return response;
     }
 
@@ -259,7 +263,7 @@ export class ModelGateway implements ModelCaller {
               cassetteVersion: 1,
             });
           }
-          this.emitCall(request, response, estimatedPrompt);
+          this.emitCall(request, response, estimatedPrompt, reuse);
           this.log.debug("model.response", {
             ...(request.runId ? { runId: request.runId } : {}),
             ...(request.stepId ? { stepId: request.stepId } : {}),
@@ -411,7 +415,45 @@ export class ModelGateway implements ModelCaller {
     }
   }
 
-  private emitCall(request: ModelRequest, response: ModelResponse, estimatedPrompt: number): void {
+  /**
+   * ADR-0013 §4: within a step the prompt only grows at the end, so a prefix cache can reuse all of
+   * it but the newest messages. `prefixReuse` (the share of this prompt identical to the previous
+   * call's from the start) shows how cache-friendly the prompts are even where the gateway reports no
+   * cache; a change in the stable layers (the first two messages) is a `context.prefixChanged`.
+   */
+  private observePrefix(request: ModelRequest): number | undefined {
+    if (!request.runId || !request.stepId) return undefined;
+    const key = `${request.runId}:${request.stepId}:${request.iteration ?? 0}:${request.modelId}`;
+    const previous = this.lastPrompts.get(key);
+    this.lastPrompts.delete(key);
+    this.lastPrompts.set(key, request.messages);
+    if (this.lastPrompts.size > 32) this.lastPrompts.delete(this.lastPrompts.keys().next().value as string);
+    if (!previous) return undefined;
+    const r = prefixReuse(previous, request.messages);
+    if (r.changedMessage !== undefined && r.changedMessage < 2) {
+      this.events.emit({
+        kind: "context.prefixChanged",
+        runId: request.runId,
+        stepId: request.stepId,
+        ...(request.iteration !== undefined ? { iteration: request.iteration } : {}),
+        payload: {
+          modelId: request.modelId,
+          agentId: request.agentId,
+          message: r.changedMessage,
+          role: request.messages[r.changedMessage]?.role,
+          reusedChars: r.reusedChars,
+        },
+      });
+    }
+    return r.totalChars > 0 ? Number((r.reusedChars / r.totalChars).toFixed(3)) : undefined;
+  }
+
+  private emitCall(
+    request: ModelRequest,
+    response: ModelResponse,
+    estimatedPrompt: number,
+    reuse?: number,
+  ): void {
     this.events.emit({
       kind: "model.call",
       ...(request.runId ? { runId: request.runId } : {}),
@@ -437,6 +479,7 @@ export class ModelGateway implements ModelCaller {
         rateLimit: response.rateLimit,
         ...(response.streamed ? { streamed: true } : {}),
         ...(response.firstTokenMs !== undefined ? { firstTokenMs: response.firstTokenMs } : {}),
+        ...(reuse !== undefined ? { prefixReuse: reuse } : {}),
       },
     });
   }

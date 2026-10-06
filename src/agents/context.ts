@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { z } from "zod";
+import { stableJson } from "../context/serialize.ts";
 import type { KnowledgeConfig } from "../core/config/schema.ts";
 import type { ArtifactVersion } from "../core/domain/artifact.ts";
 import { renderPackage } from "../knowledge/package.ts";
@@ -70,7 +71,7 @@ export function outputContract(def: AgentDefinition): string {
   return [
     "# Result document",
     `When asked for the result, answer with one JSON document matching this schema (artifact type "${def.output.type}"):`,
-    JSON.stringify(schema),
+    stableJson(schema),
     `Allowed values of "outcome": ${def.output.outcomes.map((o) => `"${o}"`).join(", ")}. Use "ok" unless the instructions say otherwise, and fill "reasons" whenever outcome is not "ok".`,
   ].join("\n");
 }

@@ -9,8 +9,8 @@
 - Код: `src/context/pressure.ts` (знаменатель, пороги, уровень), `src/context/transcript.ts` (trimming,
   компакция, handoff), `src/context/manager.ts` (`ContextManager` в цикле агента), `src/agents/contextOps.ts` и
   `src/cli/commands/context.ts` (ручные команды), `src/models/tokens.ts` (калибровка), профили порогов в
-  конфиге (`context.thresholds`), события `context.*`. Не сделано: `src/context/serialize.ts` и метрика
-  cache-hit (§4), `context.toolSchemaTokens` (§5)
+  конфиге (`context.thresholds`), события `context.*`, `src/context/serialize.ts` и `prefixReuse` в
+  `model.call` (§4). Не сделано: `context.toolSchemaTokens` (§5)
 
 ## Контекст
 
@@ -118,5 +118,11 @@ L2 внутри шага (иначе теряется prefix cache на ровн
   `Originals:` накапливаются; агент читает их `knowledge.read blob:<ref>`.
 - **Вручную**: `jarvis context`, `jarvis compact`, `jarvis reset-context` меняют транскрипт припаркованного
   run новым checkpoint'ом; `resume` продолжает с него.
-- **Не сделано**: сериализатор слоёв и метрика cache-hit (§4), `context.toolSchemaTokens`, сравнение порогов
-  по evals.
+- **Prefix cache** (§4): `stableJson` (ключи по порядку) для JSON в стабильных слоях; Gateway помнит последний
+  промпт шага и пишет в `model.call` `prefixReuse` — долю промпта, совпадающую с предыдущим вызовом шага с
+  начала: сколько мог бы переиспользовать кэш префикса, даже когда шлюз о кэше не сообщает
+  (`cachedTokens`). Изменение первых двух сообщений (L0–L2) внутри шага — событие `context.prefixChanged`.
+  `jarvis models stats` показывает `reusable p50`. На уровне `watch` результаты инструментов подрезаются
+  пачками (держим 3 последних, режем, когда необрезанных старее набралось 4), а не по одному за вызов: иначе
+  префикс менялся бы на каждом вызове.
+- **Не сделано**: `context.toolSchemaTokens`, сравнение порогов по evals.

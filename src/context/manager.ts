@@ -1,7 +1,11 @@
 import { ModelError } from "../models/errors.ts";
 import type { Message } from "../models/types.ts";
 import { levelOf, type PressureLevel, pressureOf, type Thresholds } from "./pressure.ts";
-import { compactTranscript, trimToolResults } from "./transcript.ts";
+import { compactTranscript, trimmable, trimToolResults } from "./transcript.ts";
+
+/** At `watch`: keep the 3 newest tool results, and trim only once 4 older ones are untrimmed. */
+const WATCH_KEEP = 3;
+const WATCH_BATCH = 4;
 
 /**
  * Acts on context pressure before every model call (ADR-0013 §6, ADR-0001 §7):
@@ -142,7 +146,9 @@ export class ContextManager {
 
     const t = this.o.thresholds;
     if (level === "watch") {
-      trim(6);
+      // in batches: trimming one more result on every call would change the prompt's prefix on
+      // every call and a prefix cache would never reuse past it (ADR-0013 §4)
+      if (trimmable(transcript, WATCH_KEEP) >= WATCH_BATCH) trim(WATCH_KEEP);
     } else if (level === "compact") {
       trim(4);
       if (pressure >= t.compact) await compact("compact", 3, this.o.compactTarget);

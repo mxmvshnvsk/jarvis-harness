@@ -233,7 +233,7 @@ export async function runModelsStats(
             `${f("streamed")}${s.streamed.calls} of ${s.calls}${s.streamed.firstTokenMs ? `${st.muted(" · first token ")}${p(s.streamed.firstTokenMs, duration)}` : ""}`,
           );
         ctx.out.line(
-          `${f("prompt")}avg ${kTok(s.promptTokens.avg)} ${st.muted("·")} max ${kTok(s.promptTokens.max)} ${st.muted("·")} total ${kTok(s.promptTokens.total)} ${st.muted(`· cached ${Math.round(s.cachedShare * 100)}%`)}`,
+          `${f("prompt")}avg ${kTok(s.promptTokens.avg)} ${st.muted("·")} max ${kTok(s.promptTokens.max)} ${st.muted("·")} total ${kTok(s.promptTokens.total)} ${st.muted(`· cached ${Math.round(s.cachedShare * 100)}%`)}${s.prefixReuse ? st.muted(` · reusable p50 ${Math.round(s.prefixReuse.p50 * 100)}%`) : ""}`,
         );
         ctx.out.line(
           `${f("output")}avg ${kTok(s.outputTokens.avg)} ${st.muted("·")} max ${kTok(s.outputTokens.max)} ${st.muted("·")} total ${kTok(s.outputTokens.total)}`,

@@ -41,6 +41,11 @@ export interface ModelStats {
   readonly promptTokens: { readonly total: number; readonly avg: number; readonly max: number };
   readonly outputTokens: { readonly total: number; readonly avg: number; readonly max: number };
   readonly cachedShare: number;
+  /**
+   * Share of each prompt identical to the previous call of its step from the start (ADR-0013 §4):
+   * what a prefix cache could reuse, whether or not the gateway reports caching.
+   */
+  readonly prefixReuse?: Percentiles;
   /** `length` = the answer was cut at maxOutput. */
   readonly finishReasons: Record<string, number>;
   readonly failures: readonly FailureGroup[];
@@ -138,6 +143,9 @@ export function modelStats(events: readonly StoredEvent[]): ModelStats[] {
     const failed = a.errors.length;
     const latency = percentiles(latencies);
     const speed = percentiles(speeds);
+    const reuse = percentiles(
+      a.calls.filter((e) => typeof pay(e).prefixReuse === "number").map((e) => num(pay(e).prefixReuse)),
+    );
     const streamedCalls = a.calls.filter((e) => pay(e).streamed === true);
     const firstToken = percentiles(streamedCalls.map((e) => num(pay(e).firstTokenMs)).filter((v) => v > 0));
     out.push({
@@ -155,6 +163,7 @@ export function modelStats(events: readonly StoredEvent[]): ModelStats[] {
       promptTokens: stat(prompts),
       outputTokens: stat(outputs),
       cachedShare: sum(prompts) > 0 ? cached / sum(prompts) : 0,
+      ...(reuse ? { prefixReuse: reuse } : {}),
       finishReasons,
       failures: [...groups.entries()]
         .map(([reason, g]) => {

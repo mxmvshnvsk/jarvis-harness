@@ -48,6 +48,14 @@ export interface TrimResult {
 
 const HEAD_CHARS = 240;
 
+/** Tool results older than the `keepRecent` newest that a trim would shorten. */
+export function trimmable(transcript: readonly Message[], keepRecent: number, minChars = 600): number {
+  const tools = transcript.filter((m) => m.role === "tool");
+  return tools
+    .slice(0, Math.max(0, tools.length - keepRecent))
+    .filter((m) => m.content.length >= minChars && !m.content.includes(TRIMMED_MARKER)).length;
+}
+
 export function trimToolResults(transcript: readonly Message[], options: TrimOptions): TrimResult {
   const minChars = options.minChars ?? 600;
   const toolIndexes = transcript.flatMap((m, i) => (m.role === "tool" ? [i] : []));

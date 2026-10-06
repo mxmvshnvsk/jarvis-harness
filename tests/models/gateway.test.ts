@@ -236,3 +236,25 @@ describe("ModelGateway noRetry", () => {
     expect(server.requests).toHaveLength(1);
   });
 });
+
+describe("ModelGateway prefix reuse (ADR-0013 §4)", () => {
+  it("reports how much of a step's prompt repeats the previous call and flags a changed stable layer", async () => {
+    server.respond(() => completion("ok"));
+    const g = gateway();
+    const step = { ...ask, stepId: "spec", iteration: 1 };
+    const system = { role: "system" as const, content: "stable rules" };
+    await g.call({ ...step, messages: [system, { role: "user", content: "task" }] });
+    await g.call({
+      ...step,
+      messages: [system, { role: "user", content: "task" }, { role: "assistant", content: "more" }],
+    });
+    await g.call({ ...step, messages: [{ role: "system", content: "stable rules at 15:04" }] });
+    const calls = events.events
+      .filter((e) => e.kind === "model.call")
+      .map((e) => (e.payload as Record<string, unknown>).prefixReuse);
+    expect(calls).toEqual([undefined, 0.8, 0.571]);
+    const changed = events.events.filter((e) => e.kind === "context.prefixChanged");
+    expect(changed).toHaveLength(1);
+    expect(changed[0]).toMatchObject({ stepId: "spec", payload: { message: 0, role: "system" } });
+  });
+});
