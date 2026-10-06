@@ -136,6 +136,13 @@ export class AgentRuntimeRunner implements AgentRunner {
     let transcript: Message[] = restored?.transcriptRef
       ? (JSON.parse(rt.blobs.getText(restored.transcriptRef)) as Message[])
       : [];
+    // project/user `agents.<id>.limits` over the built-in ones
+    const override = config.agents[def.id]?.limits;
+    const limits = {
+      ...def.limits,
+      maxToolCalls: override?.maxToolCalls ?? def.limits.maxToolCalls,
+      maxModelCalls: override?.maxModelCalls ?? def.limits.maxModelCalls,
+    };
     let toolCalls = restored?.toolCalls ?? 0;
     let modelCalls = restored?.modelCalls ?? 0;
     const emit = (kind: string, payload: Record<string, unknown>) =>
@@ -149,8 +156,8 @@ export class AgentRuntimeRunner implements AgentRunner {
     emit("agent.start", {
       modelId: route.modelId,
       tools: toolDefs.length,
-      maxToolCalls: def.limits.maxToolCalls,
-      maxModelCalls: def.limits.maxModelCalls,
+      maxToolCalls: limits.maxToolCalls,
+      maxModelCalls: limits.maxModelCalls,
       restoredToolCalls: toolCalls,
       knowledge: pkg.provenance,
     });
@@ -222,6 +229,8 @@ export class AgentRuntimeRunner implements AgentRunner {
     };
 
     let budgetExhaustedNotice = false;
+    /** Which limit ended the loop, if one did: the result may be incomplete (pilot: silent partial maps). */
+    let budgetExhausted: "tools" | "model" | undefined;
     /** The answer the loop ended with (no tool calls) — often the result document already. */
     let finalAnswer: string | undefined;
     for (;;) {
@@ -229,9 +238,13 @@ export class AgentRuntimeRunner implements AgentRunner {
         checkpoint();
         return { status: "failure", reason: "cancel requested" };
       }
-      if (modelCalls >= def.limits.maxModelCalls) break;
-      const allowTools = toolDefs.length > 0 && toolCalls < def.limits.maxToolCalls;
+      if (modelCalls >= limits.maxModelCalls) {
+        budgetExhausted = "model";
+        break;
+      }
+      const allowTools = toolDefs.length > 0 && toolCalls < limits.maxToolCalls;
       if (!allowTools && toolDefs.length > 0 && !budgetExhaustedNotice) {
+        budgetExhausted = "tools";
         transcript = [
           ...transcript,
           { role: "user", content: "Your tool budget for this step is used up. Finish with what you have." },
@@ -274,7 +287,7 @@ export class AgentRuntimeRunner implements AgentRunner {
           ...transcript,
           { role: "tool", toolCallId: call.id, content: formatToolResult(call.name, result, parseError) },
         ];
-        if (toolCalls % def.limits.checkpointEvery === 0) checkpoint();
+        if (toolCalls % limits.checkpointEvery === 0) checkpoint();
       }
     }
 
@@ -337,7 +350,7 @@ export class AgentRuntimeRunner implements AgentRunner {
         name: `${def.output.type}.json`,
         content: JSON.stringify(result.value, null, 2),
         mediaType: "application/json",
-        provenance: { kind: "agent", agentId: def.id },
+        provenance: { kind: "agent", agentId: def.id, ...(budgetExhausted ? { budgetExhausted } : {}) },
         // What the agent was told (ADR-0020 §4) joins what it read (ADR-0005).
         sourceRefs: [...(doc.sources ?? []), ...pkg.provenance],
         stepId: ctx.step.id,
@@ -354,6 +367,7 @@ export class AgentRuntimeRunner implements AgentRunner {
         repairs: result.repairs,
         finalizedFromLoop: result.calls === 0,
         artifact: `${artifact.artifactId}@${artifact.version}`,
+        ...(budgetExhausted ? { budgetExhausted } : {}),
       });
       return {
         status: "success",

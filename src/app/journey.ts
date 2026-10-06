@@ -25,6 +25,8 @@ export interface StepReport {
   readonly retries: number;
   readonly toolCalls: number;
   readonly maxToolCalls?: number;
+  /** The agent stopped on a limit, not because it was done: its document may be incomplete. */
+  readonly budgetExhausted?: string;
 }
 
 export interface LoopReport {
@@ -57,6 +59,7 @@ interface Open {
   retries: number;
   toolCalls: number;
   maxToolCalls?: number;
+  budgetExhausted?: string;
 }
 
 /** Feeds events in journal order; returns the lines each event completes. */
@@ -90,6 +93,11 @@ export class Journey {
         const agent = str(p.agent);
         if (this.open && agent) this.open.agent = agent;
         if (this.open && num(p.maxToolCalls) > 0) this.open.maxToolCalls = num(p.maxToolCalls);
+        return [];
+      }
+      case "agent.finish": {
+        const exhausted = str(p.budgetExhausted);
+        if (this.open && exhausted) this.open.budgetExhausted = exhausted;
         return [];
       }
       case "model.call":
@@ -152,6 +160,7 @@ export class Journey {
       retries: o.retries,
       toolCalls: o.toolCalls,
       ...(o.maxToolCalls ? { maxToolCalls: o.maxToolCalls } : {}),
+      ...(o.budgetExhausted ? { budgetExhausted: o.budgetExhausted } : {}),
     };
     return [{ kind: "step", report }];
   }

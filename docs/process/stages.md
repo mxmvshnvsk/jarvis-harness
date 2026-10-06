@@ -83,6 +83,10 @@ Remaining commands of ADR-0001 §15:
   backs and parking as lines; the live line under them; the run ends with a summary and `next` commands instead of
   the full status. `jarvis show <run> [artifact]` reads what a run produced — the pilot's `spec` stopped at
   "awaiting approval" with no command to read the spec; `workflow.loop` carries `max`
+- agent limits: `agents.<id>.limits.{maxToolCalls,maxModelCalls}` in user/project config (and `JARVIS_AGENTS__…`);
+  a result finished on a limit carries `budgetExhausted: tools|model` in its provenance and `agent.finish`, the step
+  line, the summary and `jarvis show` say it may be incomplete, and the next agent gets the input marked `INCOMPLETE`
+  (pilot: maps of large modules hit 60 tools and looked complete)
 
 ADR-0001 §20 stage 12 (git hooks) — `f11ca47`:
 

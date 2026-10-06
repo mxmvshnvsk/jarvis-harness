@@ -20,7 +20,7 @@ import type { CliContext } from "../context.ts";
 import { CliExit, EXIT } from "../output.ts";
 import { followRun } from "../progress.ts";
 import { renderDiff, renderMarkdown } from "../render.ts";
-import { padStyled } from "../style.ts";
+import { incompleteOf, padStyled } from "../style.ts";
 import { loadForCli } from "./config.ts";
 import { renderSummary } from "./status.ts";
 
@@ -499,8 +499,9 @@ export async function runShow(
           const w = Math.max(...all.map((a) => `${a.type}/${a.name}@${a.version}`.length));
           for (const a of all) {
             const state = stateOf(a);
+            const partial = incompleteOf(a);
             ctx.out.line(
-              `  ${padStyled(`${a.type}/${a.name}@${a.version}`, w)}  ${st.muted(padStyled(a.stepId ? `${a.stepId}${a.iteration && a.iteration > 1 ? `#${a.iteration}` : ""}` : "-", 16))} ${state === "approved" ? st.ok(state) : st.warn(state)}`,
+              `  ${padStyled(`${a.type}/${a.name}@${a.version}`, w)}  ${st.muted(padStyled(a.stepId ? `${a.stepId}${a.iteration && a.iteration > 1 ? `#${a.iteration}` : ""}` : "-", 16))} ${state === "approved" ? st.ok(state) : st.warn(state)}${partial ? ` ${st.warn(`⚠ incomplete (${partial.limit} limit)`)}` : ""}`.trimEnd(),
             );
           }
           ctx.out.line();
@@ -532,28 +533,36 @@ export async function runShow(
       return;
     }
     const state = stateOf(a);
-    ctx.out.result({ artifact: a, state: state || undefined, content: text }, () => {
-      const who =
-        a.provenance.kind === "agent"
-          ? `agent ${a.provenance.agentId}`
-          : a.provenance.kind === "human"
-            ? `human ${a.provenance.actor.id}`
-            : a.provenance.kind;
-      ctx.out.line(
-        `${st.name(`${a.type}/${a.name}@${a.version}`)}  ${st.muted(`run ${id} · ${a.stepId ?? "-"} · ${who}`)}${state ? `  ${state === "approved" ? st.ok(state) : st.warn(state)}` : ""}`,
-      );
-      ctx.out.line(st.muted("─".repeat(60)));
-      const body = a.name.endsWith(".json") ? prettyJson(text) : text;
-      ctx.out.raw(renderMarkdown(body.trimEnd(), st));
-      ctx.out.line(st.muted("─".repeat(60)));
-      if (state === "awaiting approval") {
-        ctx.out.line(`${st.muted("accept ")} ${st.cmd(`jarvis approve ${id} --resume`)}`);
+    ctx.out.result(
+      { artifact: a, state: state || undefined, incomplete: incompleteOf(a), content: text },
+      () => {
+        const who =
+          a.provenance.kind === "agent"
+            ? `agent ${a.provenance.agentId}`
+            : a.provenance.kind === "human"
+              ? `human ${a.provenance.actor.id}`
+              : a.provenance.kind;
         ctx.out.line(
-          `${st.muted("changes")} ${st.cmd(`jarvis approve ${id} --request-changes --comment "…" --resume`)}`,
+          `${st.name(`${a.type}/${a.name}@${a.version}`)}  ${st.muted(`run ${id} · ${a.stepId ?? "-"} · ${who}`)}${state ? `  ${state === "approved" ? st.ok(state) : st.warn(state)}` : ""}`,
         );
-      }
-      ctx.out.line(`${st.muted("save   ")} ${st.cmd(`jarvis show ${id} ${a.type} --out <file>`)}`);
-    });
+        const partial = incompleteOf(a);
+        if (partial)
+          ctx.out.line(
+            `${st.warn("⚠")} ${st.warn(`incomplete: agent ${partial.agentId} hit its ${partial.limit} limit`)} ${st.muted("— what it did not cover is unknown; check before relying on it. More room for the next runs:")} ${st.cmd(`agents.${partial.agentId}.limits.max${partial.limit === "tool call" ? "Tool" : "Model"}Calls`)} ${st.muted("in .jarvis/project.yaml")}`,
+          );
+        ctx.out.line(st.muted("─".repeat(60)));
+        const body = a.name.endsWith(".json") ? prettyJson(text) : text;
+        ctx.out.raw(renderMarkdown(body.trimEnd(), st));
+        ctx.out.line(st.muted("─".repeat(60)));
+        if (state === "awaiting approval") {
+          ctx.out.line(`${st.muted("accept ")} ${st.cmd(`jarvis approve ${id} --resume`)}`);
+          ctx.out.line(
+            `${st.muted("changes")} ${st.cmd(`jarvis approve ${id} --request-changes --comment "…" --resume`)}`,
+          );
+        }
+        ctx.out.line(`${st.muted("save   ")} ${st.cmd(`jarvis show ${id} ${a.type} --out <file>`)}`);
+      },
+    );
   } finally {
     await runtime.close();
   }

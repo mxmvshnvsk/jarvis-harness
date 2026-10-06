@@ -1,3 +1,5 @@
+import type { ArtifactVersion } from "../core/domain/artifact.ts";
+
 /**
  * Terminal styling of human-readable output, one small palette for every command (the
  * conventions of git, gh and cargo): headings bold, the thing a line is about bold cyan,
@@ -122,6 +124,16 @@ export function createStyle(enabled: boolean): Style {
     byState,
     inline: (text) => text.replace(/`([^`\n]+)`/g, (_m, code: string) => cyan(code)),
   };
+}
+
+/** `research (tool limit)` for an artifact whose agent stopped on a limit; undefined otherwise. */
+export function incompleteOf(
+  a: Pick<ArtifactVersion, "provenance">,
+): { agentId: string; limit: string } | undefined {
+  const p = a.provenance;
+  return p.kind === "agent" && p.budgetExhausted
+    ? { agentId: p.agentId, limit: p.budgetExhausted === "model" ? "model call" : "tool call" }
+    : undefined;
 }
 
 export const PLAIN: Style = createStyle(false);

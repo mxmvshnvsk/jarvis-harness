@@ -434,6 +434,68 @@ context: { maxContext: 8000 }
     expect(lastUserContent(researchReq as CapturedRequest)).toContain("billing module not researched");
   });
 
+  it("marks a result cut short by a limit (agents.<id>.limits) and tells the next agent it is incomplete (pilot)", async () => {
+    sb.write(
+      "project/.jarvis/project.yaml",
+      "version: 1\nworkspace: { mode: cwd }\nagents: { research: { limits: { maxToolCalls: 2 } } }\n",
+    );
+    rt = await testRuntime(sb, { PATH: process.env.PATH ?? "" });
+    const wf = workflowOf({
+      name: "rr",
+      entry: "research",
+      steps: [
+        {
+          id: "research",
+          kind: "agentic",
+          agent: "research",
+          outputs: ["research"],
+          transitions: { onSuccess: "requirements" },
+        },
+        {
+          id: "requirements",
+          kind: "agentic",
+          agent: "requirements",
+          inputs: ["research"],
+          outputs: ["requirements"],
+          transitions: { onSuccess: "DONE" },
+        },
+      ],
+    });
+    const engine = engineWith(rt, wf);
+    server.respond((req) => {
+      const system = (req.body.messages as Array<{ content: string }>)[0]?.content ?? "";
+      if (system.includes("# Agent: research")) {
+        // keeps exploring while it may: only the limit stops it
+        if (req.body.tools) return toolCallCompletion("repo.list", {});
+        return completion(JSON.stringify(RESEARCH_DOC));
+      }
+      return completion("not a document");
+    });
+    const run = createRun(rt, "rr");
+    await engine.execute(run.id, { owner: "cli:t" });
+
+    const research = rt.artifacts.listLatest(run.id, "research")[0];
+    expect(research?.provenance).toMatchObject({
+      kind: "agent",
+      agentId: "research",
+      budgetExhausted: "tools",
+    });
+    const finish = rt.events
+      .list({ runId: run.id })
+      .find((e) => e.kind === "agent.finish" && e.stepId === "research");
+    expect(finish?.payload).toMatchObject({ toolCalls: 2, budgetExhausted: "tools" });
+    const start = rt.events.list({ runId: run.id }).find((e) => e.kind === "agent.start");
+    expect(start?.payload).toMatchObject({ maxToolCalls: 2 });
+    // the requirements agent reads research as incomplete
+    const next = server.requests.find((r) =>
+      ((r.body.messages as Array<{ content: string }>)[0]?.content ?? "").includes("# Agent: requirements"),
+    );
+    const text = JSON.stringify(next?.body.messages);
+    expect(text).toMatch(
+      /INCOMPLETE: agent research ran out of tool calls|incomplete: its agent ran out of budget/,
+    );
+  });
+
   it("stores invalid structured output as an artifact and fails the step", async () => {
     sb.write("project/.jarvis/project.yaml", "version: 1\nworkspace: { mode: cwd }\n");
     rt = await testRuntime(sb, { PATH: process.env.PATH ?? "" });

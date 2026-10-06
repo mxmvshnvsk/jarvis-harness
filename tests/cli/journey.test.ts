@@ -73,6 +73,20 @@ describe("journey", () => {
     );
   });
 
+  it("says when an agent stopped on its limit", () => {
+    const j = new Journey();
+    j.push(ev("step.start", "00:00", { stepId: "research", iteration: 1 }));
+    j.push(ev("agent.start", "00:00", { agent: "research", maxToolCalls: 2 }));
+    j.push(ev("tool.call", "00:01"));
+    j.push(ev("tool.call", "00:02"));
+    j.push(ev("agent.finish", "00:03", { status: "success", budgetExhausted: "tools" }));
+    const [line] = j.push(ev("step.finish", "00:04", { status: "success" }));
+    if (line?.kind !== "step") throw new Error("step");
+    expect(formatStepReport(line.report, [], createStyle(false))).toEqual([
+      "✓ research  4.0s    research · 2/2 tools · tool limit reached, result may be incomplete",
+    ]);
+  });
+
   it("formats durations for people", () => {
     expect([400, 42_000, 192_000, 3_840_000].map(duration)).toEqual(["0.4s", "42s", "3m 12s", "1h 04m"]);
   });

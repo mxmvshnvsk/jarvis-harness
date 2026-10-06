@@ -6,6 +6,7 @@ import { isTerminal } from "../../core/domain/run.ts";
 import { shortRunId } from "../../storage/runStore.ts";
 import type { CliContext } from "../context.ts";
 import { CliExit, EXIT, padEnd } from "../output.ts";
+import { incompleteOf } from "../style.ts";
 import { loadForCli } from "./config.ts";
 
 export interface StatusOptions {
@@ -375,10 +376,14 @@ export function renderSummary(ctx: CliContext, d: RunDetail): void {
         : a.approved
           ? `  ${st.ok("approved")}`
           : "";
+      const partial = incompleteOf(a);
+      const incomplete = partial ? `  ${st.warn(`⚠ incomplete (${partial.limit} limit)`)}` : "";
       const step = a.stepId
         ? st.muted(`  ${a.stepId}${a.iteration && a.iteration > 1 ? `#${a.iteration}` : ""}`)
         : "";
-      out.line(`${i === 0 ? f("artifacts") : " ".repeat(13)}${a.type}/${a.name}@${a.version}${step}${gate}`);
+      out.line(
+        `${i === 0 ? f("artifacts") : " ".repeat(13)}${a.type}/${a.name}@${a.version}${step}${gate}${incomplete}`,
+      );
     });
   const next = nextCommands(d);
   const w = Math.max(...next.map((n) => n.cmd.length));

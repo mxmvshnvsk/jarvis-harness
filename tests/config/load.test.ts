@@ -54,6 +54,16 @@ describe("loadConfig", () => {
     expect(loaded.sources["actor.id"]).toBe("env:JARVIS_ACTOR");
   });
 
+  it("takes agent limits from the project and from the environment", async () => {
+    sb.write("home/.jarvis/config.yaml", USER_CONFIG);
+    sb.write(
+      "project/.jarvis/project.yaml",
+      `${PROJECT_CONFIG}agents:\n  research:\n    limits: { maxToolCalls: 80 }\n`,
+    );
+    const loaded = await load({ env: { JARVIS_AGENTS__RESEARCH__LIMITS__MAX_MODEL_CALLS: "90" } });
+    expect(loaded.config.agents.research?.limits).toEqual({ maxToolCalls: 80, maxModelCalls: 90 });
+  });
+
   it("lets CLI overrides win over everything", async () => {
     sb.write("home/.jarvis/config.yaml", USER_CONFIG);
     sb.write("project/.jarvis/project.yaml", PROJECT_CONFIG);

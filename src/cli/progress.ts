@@ -76,7 +76,9 @@ export function formatStepReport(
   if (r.toolCalls > 0 || r.maxToolCalls)
     facts.push(r.maxToolCalls ? `${r.toolCalls}/${r.maxToolCalls} tools` : `${r.toolCalls} tools`);
   const retries = r.retries > 0 ? ` ${st.warn(`· ${r.retries} retr${r.retries === 1 ? "y" : "ies"}`)}` : "";
-  const limit = r.maxToolCalls && r.toolCalls >= r.maxToolCalls ? ` ${st.warn("· tool limit reached")}` : "";
+  const limit = r.budgetExhausted
+    ? ` ${st.warn(`· ${r.budgetExhausted === "model" ? "model call" : "tool"} limit reached, result may be incomplete`)}`
+    : "";
   const outcome = r.outcome && r.outcome !== "success" ? ` ${st.muted("·")} ${st.warn(r.outcome)}` : "";
   const produced = artifacts.length > 0 ? `  ${st.muted("→")} ${producedOf(artifacts)}` : "";
   const lines = [

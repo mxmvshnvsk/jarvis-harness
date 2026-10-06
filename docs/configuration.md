@@ -201,6 +201,34 @@ profiles:                      # ADR-0009 §1 — только сужение
 Модель без `egress` не проходит схему; сервер без `network` считается `internet`. Нарушение — отказ
 роутера до вызова, событие `tool.denied`.
 
+### Лимиты агентов (`agents`)
+
+У каждого встроенного агента есть лимиты на шаг: сколько раз он может вызвать инструменты и модель.
+`agents.<id>.limits` меняет их для проекта (`.jarvis/project.yaml`) или машины (`~/.jarvis/config.yaml`),
+переменной — `JARVIS_AGENTS__RESEARCH__LIMITS__MAX_TOOL_CALLS=80`.
+
+```yaml
+agents:
+  research:     { limits: { maxToolCalls: 80 } }      # по умолчанию 40 / 60
+  specification: { limits: { maxToolCalls: 30 } }    # 20 / 60
+```
+
+| агент | инструменты | вызовы модели |
+|---|---|---|
+| research, requirements, test, review и прочие | 40 | 60 |
+| specification | 20 | 60 |
+| plan | 15 | 60 |
+| implementation | 80 | 100 |
+| onboard-mapper | 60 | 80 |
+| knowledge-answerer | 12 | 20 |
+
+Упёршись в лимит инструментов, агент получает «бюджет исчерпан, заканчивай с тем, что есть» и
+следующий ответ даёт без инструментов; на лимите вызовов модели цикл обрывается. Шаг не падает: документ
+финализируется как обычно, но помечается неполным — `budgetExhausted: tools|model` в происхождении
+артефакта и в событии `agent.finish`. Это видно в строке шага («tool limit reached, result may be
+incomplete»), в итоге прогона и в `jarvis show` («⚠ incomplete»), а следующий агент получает такой вход
+с пометкой `INCOMPLETE` — чтобы не принимать его за полный.
+
 ### Режимы `humanGate`
 
 | Режим | На гейте без интерактива |

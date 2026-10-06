@@ -29,6 +29,14 @@ function clip(text: string, max: number): string {
   return `${text.slice(0, max)}\n…[truncated ${text.length - max} chars]`;
 }
 
+/** An input produced by an agent that ran out of its budget: say so, so it is not taken as complete. */
+export function incompleteNote(a: ArtifactVersion): string {
+  const p = a.provenance;
+  if (p.kind !== "agent" || !p.budgetExhausted) return "";
+  const what = p.budgetExhausted === "tools" ? "tool calls" : "model calls";
+  return `> INCOMPLETE: agent ${p.agentId} ran out of ${what} while producing this; what it did not cover is unknown. Verify what you rely on.\n\n`;
+}
+
 export function systemLayer(def: AgentDefinition, tools: readonly CapabilityDescriptor[]): string {
   const toolList = tools
     .map((t) => `- ${t.name}${t.access !== "read" ? ` (${t.access})` : ""}: ${t.description}`)
@@ -100,11 +108,14 @@ export function buildBaseMessages(input: BuildInput): Message[] {
   const perInput = full.length > 0 ? Math.floor(inputBudget / full.length) : 0;
   const l3 = full.map(
     (i) =>
-      `## Artifact ${i.artifact.type}/${i.artifact.name}@${i.artifact.version}\n${clip(i.text, perInput)}`,
+      `## Artifact ${i.artifact.type}/${i.artifact.name}@${i.artifact.version}\n${incompleteNote(i.artifact)}${clip(i.text, perInput)}`,
   );
   const named = input.inputs
     .filter((i) => !full.includes(i))
-    .map((i) => `- ${i.artifact.type}/${i.artifact.name}@${i.artifact.version}`);
+    .map(
+      (i) =>
+        `- ${i.artifact.type}/${i.artifact.name}@${i.artifact.version}${incompleteNote(i.artifact) ? " (incomplete: its agent ran out of budget)" : ""}`,
+    );
   if (named.length > 0) l3.push(`## Other inputs (available on request)\n${named.join("\n")}`);
 
   const l4 = renderPackage(input.pkg, knowledgeBudget, input.knowledgeConfig);

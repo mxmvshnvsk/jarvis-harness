@@ -322,6 +322,21 @@ export const TelemetryConfigSchema = z.strictObject({
     .prefault({}),
 });
 
+/**
+ * Per-agent settings (`agents.<agentId>`): the step limits of a built-in agent for this project or
+ * machine. Pilot: 40 tool calls of the research agent ran out on a large monorepo with nothing to
+ * raise them but a code change.
+ */
+export const AgentConfigSchema = z.strictObject({
+  limits: z
+    .strictObject({
+      maxToolCalls: z.int().positive().optional(),
+      maxModelCalls: z.int().positive().optional(),
+    })
+    .optional(),
+});
+export type AgentConfig = z.infer<typeof AgentConfigSchema>;
+
 export const ActorConfigSchema = z.strictObject({
   id: z.string().min(1).optional(),
   display: z.string().min(1).optional(),
@@ -357,6 +372,7 @@ export const UserConfigSchema = z.strictObject({
   mcp: McpConfigSchema.optional(),
   context: ContextConfigSchema.optional(),
   telemetry: TelemetryConfigSchema.optional(),
+  agents: z.record(z.string(), AgentConfigSchema).optional(),
 });
 export type UserConfig = z.infer<typeof UserConfigSchema>;
 
@@ -376,6 +392,7 @@ export const ProjectConfigSchema = z.strictObject({
   knowledge: KnowledgeConfigSchema.optional(),
   human: HumanConfigSchema.optional(),
   hooks: HooksConfigSchema.optional(),
+  agents: z.record(z.string(), AgentConfigSchema).optional(),
   /** Stack tags (ADR-0021 §3): typescript, react, csharp, … Empty = detected from the workspace. */
   stack: z.array(z.string().min(1)).optional(),
   /** ADR-0021 §9 polyglot: path glob → stacks, e.g. "backend/**": [csharp, aspnet]. */
@@ -404,6 +421,7 @@ export const ResolvedConfigSchema = z.strictObject({
   knowledge: KnowledgeConfigSchema.prefault({}),
   human: HumanConfigSchema.prefault({}),
   hooks: HooksConfigSchema.prefault({}),
+  agents: z.record(z.string(), AgentConfigSchema).prefault({}),
   stack: z.array(z.string().min(1)).default([]),
   stackScopes: z.record(z.string().min(1), z.array(z.string().min(1))).prefault({}),
   /** Capability patterns denied by the active profile (ADR-0009 §1); applied by the Tool Router. */
