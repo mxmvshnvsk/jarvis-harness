@@ -8,6 +8,7 @@ import { isSweeping } from "../../onboarding/verify.ts";
 import { shortRunId } from "../../storage/runStore.ts";
 import type { CliContext } from "../context.ts";
 import { CliExit, EXIT } from "../output.ts";
+import { renderMarkdown } from "../render.ts";
 import { loadForCli } from "./config.ts";
 
 /**
@@ -178,43 +179,51 @@ export async function runCandidatesList(ctx: CliContext, options: { all?: boolea
       createdAt: c.artifact.createdAt,
     }));
     ctx.out.result({ candidates: rows }, () => {
+      const st = ctx.out.style;
       if (rows.length === 0) {
         ctx.out.line(options.all ? "no candidates" : "no open candidates (--all shows decided ones)");
         return;
       }
       const open = rows.filter((r) => r.decision === "open").length;
       ctx.out.line(
-        `${rows.length} candidate${rows.length === 1 ? "" : "s"}${options.all ? `, ${open} open` : ""}`,
+        st.heading(
+          `${rows.length} ${options.all ? "" : "open "}candidate${rows.length === 1 ? "" : "s"}${options.all ? `, ${open} open` : ""}`,
+        ),
       );
+      const label = (text: string) => st.muted(text.padEnd(9));
       for (const r of rows) {
         ctx.out.line();
         const status =
-          r.decision === "open" ? "" : `  [${r.decision === "approve" ? "promoted" : "rejected"}]`;
-        ctx.out.line(`● ${r.name}${status}`);
-        ctx.out.line(`  ${r.kind} · ${r.title} · run ${r.run} · ${ago(r.createdAt)}`);
+          r.decision === "open"
+            ? ""
+            : `  ${r.decision === "approve" ? st.ok("[promoted]") : st.bad("[rejected]")}`;
+        ctx.out.line(`${st.muted("●")} ${st.name(r.name)}${status}`);
+        ctx.out.line(`  ${st.muted(`${r.kind} · ${r.title} · run ${r.run} · ${ago(r.createdAt)}`)}`);
         if (r.claims) {
-          const check = r.review.length > 0 ? ` · ${r.review.length} to check` : "";
-          ctx.out.line(
-            `  claims ${r.claims.kept}/${r.claims.proposed} confirmed${r.claims.dropped ? `, ${r.claims.dropped} dropped` : ""}${check}`,
-          );
-        } else ctx.out.line(`  ${r.rationale}`);
-        if (r.paths.length > 0) ctx.out.line(`  code      ${r.paths.join(", ")}`);
+          const parts = [`${st.ok(`${r.claims.kept}/${r.claims.proposed}`)} confirmed`];
+          if (r.claims.dropped) parts.push(`${st.bad(String(r.claims.dropped))} dropped`);
+          if (r.review.length > 0) parts.push(st.warn(`${r.review.length} to check`));
+          ctx.out.line(`  ${label("claims")} ${parts.join(st.muted(" · "))}`);
+        } else ctx.out.line(`  ${label("why")} ${r.rationale}`);
+        if (r.paths.length > 0) ctx.out.line(`  ${label("code")} ${r.paths.join(", ")}`);
         if (r.files.length > 0) {
-          const more = r.files.length > 3 ? ` +${r.files.length - 3} more` : "";
-          ctx.out.line(`  evidence  ${r.files.slice(0, 3).map(short).join(", ")}${more}`);
+          const more = r.files.length > 3 ? st.muted(` +${r.files.length - 3} more`) : "";
+          ctx.out.line(`  ${label("evidence")} ${r.files.slice(0, 3).map(short).join(", ")}${more}`);
         }
         for (const s of r.review.slice(0, 3))
-          ctx.out.line(`  ? ${s.length > 110 ? `${s.slice(0, 109)}…` : s}`);
+          ctx.out.line(`  ${st.warn("?")} ${s.length > 110 ? `${s.slice(0, 109)}…` : s}`);
         if (r.review.length > 3)
-          ctx.out.line(`  ? … ${r.review.length - 3} more in \`jarvis candidates show ${r.name}\``);
+          ctx.out.line(
+            `  ${st.warn("?")} ${st.muted(`… ${r.review.length - 3} more:`)} ${st.cmd(`jarvis candidates show ${r.name}`)}`,
+          );
       }
       ctx.out.line();
-      ctx.out.line("read:     jarvis candidates show <name>        (the document as it would be written)");
-      ctx.out.line(
-        "accept:   jarvis candidates promote <name>     (writes it into .jarvis/; edit it there freely)",
-      );
-      ctx.out.line("decline:  jarvis candidates reject <name> [--comment …]");
-      ctx.out.line("<name> may be any unique part of a name, e.g. `metrics`, or the artifact id");
+      const hint = (what: string, cmd: string, note: string) =>
+        ctx.out.line(`${st.muted(what.padEnd(8))} ${st.cmd(cmd.padEnd(36))} ${st.muted(note)}`);
+      hint("read", "jarvis candidates show <name>", "the document as it would be written");
+      hint("accept", "jarvis candidates promote <name>", "writes it into .jarvis/; edit it there freely");
+      hint("decline", "jarvis candidates reject <name>", "[--comment …]");
+      ctx.out.line(st.muted("<name>: any unique part of a name (`billing`) or the artifact id"));
     });
   } finally {
     await runtime.close();
@@ -241,25 +250,32 @@ export async function runCandidatesShow(ctx: CliContext, ref: string): Promise<v
         proposal: c.doc.proposal ?? c.doc.rationale,
       },
       () => {
+        const st = ctx.out.style;
+        const state = c.decision
+          ? c.decision === "approve"
+            ? st.ok("promoted")
+            : st.bad("rejected")
+          : "open";
+        ctx.out.line(`${st.name(c.name)}  ${st.muted(`${c.doc.kind} ·`)} ${state}`);
+        ctx.out.line(st.muted(c.doc.rationale));
         ctx.out.line(
-          `${c.name} — ${c.doc.kind}, ${c.decision ? (c.decision === "approve" ? "promoted" : "rejected") : "open"}`,
+          `${st.muted("promote writes")} ${targetOf(loaded.project?.root ?? ctx.cwd, c, undefined)}`,
         );
-        ctx.out.line(`${c.doc.rationale}`);
-        ctx.out.line(`promote writes: ${targetOf(loaded.project?.root ?? ctx.cwd, c, undefined)}`);
         if (c.review.length > 0) {
           ctx.out.line();
           ctx.out.line(
-            `check before promoting — generalisations the quoted lines cannot prove (${c.review.length}):`,
+            st.heading(
+              `Check before promoting ${st.muted(`— ${c.review.length} generalisation${c.review.length === 1 ? "" : "s"} the quoted lines cannot prove`)}`,
+            ),
           );
-          for (const s of c.review) ctx.out.line(`  ? ${s}`);
+          for (const s of c.review) ctx.out.line(`  ${st.warn("?")} ${s}`);
         }
         ctx.out.line();
-        ctx.out.line("─".repeat(60));
-        ctx.out.line((c.doc.proposal ?? c.doc.rationale).trimEnd());
-        ctx.out.line("─".repeat(60));
-        ctx.out.line(
-          `accept: jarvis candidates promote ${c.name}   ·   decline: jarvis candidates reject ${c.name}`,
-        );
+        ctx.out.line(st.muted("─".repeat(60)));
+        ctx.out.raw(renderMarkdown((c.doc.proposal ?? c.doc.rationale).trimEnd(), st));
+        ctx.out.line(st.muted("─".repeat(60)));
+        ctx.out.line(`${st.muted("accept ")} ${st.cmd(`jarvis candidates promote ${c.name}`)}`);
+        ctx.out.line(`${st.muted("decline")} ${st.cmd(`jarvis candidates reject ${c.name}`)}`);
       },
     );
   } finally {
@@ -342,12 +358,13 @@ export async function runCandidatesPromote(
       comment: `promoted to ${file}`,
     });
     ctx.out.result({ promoted: artifact.artifactId, name: found.name, file }, () => {
-      ctx.out.line(`promoted ${found.name} → ${file}`);
+      const st = ctx.out.style;
+      ctx.out.line(`${st.ok("✓")} promoted ${st.name(found.name)} ${st.muted("→")} ${file}`);
       if (found.review.length > 0)
         ctx.out.line(
-          `  ${found.review.length} generalisation${found.review.length === 1 ? "" : "s"} still to check there; edit the file freely, it is yours now`,
+          `  ${st.warn(`${found.review.length} generalisation${found.review.length === 1 ? "" : "s"} still to check there`)}; edit the file freely, it is yours now`,
         );
-      ctx.out.line("  review and commit it with the repository");
+      ctx.out.line(st.muted("  review and commit it with the repository"));
     });
   } finally {
     await runtime.close();
@@ -385,7 +402,7 @@ export async function runCandidatesReject(
       ...(options.comment ? { comment: options.comment } : {}),
     });
     ctx.out.result({ rejected: found.artifact.artifactId, name: found.name }, () =>
-      ctx.out.line(`rejected ${found.name}`),
+      ctx.out.line(`${ctx.out.style.bad("✗")} rejected ${ctx.out.style.name(found.name)}`),
     );
   } finally {
     await runtime.close();

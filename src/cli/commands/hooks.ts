@@ -156,7 +156,7 @@ function renderRange(ctx: CliContext, r: RangeReport): void {
 /** `jarvis prepush` — also what the installed hook runs (ADR-0001 §16). */
 export async function runPrePush(ctx: CliContext, options: PrePushCliOptions): Promise<void> {
   if (ctx.env.JARVIS_SKIP_HOOKS) {
-    ctx.out.error("jarvis prepush: skipped (JARVIS_SKIP_HOOKS)");
+    ctx.out.note("jarvis prepush: skipped (JARVIS_SKIP_HOOKS)");
     return;
   }
   const loaded = await loadForCli(ctx);

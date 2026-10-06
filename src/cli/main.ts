@@ -64,12 +64,18 @@ export function buildProgram(options: RunOptions = {}): Command {
     .option("--json", "machine-readable output", false)
     .option("--profile <name>", "apply a configuration profile (ADR-0009)")
     .option("--cwd <dir>", "run as if started in this directory")
+    .option("--color", "colour the output even when it is not a terminal")
+    .option("--no-color", "plain output (also NO_COLOR=1)")
     .showHelpAfterError();
 
   const ctxFor = (): CliContext => {
-    const opts = program.opts<{ json: boolean; profile?: string; cwd?: string }>();
+    const opts = program.opts<{ json: boolean; profile?: string; cwd?: string; color?: boolean }>();
     const env = options.context?.env ?? process.env;
-    const out = createOutput(opts.json, streams, { progress: env.JARVIS_PROGRESS !== "off" });
+    const out = createOutput(opts.json, streams, {
+      progress: env.JARVIS_PROGRESS !== "off",
+      env,
+      ...(opts.color !== undefined ? { color: opts.color } : {}),
+    });
     const overrides: Partial<CliContext> = {
       ...options.context,
       ...(opts.cwd ? { cwd: opts.cwd } : {}),

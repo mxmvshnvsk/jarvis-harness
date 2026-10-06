@@ -111,7 +111,7 @@ export async function runCi(ctx: CliContext, task: string, options: CiOptions): 
     }
     if (options.bundle) {
       writeBundle(await exportRun(runtime, run.id), options.bundle);
-      ctx.out.error(`bundle written to ${options.bundle}`);
+      ctx.out.note(`bundle written to ${options.bundle}`);
     }
   } finally {
     await runtime.close();

@@ -19,6 +19,7 @@ import { git } from "../../tools/local/exec.ts";
 import type { CliContext } from "../context.ts";
 import { CliExit, EXIT } from "../output.ts";
 import { followRun } from "../progress.ts";
+import { renderDiff } from "../render.ts";
 import { loadForCli } from "./config.ts";
 import { renderDetail } from "./status.ts";
 
@@ -321,11 +322,13 @@ export async function runDiff(ctx: CliContext, ref: string): Promise<void> {
     const diff = await wt.diff();
     const files = await wt.changedFiles();
     ctx.out.result({ run: run.id, branch: run.workspace.branch, files, diff }, () => {
-      ctx.out.line(
-        diff.length > 0
-          ? diff
-          : `no changes on ${run.workspace.branch} since ${run.workspace.baseCommit?.slice(0, 10)}`,
-      );
+      if (diff.length > 0) ctx.out.raw(renderDiff(diff.replace(/\n$/, ""), ctx.out.style));
+      else
+        ctx.out.line(
+          ctx.out.style.muted(
+            `no changes on ${run.workspace.branch} since ${run.workspace.baseCommit?.slice(0, 10)}`,
+          ),
+        );
     });
   } finally {
     await runtime.close();

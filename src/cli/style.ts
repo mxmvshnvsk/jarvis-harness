@@ -1,0 +1,145 @@
+/**
+ * Terminal styling of human-readable output, one small palette for every command (the
+ * conventions of git, gh and cargo): headings bold, the thing a line is about bold cyan,
+ * metadata and ids dim, commands to type cyan, success / additions green, warnings yellow,
+ * failures / removals red. Content stays in the default colour.
+ *
+ * Colour is on only for a terminal and never in `--json`; `--no-color` / `--color`, then
+ * `NO_COLOR` (https://no-color.org), `FORCE_COLOR` and `TERM=dumb` decide before that.
+ */
+export interface Style {
+  readonly enabled: boolean;
+  /** Section and document headings. */
+  heading(text: string): string;
+  /** The handle a line is about: a candidate, a run, a module. */
+  name(text: string): string;
+  /** Metadata: ids, times, field labels, separators, footnotes. */
+  muted(text: string): string;
+  /** A command to type. */
+  cmd(text: string): string;
+  ok(text: string): string;
+  warn(text: string): string;
+  bad(text: string): string;
+  /** Diff and count semantics. */
+  add(text: string): string;
+  del(text: string): string;
+  /** A run or step state coloured by what it means. */
+  state(state: string): string;
+  /** `text` (e.g. a padded cell) in the colour of `state`. */
+  byState(state: string, text: string): string;
+  /** Backticked spans of a message rendered as commands (backticks dropped when coloured). */
+  inline(text: string): string;
+}
+
+export interface ColorOptions {
+  /** `--color` (true) / `--no-color` (false); undefined = decide from the environment. */
+  readonly flag?: boolean;
+  readonly json?: boolean;
+  readonly env?: NodeJS.ProcessEnv;
+  readonly stream?: { isTTY?: boolean };
+}
+
+export function colorEnabled(options: ColorOptions): boolean {
+  if (options.json) return false;
+  if (options.flag !== undefined) return options.flag;
+  const env = options.env ?? {};
+  if (env.NO_COLOR !== undefined && env.NO_COLOR !== "") return false;
+  const force = env.FORCE_COLOR;
+  if (force !== undefined) return force !== "0" && force !== "false";
+  if (env.TERM === "dumb") return false;
+  return options.stream?.isTTY === true;
+}
+
+const sgr = (open: number, close: number) => (text: string) =>
+  text === "" ? text : `\u001b[${open}m${text}\u001b[${close}m`;
+
+const bold = sgr(1, 22);
+const dim = sgr(2, 22);
+const red = sgr(31, 39);
+const green = sgr(32, 39);
+const yellow = sgr(33, 39);
+const cyan = sgr(36, 39);
+
+const STATE_TONE: Record<string, "ok" | "warn" | "bad" | "muted" | "active"> = {
+  COMPLETED: "ok",
+  DONE: "ok",
+  SUCCEEDED: "ok",
+  approve: "ok",
+  FAILED: "bad",
+  ERROR: "bad",
+  reject: "bad",
+  CANCELLED: "muted",
+  SKIPPED: "muted",
+  RUNNING: "active",
+  CREATED: "active",
+  PENDING: "active",
+  success: "ok",
+  failure: "bad",
+  suspended: "warn",
+};
+
+function byState(state: string, text: string): string {
+  const tone = STATE_TONE[state] ?? (state.startsWith("WAITING") ? "warn" : undefined);
+  if (tone === "ok") return green(text);
+  if (tone === "bad") return red(text);
+  if (tone === "warn") return yellow(text);
+  if (tone === "muted") return dim(text);
+  if (tone === "active") return cyan(text);
+  return text;
+}
+
+export function createStyle(enabled: boolean): Style {
+  const id = (text: string) => text;
+  if (!enabled) {
+    return {
+      enabled,
+      heading: id,
+      name: id,
+      muted: id,
+      cmd: id,
+      ok: id,
+      warn: id,
+      bad: id,
+      add: id,
+      del: id,
+      state: id,
+      byState: (_state, text) => text,
+      inline: id,
+    };
+  }
+  return {
+    enabled,
+    heading: bold,
+    name: (text) => bold(cyan(text)),
+    muted: dim,
+    cmd: cyan,
+    ok: green,
+    warn: yellow,
+    bad: red,
+    add: green,
+    del: red,
+    state: (state) => byState(state, state),
+    byState,
+    inline: (text) => text.replace(/`([^`\n]+)`/g, (_m, code: string) => cyan(code)),
+  };
+}
+
+export const PLAIN: Style = createStyle(false);
+
+// biome-ignore lint/suspicious/noControlCharactersInRegex: matching ANSI escapes is the point
+const ANSI = /\u001b\[[0-9;]*m/g;
+
+/** Length as the terminal shows it (escapes do not take columns). */
+export function visibleLength(text: string): number {
+  return [...text.replace(ANSI, "")].length;
+}
+
+export function stripAnsi(text: string): string {
+  return text.replace(ANSI, "");
+}
+
+/** `padEnd` that ignores escapes, for columns of styled cells. */
+export function padStyled(text: string, width: number): string {
+  const n = visibleLength(text);
+  return n >= width ? text : text + " ".repeat(width - n);
+}

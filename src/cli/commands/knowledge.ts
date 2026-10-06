@@ -22,7 +22,10 @@ export async function runStandardsList(ctx: CliContext): Promise<void> {
       return;
     }
     const w = Math.max(...standards.map((s) => s.id.length), 2);
-    ctx.out.line(`${padEnd("id", w)}  v  ${padEnd("severity", 11)}  ${padEnd("verification", 13)}  scope`);
+    const st = ctx.out.style;
+    ctx.out.line(
+      st.heading(`${padEnd("id", w)}  v  ${padEnd("severity", 11)}  ${padEnd("verification", 13)}  scope`),
+    );
     for (const s of standards) {
       const scope = [
         s.scope.stacks.length > 0 ? `stacks ${s.scope.stacks.join(",")}` : "",
@@ -31,7 +34,7 @@ export async function runStandardsList(ctx: CliContext): Promise<void> {
         .filter(Boolean)
         .join("; ");
       ctx.out.line(
-        `${padEnd(s.id, w)}  ${s.version}  ${padEnd(s.severity, 11)}  ${padEnd(s.verification.kind, 13)}  ${scope || "any"}${s.level === "user" ? "  (user)" : ""}`,
+        `${st.name(padEnd(s.id, w))}  ${s.version}  ${s.severity === "required" ? padEnd(s.severity, 11) : st.muted(padEnd(s.severity, 11))}  ${padEnd(s.verification.kind, 13)}  ${st.muted(`${scope || "any"}${s.level === "user" ? "  (user)" : ""}`)}`,
       );
       ctx.out.line(`${" ".repeat(w)}  ${s.title}`);
     }
@@ -48,16 +51,17 @@ export async function runStandardsCheck(ctx: CliContext, options: { base?: strin
   const report = await checkStandards({ standards, workspace: root, files, baseRef: base });
   const required = report.violations.filter((v) => v.severity === "required");
   ctx.out.result(report, () => {
+    const st = ctx.out.style;
     ctx.out.line(
-      `${report.files.length} file(s), ${report.checked.length} deterministic standard(s) checked`,
+      st.muted(`${report.files.length} file(s), ${report.checked.length} deterministic standard(s) checked`),
     );
     for (const v of report.violations) {
       ctx.out.line(
-        `${v.severity === "required" ? "FAIL" : "warn"}  ${v.standardId}@${v.version}  ${v.file ?? ""}${v.line ? `:${v.line}` : ""}  ${v.detail.split("\n")[0]}`,
+        `${v.severity === "required" ? st.bad("FAIL") : st.warn("warn")}  ${st.name(`${v.standardId}@${v.version}`)}  ${v.file ?? ""}${v.line ? st.muted(`:${v.line}`) : ""}  ${v.detail.split("\n")[0]}`,
       );
     }
-    for (const s of report.skipped) ctx.out.line(`skip  ${s.standard}  ${s.reason}`);
-    if (report.violations.length === 0) ctx.out.line("no violations");
+    for (const s of report.skipped) ctx.out.line(st.muted(`skip  ${s.standard}  ${s.reason}`));
+    if (report.violations.length === 0) ctx.out.line(`${st.ok("✓")} no violations`);
   });
   if (required.length > 0) throw new CliExit(EXIT.error);
 }
@@ -90,8 +94,9 @@ export async function runSkillsList(ctx: CliContext, options: { agent?: string }
         ]
           .filter(Boolean)
           .join("; ");
+        const st = ctx.out.style;
         ctx.out.line(
-          `${selected.has(s.id) ? "*" : " "} ${padEnd(s.id, w)}  v${s.version}  ${padEnd(s.level, 8)}  ${applies}`,
+          `${selected.has(s.id) ? st.ok("*") : " "} ${selected.has(s.id) ? st.name(padEnd(s.id, w)) : padEnd(s.id, w)}  ${st.muted(`v${s.version}`)}  ${st.muted(padEnd(s.level, 8))}  ${st.muted(applies)}`,
         );
       }
       ctx.out.line(

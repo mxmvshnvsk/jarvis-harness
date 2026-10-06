@@ -41,7 +41,7 @@ export async function runConfigShow(ctx: CliContext, options: ConfigShowOptions 
           ctx.out.line(text);
         }
       }
-      for (const warning of loaded.warnings) ctx.out.line(`\nwarning: ${warning}`);
+      for (const warning of loaded.warnings) ctx.out.line(`\n${ctx.out.style.warn("warning:")} ${warning}`);
     },
   );
 }

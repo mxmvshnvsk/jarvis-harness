@@ -435,12 +435,18 @@ function collectSecretRefs(loaded: LoadedConfig): SecretRefAt[] {
 
 export function renderDoctor(ctx: CliContext, report: DoctorReport): void {
   const { out } = ctx;
-  const label: Record<CheckStatus, string> = { ok: "OK  ", warn: "WARN", fail: "FAIL" };
-  out.line("jarvis doctor");
+  const st = out.style;
+  const label: Record<CheckStatus, string> = {
+    ok: st.ok("OK  "),
+    warn: st.warn("WARN"),
+    fail: st.bad("FAIL"),
+  };
+  out.line(st.heading("jarvis doctor"));
   const width = Math.max(...report.checks.map((c) => c.subject.length));
   for (const c of report.checks) {
-    out.line(`  ${label[c.status]}  ${padEnd(c.subject, width)}  ${c.detail}`);
-    if (c.hint) out.line(`        ${" ".repeat(width)}  → ${c.hint}`);
+    const detail = c.status === "ok" ? st.muted(c.detail) : c.detail;
+    out.line(`  ${label[c.status]}  ${padEnd(c.subject, width)}  ${detail}`);
+    if (c.hint) out.line(`        ${" ".repeat(width)}  ${st.muted("→")} ${st.cmd(c.hint)}`);
   }
   if (report.egress) {
     out.line();

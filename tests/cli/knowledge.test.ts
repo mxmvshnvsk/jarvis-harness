@@ -229,18 +229,18 @@ describe("jarvis candidates: names", () => {
 
     const list = await jarvis(["candidates", "list"]);
     expect(list.code).toBe(0);
-    expect(list.out).toContain("3 candidates");
+    expect(list.out).toContain("3 open candidates");
     expect(list.out).toContain("● shared-lib/billing\n");
     expect(list.out).toContain(`● shared-lib/billing@${shortRunId(older.id)}\n`);
     expect(list.out).toContain("● server/plugins\n");
-    expect(list.out).toContain("claims 4/5 confirmed, 1 dropped · 1 to check");
+    expect(list.out).toContain("claims    4/5 confirmed · 1 dropped · 1 to check");
     expect(list.out).toContain("evidence  plugins/a.ts, plugins/b.ts");
     expect(list.out).toContain("? Every request is logged by this plugin.");
     expect(list.out).toContain("jarvis candidates show <name>");
 
     const show = await jarvis(["candidates", "show", "plugins"]);
     expect(show.code).toBe(0);
-    expect(show.out).toContain("server/plugins — knowledge, open");
+    expect(show.out).toContain("server/plugins  knowledge · open");
     expect(show.out).toContain(join(".jarvis", "knowledge", "module-server-plugins.md"));
     expect(show.out).toContain("  ? Every request is logged by this plugin.");
     expect(show.out).toContain("## Responsibilities");

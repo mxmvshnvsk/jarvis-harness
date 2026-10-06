@@ -188,22 +188,30 @@ async function runModuleMap(
       progress.stop(),
     );
     ctx.out.result(result, () => {
-      ctx.out.line(`run ${result.runId || "-"}: ${result.state}`);
-      ctx.out.line(`claims confirmed against the code: ${result.claims.kept} of ${result.claims.proposed}`);
+      const st = ctx.out.style;
+      ctx.out.line(`${st.muted("run")} ${result.runId || "-"}${st.muted(":")} ${st.state(result.state)}`);
+      const { kept, proposed } = result.claims;
+      const tone = kept === proposed ? st.ok : kept === 0 ? st.bad : st.warn;
+      ctx.out.line(`claims confirmed against the code: ${tone(`${kept} of ${proposed}`)}`);
       // the excerpt check proves that a quote exists, not that it supports a generalisation
       if (result.sweeping && result.sweeping.length > 0) {
         ctx.out.line(
-          `check before promoting — generalisations the excerpts cannot prove (${result.sweeping.length}):`,
+          `${st.heading("check before promoting")} ${st.muted(`— generalisations the excerpts cannot prove (${result.sweeping.length}):`)}`,
         );
-        for (const s of result.sweeping) ctx.out.line(`  ? ${s}`);
+        for (const s of result.sweeping) ctx.out.line(`  ${st.warn("?")} ${s}`);
       }
-      for (const d of result.dropped) ctx.out.line(`  dropped ${d.section} "${d.what}": ${d.why}`);
-      if (result.problem) ctx.out.line(result.problem);
+      for (const d of result.dropped)
+        ctx.out.line(`  ${st.del("dropped")} ${d.section} "${d.what}": ${st.muted(d.why)}`);
+      if (result.problem) ctx.out.line(st.warn(result.problem));
       if (result.candidateId) {
         ctx.out.line();
         const name = nameOf({ kind: "knowledge", title: `module ${module}`, module });
-        ctx.out.line(`candidate ${name} (knowledge, paths: ${module}/**, ${result.candidateId})`);
-        ctx.out.line(`read: jarvis candidates show ${name}   ·   accept: jarvis candidates promote ${name}`);
+        ctx.out.line(
+          `candidate ${st.name(name)} ${st.muted(`(knowledge, paths: ${module}/**, ${result.candidateId})`)}`,
+        );
+        ctx.out.line(
+          `${st.muted("read:")} ${st.cmd(`jarvis candidates show ${name}`)}   ${st.muted("·")}   ${st.muted("accept:")} ${st.cmd(`jarvis candidates promote ${name}`)}`,
+        );
       }
     });
     if (result.problem && !result.candidateId) throw new CliExit(EXIT.error);

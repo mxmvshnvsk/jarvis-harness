@@ -33,7 +33,7 @@ export function followRun(
         events.push(e);
         // retries, provider failures, a failed or parked run: a line that stays, also in a pipe
         const notice = noticeOf(e);
-        if (notice) ctx.out.error(notice);
+        if (notice) ctx.out.note(notice);
       }
     }
   };
@@ -53,10 +53,10 @@ export function followRun(
         payload: { signal: "SIGINT", pid: process.pid },
       });
       const short = runId.replace(/^run_/, "").slice(0, 8);
-      ctx.out.error(
+      ctx.out.note(
         `interrupted; run ${short} keeps its checkpoint: jarvis resume ${short} | jarvis cancel ${short}`,
       );
-    } else ctx.out.error("interrupted");
+    } else ctx.out.note("interrupted");
     process.exit(130);
   };
   if (options.signals !== false) process.once("SIGINT", onInterrupt);

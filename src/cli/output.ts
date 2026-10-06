@@ -1,3 +1,5 @@
+import { colorEnabled, createStyle, type Style } from "./style.ts";
+
 /** Exit codes (ADR-0009 §3). */
 export const EXIT = {
   ok: 0,
@@ -10,8 +12,16 @@ export const EXIT = {
 
 export interface Output {
   readonly json: boolean;
+  /** Styling for stdout (a no-op unless stdout is a colour terminal, see style.ts). */
+  readonly style: Style;
+  /** A line of the result on stdout; `backticked` spans render as commands. */
   line(text?: string): void;
+  /** Text written as is (a diff, a document already rendered): no backtick handling. */
+  raw(text: string): void;
+  /** A failure on stderr, `error: …` (the prefix red when coloured). */
   error(text: string): void;
+  /** Informational stderr: progress notices (⚠ retry, ✗ gave up), "skipped", "written to". */
+  note(text: string): void;
   /** Prints the JSON document in `--json` mode, otherwise calls `render`. */
   result(value: unknown, render: () => void): void;
   /** Whether `progress` draws anything (a terminal on stderr, not `--json`, not JARVIS_PROGRESS=off). */
@@ -23,9 +33,22 @@ export interface Output {
 export function createOutput(
   json: boolean,
   streams: { out: NodeJS.WritableStream; err: NodeJS.WritableStream },
-  options: { progress?: boolean } = {},
+  options: { progress?: boolean; color?: boolean; env?: NodeJS.ProcessEnv } = {},
 ): Output {
   const err = streams.err as NodeJS.WritableStream & { isTTY?: boolean; columns?: number };
+  const colors = (stream: { isTTY?: boolean }) =>
+    createStyle(
+      colorEnabled({
+        json,
+        stream,
+        ...(options.color !== undefined ? { flag: options.color } : {}),
+        ...(options.env ? { env: options.env } : {}),
+      }),
+    );
+  const style = colors(streams.out as { isTTY?: boolean });
+  const errStyle = colors(err);
+  const glyph = (text: string) =>
+    text.replace(/^(⚠|⏸|✗)/, (g) => (g === "✗" ? errStyle.bad(g) : errStyle.warn(g)));
   const live = !json && options.progress !== false && err.isTTY === true;
   let shown = false;
   const clear = () => {
@@ -36,13 +59,23 @@ export function createOutput(
   return {
     json,
     live,
+    style,
     line(text = "") {
+      clear();
+      streams.out.write(`${style.inline(text)}\n`);
+    },
+    raw(text) {
       clear();
       streams.out.write(`${text}\n`);
     },
     error(text) {
       clear();
-      streams.err.write(`${text}\n`);
+      const prefix = errStyle.enabled ? `\u001b[1m${errStyle.bad("error:")}\u001b[22m` : "error:";
+      streams.err.write(`${prefix} ${errStyle.inline(text)}\n`);
+    },
+    note(text) {
+      clear();
+      streams.err.write(`${glyph(errStyle.inline(text))}\n`);
     },
     result(value, render) {
       clear();

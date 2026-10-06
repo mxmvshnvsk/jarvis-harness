@@ -74,6 +74,10 @@ Remaining commands of ADR-0001 §15:
   older candidate about the same thing; any unique part works), `candidates show` prints the document as promote
   would write it with the generalisations to check, `list` says where to look (code paths, most quoted files) and how
   many claims to check; module maps are promoted to `module-<name>.md` without `--id`
+- output styling: one palette for every command (`src/cli/style.ts`; headings bold, the subject bold cyan, metadata
+  dim, commands cyan, ok/additions green, warnings yellow, errors/removals red), backticked spans render as commands,
+  `jarvis diff` coloured like git, `candidates show` renders the markdown; errors are prefixed `error:`, notices go
+  through `Output.note`; colour only on a terminal, `--color`/`--no-color`, `NO_COLOR`, `FORCE_COLOR`, `TERM=dumb`
 
 ADR-0001 §20 stage 12 (git hooks) — `f11ca47`:
 

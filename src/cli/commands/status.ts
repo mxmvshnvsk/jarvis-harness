@@ -91,8 +91,11 @@ function renderOverview(
       ctx.out.line(options.all ? "no runs" : "no active runs (use --all to include completed and cancelled)");
     } else {
       const w = Math.max(...overview.runs.map((r) => r.task.length), 4);
+      const st = ctx.out.style;
       ctx.out.line(
-        `${padEnd("run", 8)}  ${padEnd("task", w)}  ${padEnd("state", 15)}  ${padEnd("step", 22)}  ${padEnd("updated", 9)}  lease`,
+        st.heading(
+          `${padEnd("run", 8)}  ${padEnd("task", w)}  ${padEnd("state", 15)}  ${padEnd("step", 22)}  ${padEnd("updated", 9)}  lease`,
+        ),
       );
       for (const r of overview.runs) {
         const step = r.currentStep ? `${r.currentStep}#${r.currentIteration}` : "-";
@@ -100,20 +103,20 @@ function renderOverview(
         // RUNNING without a live lease: the process that ran it is gone (Ctrl-C, crash, closed terminal)
         const orphan = r.state === "RUNNING" && !live;
         const lease = live
-          ? (r.lease as { owner: string }).owner
+          ? st.muted((r.lease as { owner: string }).owner)
           : orphan
-            ? `no process${r.cancelRequested ? ", cancel requested" : ""} → jarvis resume|cancel ${shortRunId(r.id)}`
+            ? `${st.warn(`no process${r.cancelRequested ? ", cancel requested" : ""}`)} ${st.muted("→")} ${st.cmd(`jarvis resume|cancel ${shortRunId(r.id)}`)}`
             : r.cancelRequested
-              ? "cancel requested"
-              : "-";
+              ? st.warn("cancel requested")
+              : st.muted("-");
         ctx.out.line(
-          `${padEnd(shortRunId(r.id), 8)}  ${padEnd(r.task, w)}  ${padEnd(r.state, 15)}  ${padEnd(step, 22)}  ${padEnd(ago(r.updatedAt, now), 9)}  ${lease}`,
+          `${st.name(padEnd(shortRunId(r.id), 8))}  ${padEnd(r.task, w)}  ${st.byState(r.state, padEnd(r.state, 15))}  ${padEnd(step, 22)}  ${st.muted(padEnd(ago(r.updatedAt, now), 9))}  ${lease}`,
         );
       }
     }
     if (overview.pools.length > 0) {
       ctx.out.line();
-      ctx.out.line("budget:");
+      ctx.out.line(ctx.out.style.heading("budget:"));
       for (const p of overview.pools) ctx.out.line(`  ${fmtPool(p)}`);
     }
   });
@@ -138,26 +141,29 @@ function renderRun(
 
 export function renderDetail(ctx: CliContext, d: RunDetail, now: Date, eventLimit: number): void {
   const { out } = ctx;
+  const st = out.style;
+  // field labels dim, values plain: `  task       …`
+  const f = (label: string) => `  ${st.muted(padEnd(label, 10))} `;
   const r = d.run;
-  out.line(`run ${r.id}  (${shortRunId(r.id)})`);
+  out.line(`${st.heading("run")} ${st.name(r.id)}  ${st.muted(`(${shortRunId(r.id)})`)}`);
   out.line(
-    `  task       ${r.task}    workflow ${r.workflow}    dataClass ${r.dataClass}${r.profile ? `    profile ${r.profile}` : ""}`,
+    `${f("task")}${r.task}    ${st.muted("workflow")} ${r.workflow}    ${st.muted("dataClass")} ${r.dataClass}${r.profile ? `    ${st.muted("profile")} ${r.profile}` : ""}`,
   );
   out.line(
-    `  state      ${r.state}${r.stateReason ? ` — ${r.stateReason}` : ""}${r.cancelRequested ? "  (cancel requested)" : ""}`,
+    `${f("state")}${st.state(r.state)}${r.stateReason ? ` ${st.muted("—")} ${r.stateReason}` : ""}${r.cancelRequested ? `  ${st.warn("(cancel requested)")}` : ""}`,
   );
   if (r.state === "RUNNING" && !d.leaseLive)
     out.line(
-      `             no process holds it (interrupted or crashed): jarvis resume ${shortRunId(r.id)} | jarvis cancel ${shortRunId(r.id)}`,
+      `             ${st.warn("no process holds it (interrupted or crashed):")} ${st.cmd(`jarvis resume ${shortRunId(r.id)}`)} ${st.muted("|")} ${st.cmd(`jarvis cancel ${shortRunId(r.id)}`)}`,
     );
-  out.line(`  step       ${r.currentStep ? `${r.currentStep} #${r.currentIteration}` : "-"}`);
+  out.line(`${f("step")}${r.currentStep ? `${r.currentStep} #${r.currentIteration}` : "-"}`);
   // ADR-0018: what the run does right now — the same line the foreground command draws
   if (d.activity && !d.activity.finished && r.state === "RUNNING")
-    out.line(`  now        ${formatActivity(d.activity, d.activityOptions ?? {})}`);
+    out.line(`${f("now")}${formatActivity(d.activity, d.activityOptions ?? {})}`);
   const capsArtifact = d.artifacts.find((a) => a.type === "project-capabilities");
   if (capsArtifact && d.capabilities) {
     out.line(
-      `  stack      ${d.capabilities.stacks.join(", ") || "-"}    level ${d.capabilities.level}${d.capabilities.adapters.length > 0 ? `    adapters ${d.capabilities.adapters.map((a) => a.id).join(", ")}` : ""}`,
+      `${f("stack")}${d.capabilities.stacks.join(", ") || "-"}    level ${d.capabilities.level}${d.capabilities.adapters.length > 0 ? `    adapters ${d.capabilities.adapters.map((a) => a.id).join(", ")}` : ""}`,
     );
   }
   if (r.waitingFor) {
@@ -169,50 +175,50 @@ export function renderDetail(ctx: CliContext, d: RunDetail, now: Date, eventLimi
           ? `jarvis approve ${shortRunId(r.id)} | jarvis review submit ${shortRunId(r.id)}`
           : "";
     out.line(
-      `  waiting    ${w.kind}${w.detail ? ` (${w.detail})` : ""}${w.interactionId ? `  thread ${w.interactionId}` : ""}${hint ? `  → ${hint}` : ""}`,
+      `${f("waiting")}${st.warn(w.kind)}${w.detail ? ` (${w.detail})` : ""}${w.interactionId ? `  ${st.muted("thread")} ${w.interactionId}` : ""}${hint ? `  ${st.muted("→")} ${st.cmd(hint)}` : ""}`,
     );
   }
   for (const i of d.interactions) {
     out.line(
-      `  thread     ${i.id}  ${i.kind}  ${i.state}  ${i.stepId} #${i.iteration}${i.contentRef ? `  ${i.contentRef}` : ""}`,
+      `${f("thread")}${i.id}  ${i.kind}  ${i.state}  ${i.stepId} #${i.iteration}${i.contentRef ? `  ${i.contentRef}` : ""}`,
     );
   }
   out.line(
-    `  owner      ${r.owner.kind}:${r.owner.id}    created ${ago(r.createdAt, now)}    updated ${ago(r.updatedAt, now)}`,
+    `${f("owner")}${r.owner.kind}:${r.owner.id}    ${st.muted(`created ${ago(r.createdAt, now)}    updated ${ago(r.updatedAt, now)}`)}`,
   );
   out.line(
-    `  workspace  ${r.workspace.mode} ${r.workspace.path}${r.workspace.branch ? ` (${r.workspace.branch})` : ""}${r.workspace.headCommit ? ` @ ${r.workspace.headCommit.slice(0, 10)}` : ""}`,
+    `${f("workspace")}${r.workspace.mode} ${r.workspace.path}${r.workspace.branch ? ` (${r.workspace.branch})` : ""}${r.workspace.headCommit ? ` @ ${r.workspace.headCommit.slice(0, 10)}` : ""}`,
   );
   out.line(
-    `  lease      ${r.lease ? `${r.lease.owner} epoch ${r.lease.epoch} ${d.leaseLive ? "live" : "expired"}` : "-"}`,
+    `${f("lease")}${r.lease ? `${r.lease.owner} ${st.muted(`epoch ${r.lease.epoch}`)} ${d.leaseLive ? st.ok("live") : st.muted("expired")}` : "-"}`,
   );
   const loops = Object.entries(r.iterations).filter(([, n]) => n > 0);
-  if (loops.length > 0) out.line(`  loops      ${loops.map(([e, n]) => `${e} ×${n}`).join(", ")}`);
+  if (loops.length > 0) out.line(`${f("loops")}${loops.map(([e, n]) => `${e} ×${n}`).join(", ")}`);
 
   out.line();
   out.line(
-    `tokens     ${d.tokens.calls} calls, ${d.tokens.promptTokens} prompt (${d.tokens.cachedTokens} cached), ${d.tokens.outputTokens} output, ${d.tokens.retries} retries`,
+    `${st.heading("tokens")}     ${d.tokens.calls} calls, ${d.tokens.promptTokens} prompt ${st.muted(`(${d.tokens.cachedTokens} cached)`)}, ${d.tokens.outputTokens} output, ${d.tokens.retries > 0 ? st.warn(`${d.tokens.retries} retries`) : `${d.tokens.retries} retries`}`,
   );
 
   if (d.steps.length > 0) {
     out.line();
-    out.line("steps:");
+    out.line(st.heading("steps:"));
     for (const s of d.steps.slice(-10)) {
       const status = s.status ? `${s.status}${s.outcome ? ` → ${s.outcome}` : ""}` : "running";
       out.line(
-        `  ${padEnd(`${s.stepId} #${s.iteration}`, 24)} ${padEnd(status, 28)} ${ago(s.startedAt, now)}`,
+        `  ${padEnd(`${s.stepId} #${s.iteration}`, 24)} ${st.byState(s.status ?? "RUNNING", padEnd(status, 28))} ${st.muted(ago(s.startedAt, now))}`,
       );
     }
   }
   if (d.checkpoint) {
     out.line();
     out.line(
-      `checkpoint ${d.checkpoint.kind} at ${d.checkpoint.stepId} #${d.checkpoint.iteration}${d.checkpoint.headCommit ? ` @ ${d.checkpoint.headCommit.slice(0, 10)}` : ""} (${ago(d.checkpoint.createdAt, now)})`,
+      `${st.heading("checkpoint")} ${d.checkpoint.kind} at ${d.checkpoint.stepId} #${d.checkpoint.iteration}${d.checkpoint.headCommit ? ` @ ${d.checkpoint.headCommit.slice(0, 10)}` : ""} (${ago(d.checkpoint.createdAt, now)})`,
     );
   }
   if (d.artifacts.length > 0) {
     out.line();
-    out.line("artifacts:");
+    out.line(st.heading("artifacts:"));
     for (const a of d.artifacts) {
       const who =
         a.provenance.kind === "human"
@@ -221,12 +227,12 @@ export function renderDetail(ctx: CliContext, d: RunDetail, now: Date, eventLimi
             ? `agent:${a.provenance.agentId}`
             : a.provenance.kind;
       const gate = d.pendingApprovals.some((p) => p.artifactId === a.artifactId)
-        ? "  AWAITING APPROVAL"
+        ? `  ${st.warn("AWAITING APPROVAL")}`
         : a.approved
-          ? "  approved"
+          ? `  ${st.ok("approved")}`
           : "";
       out.line(
-        `  ${padEnd(`${a.type}/${a.name}@${a.version}`, 32)} ${padEnd(who, 24)} ${ago(a.createdAt, now)}${gate}`,
+        `  ${padEnd(`${a.type}/${a.name}@${a.version}`, 32)} ${st.muted(padEnd(who, 24))} ${st.muted(ago(a.createdAt, now))}${gate}`,
       );
     }
   }
@@ -234,7 +240,7 @@ export function renderDetail(ctx: CliContext, d: RunDetail, now: Date, eventLimi
   if (effectTotal > 0) {
     out.line();
     out.line(
-      `effects    ${Object.entries(d.effects.counts)
+      `${st.heading("effects")}    ${Object.entries(d.effects.counts)
         .map(([k, v]) => `${v} ${k}`)
         .join(", ")}`,
     );
@@ -245,7 +251,7 @@ export function renderDetail(ctx: CliContext, d: RunDetail, now: Date, eventLimi
   }
   if (d.events.length > 0) {
     out.line();
-    out.line("events:");
+    out.line(st.heading("events:"));
     for (const e of d.events.slice(-eventLimit)) {
       const p = e.payload ?? {};
       const brief =
@@ -254,7 +260,13 @@ export function renderDetail(ctx: CliContext, d: RunDetail, now: Date, eventLimi
           : e.kind.startsWith("effect")
             ? String(p.capability ?? "")
             : "";
-      out.line(`  ${padEnd(e.kind, 18)} ${padEnd(brief, 40)} ${ago(e.ts, now)}`);
+      const kind = padEnd(e.kind, 18);
+      const tone = /error|failed|gave/.test(e.kind)
+        ? st.bad
+        : /retry|waiting/.test(e.kind)
+          ? st.warn
+          : (t: string) => t;
+      out.line(`  ${tone(kind)} ${padEnd(brief, 40)} ${st.muted(ago(e.ts, now))}`);
     }
   }
 }
