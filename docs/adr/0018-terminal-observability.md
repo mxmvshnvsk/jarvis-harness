@@ -1,6 +1,8 @@
 # ADR-0018: Интерфейсы наблюдения в терминале — status/stats, TUI, поток событий, лимиты пулов
 
-- Статус: принято (только терминал; web GUI не планируется до shared runtime и отдельным решением)
+- Статус: принято (только терминал; web GUI не планируется до shared runtime и отдельным решением);
+  §1 «TUI на Ink» для основного вывода уточнён [ADR-0022](0022-terminal-interface.md): вывод остаётся в
+  истории терминала, свой рендерер без Ink; `jarvis ui` — возможный отдельный наблюдатель
 - Дата: 2026-10-03
 - Основание: [ADR-0001](0001-target-architecture.md) §11 (Budget & Resource Manager, soft/hard limits),
   §14 (метрики по уровням, `jarvis stats`), §15 (CLI, `jarvis status|context|stats|daemon`), §17
