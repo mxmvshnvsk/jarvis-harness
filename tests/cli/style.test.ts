@@ -83,3 +83,41 @@ describe("colour", () => {
     expect(renderDiff(diff, createStyle(false))).toBe(diff);
   });
 });
+
+describe("result documents", () => {
+  it("read as markdown: title, summary, sections, nested acceptance, sources last", async () => {
+    const { documentToMarkdown } = await import("../../src/cli/render.ts");
+    const md = documentToMarkdown({
+      $schema: "x",
+      summary: "Why it breaks.",
+      sources: ["a.ts:1"],
+      title: "Bug",
+      goals: ["Fix it"],
+      requirements: [{ id: "R1", text: "Do X", acceptance: ["one", "two"] }],
+      openQuestions: [],
+      outcome: "ok",
+    });
+    expect(md).toBe(
+      [
+        "# Bug",
+        "",
+        "Why it breaks.",
+        "",
+        "## Goals",
+        "",
+        "- Fix it",
+        "",
+        "## Requirements",
+        "",
+        "- **R1** Do X",
+        "  - Acceptance:",
+        "    - one",
+        "    - two",
+        "",
+        "## Sources",
+        "",
+        "- `a.ts:1`",
+      ].join("\n"),
+    );
+  });
+});

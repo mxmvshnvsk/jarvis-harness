@@ -87,6 +87,14 @@ Remaining commands of ADR-0001 §15:
   a result finished on a limit carries `budgetExhausted: tools|model` in its provenance and `agent.finish`, the step
   line, the summary and `jarvis show` say it may be incomplete, and the next agent gets the input marked `INCOMPLETE`
   (pilot: maps of large modules hit 60 tools and looked complete)
+- first `spec` on a real bug (a form showed fields it should hide): root cause and fix found
+  (a missing condition in a shared component), test conventions of AGENTS.md carried into the spec. Fixed from
+  its logs: Node's fetch gave up on a response after 300 s (`UND_ERR_HEADERS_TIMEOUT`, read as "the gateway cuts
+  at 5:00") — a model with a longer `timeoutMs` gets a dispatcher with raised header/body timeouts
+  (`src/models/http.ts`); long code names (`isInvoiceRecalculationAvailable`) were masked as high-entropy in what
+  agents read, and the agent then searched for the placeholder — `looksLikeCodeName`; `repo.search` with a file as
+  `path` failed with spawn ENOTDIR; several tool calls in one answer overran the limit (41/40) — the rest are
+  answered "skipped"; `jarvis show` renders result documents as markdown; long tasks are cut in the header
 
 ADR-0001 §20 stage 12 (git hooks) — `f11ca47`:
 

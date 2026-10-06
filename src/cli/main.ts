@@ -216,8 +216,12 @@ export function buildProgram(options: RunOptions = {}): Command {
     .command("show <run> [artifact]")
     .description("what a run produced: the list, or one artifact (type, name or a unique part) to read")
     .option("--out <file>", "write the artifact to a file instead of printing it")
-    .action(async (run: string, artifact: string | undefined, opts: { out?: string }) => {
-      await runShow(ctxFor(), run, artifact, opts.out ? { out: opts.out } : {});
+    .option("--raw", "print a JSON document as it is stored, not as markdown")
+    .action(async (run: string, artifact: string | undefined, opts: { out?: string; raw?: boolean }) => {
+      await runShow(ctxFor(), run, artifact, {
+        ...(opts.out ? { out: opts.out } : {}),
+        ...(opts.raw ? { raw: true } : {}),
+      });
     });
   program
     .command("diff <run>")

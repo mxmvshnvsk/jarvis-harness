@@ -19,7 +19,7 @@ import { git } from "../../tools/local/exec.ts";
 import type { CliContext } from "../context.ts";
 import { CliExit, EXIT } from "../output.ts";
 import { followRun } from "../progress.ts";
-import { renderDiff, renderMarkdown } from "../render.ts";
+import { documentToMarkdown, renderDiff, renderMarkdown } from "../render.ts";
 import { incompleteOf, padStyled } from "../style.ts";
 import { loadForCli } from "./config.ts";
 import { renderSummary } from "./status.ts";
@@ -467,7 +467,7 @@ export async function runShow(
   ctx: CliContext,
   ref: string,
   artifactRef: string | undefined,
-  options: { out?: string },
+  options: { out?: string; raw?: boolean },
 ): Promise<void> {
   const loaded = await loadForCli(ctx);
   const runtime = createRuntime(loaded, { env: ctx.env });
@@ -551,7 +551,9 @@ export async function runShow(
             `${st.warn("⚠")} ${st.warn(`incomplete: agent ${partial.agentId} hit its ${partial.limit} limit`)} ${st.muted("— what it did not cover is unknown; check before relying on it. More room for the next runs:")} ${st.cmd(`agents.${partial.agentId}.limits.max${partial.limit === "tool call" ? "Tool" : "Model"}Calls`)} ${st.muted("in .jarvis/project.yaml")}`,
           );
         ctx.out.line(st.muted("─".repeat(60)));
-        const body = a.name.endsWith(".json") ? prettyJson(text) : text;
+        // a result document reads as markdown; --raw (and --json) keep the JSON
+        const doc = a.name.endsWith(".json") && !options.raw ? parseObject(text) : undefined;
+        const body = doc ? documentToMarkdown(doc) : a.name.endsWith(".json") ? prettyJson(text) : text;
         ctx.out.raw(renderMarkdown(body.trimEnd(), st));
         ctx.out.line(st.muted("─".repeat(60)));
         if (state === "awaiting approval") {
@@ -565,6 +567,15 @@ export async function runShow(
     );
   } finally {
     await runtime.close();
+  }
+}
+
+function parseObject(text: string): Record<string, unknown> | undefined {
+  try {
+    const v: unknown = JSON.parse(text);
+    return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : undefined;
+  } catch {
+    return undefined;
   }
 }
 

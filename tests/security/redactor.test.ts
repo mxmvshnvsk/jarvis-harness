@@ -107,6 +107,22 @@ describe("Redactor", () => {
     expect(r.count).toBe(0);
   });
 
+  it("keeps long names from code, still masks secret-looking values (pilot)", () => {
+    const code = [
+      "15:    isCompactModeEnabledForCustomerSelector,",
+      "            attachDeliveryAddressPage: attachDeliveryAddressPageCompactAC,",
+      "    const addressSelector = isEditMode ? foreignAddressesByType : compactForeignAddressesByType;",
+      "type: SAVE_ORDER_SUCCESS_V2",
+    ].join("\n");
+    expect(redactor.redact(code)).toMatchObject({ text: code, count: 0 });
+    for (const secret of [
+      "Ab3kX9fK2mP8qL4vN7bR1tY6wE3zA5cH0jD",
+      "Zm9vYmFyYmF6cXV4MTIzNDU2Nzg5MAbcdef",
+      "qWeRtYuIoPaSdFgHjKlZxCvBnMqWeRtYuIo",
+    ])
+      expect(redactor.redact(`key: ${secret}`).count, secret).toBe(1);
+  });
+
   it("redacts strings inside JSON-like values", () => {
     const r = redactor.redactValue({
       args: { header: "Bearer Zm9vYmFyYmF6cXV4MTIzNDU2Nzg5MA" },

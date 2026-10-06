@@ -1,5 +1,6 @@
 import type { ModelConfig } from "../../core/config/schema.ts";
 import { classifyHttpError, classifyNetworkError, ModelError } from "../errors.ts";
+import { dispatcherFor } from "../http.ts";
 import type {
   FinishReason,
   Message,
@@ -145,6 +146,7 @@ export class OpenAiCompatibleAdapter implements ProviderAdapter {
     const timeout = AbortSignal.timeout(model.timeoutMs);
     const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
 
+    const dispatcher = await dispatcherFor(model.timeoutMs);
     let response: Response;
     try {
       response = await this.fetchImpl(url, {
@@ -152,7 +154,9 @@ export class OpenAiCompatibleAdapter implements ProviderAdapter {
         headers: { "content-type": "application/json", ...options.headers },
         body,
         signal,
-      });
+        // Node's fetch extension: header/body timeouts past undici's 300 s default (see http.ts)
+        ...(dispatcher ? { dispatcher } : {}),
+      } as unknown as RequestInit);
     } catch (error) {
       throw classifyNetworkError(error, request.modelId);
     }

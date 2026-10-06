@@ -114,6 +114,15 @@ describe("local tools", () => {
     expect(search.text).toContain("src/index.ts:2:");
     const literal = await tools.invoke("repo.search", { pattern: "answer = 42", literal: true });
     expect(literal.text).toContain("src/index.ts:1:");
+    // a file as `path` (pilot: spawn ENOTDIR) and a directory: hits keep their path from the root
+    const inFile = await tools.invoke("repo.search", {
+      pattern: "canRestartOnboarding",
+      path: "src/index.ts",
+    });
+    expect(inFile.ok).toBe(true);
+    expect(inFile.text).toContain("src/index.ts:2:");
+    const inDir = await tools.invoke("repo.search", { pattern: "canRestartOnboarding", path: "src" });
+    expect(inDir.text).toContain("src/index.ts:2:");
 
     const write = await tools.invoke("repo.write", {
       path: "src/new/file.ts",

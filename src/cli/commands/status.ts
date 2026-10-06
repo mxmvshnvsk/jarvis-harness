@@ -6,6 +6,7 @@ import { isTerminal } from "../../core/domain/run.ts";
 import { shortRunId } from "../../storage/runStore.ts";
 import type { CliContext } from "../context.ts";
 import { CliExit, EXIT, padEnd } from "../output.ts";
+import { oneLine } from "../progress.ts";
 import { incompleteOf } from "../style.ts";
 import { loadForCli } from "./config.ts";
 
@@ -361,7 +362,7 @@ export function renderSummary(ctx: CliContext, d: RunDetail): void {
   out.line(
     `${st.heading("run")} ${st.name(shortRunId(r.id))}  ${st.state(r.state)}  ${st.muted(`in ${duration(workedMs(d))}`)}`,
   );
-  out.line(`${f("task")}${r.task} ${st.muted(`· workflow ${r.workflow}`)}`);
+  out.line(`${f("task")}${oneLine(r.task, 100)} ${st.muted(`· workflow ${r.workflow}`)}`);
   out.line(`${f("state")}${st.state(r.state)}${r.stateReason ? ` ${st.muted("—")} ${r.stateReason}` : ""}`);
   const t = d.tokens;
   if (t.calls > 0)

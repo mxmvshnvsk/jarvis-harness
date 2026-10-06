@@ -271,6 +271,20 @@ export class AgentRuntimeRunner implements AgentRunner {
         { role: "assistant", content: response.text, toolCalls: response.toolCalls },
       ];
       for (const call of response.toolCalls) {
+        // several calls in one answer may overrun the limit (pilot: 41/40): each needs an answer,
+        // the ones past the limit get "skipped" instead of running
+        if (toolCalls >= limits.maxToolCalls) {
+          budgetExhausted = "tools";
+          transcript = [
+            ...transcript,
+            {
+              role: "tool",
+              toolCallId: call.id,
+              content: `[${call.name}] skipped: the tool budget for this step is used up`,
+            },
+          ];
+          continue;
+        }
         let args: Record<string, unknown> = {};
         let parseError: string | undefined;
         try {

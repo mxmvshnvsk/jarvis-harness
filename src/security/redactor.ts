@@ -80,10 +80,41 @@ function looksLikePath(s: string): boolean {
   );
 }
 
+/**
+ * A name from code: camelCase, PascalCase or snake_case made of word-like parts
+ * (`isInvoiceRecalculationAvailable`, `isCompactModeEnabledForOrderSelector`, `SAVE_ORDER_SUCCESS`).
+ * A secret's mixed case falls apart into one- and two-letter pieces and digits in the middle
+ * (`L4vN7bR1tY6wE3zA5cH0jD`). Pilot: long selector names were masked in what the agent read, and it
+ * then searched for the placeholder.
+ */
+export function looksLikeCodeName(s: string): boolean {
+  if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(s)) return false;
+  const words: string[] = [];
+  for (const part of s.split(/_+/).filter((p) => p.length > 0)) {
+    const pieces = part.match(/[A-Z]{2,}(?=[A-Z][a-z]|[0-9]|$)|[A-Z]?[a-z]+|[A-Z]+|[0-9]+/g) ?? [];
+    if (pieces.join("") !== part) return false;
+    words.push(...pieces);
+  }
+  if (words.length === 0) return false;
+  const last = words.length - 1;
+  const ok = words.every(
+    (w, i) =>
+      /^[A-Z]?[a-z]+$/.test(w) ||
+      /^[A-Z]{2,8}$/.test(w) ||
+      (i === last && /^[0-9]{1,4}$/.test(w)) ||
+      (i === last - 1 && /^[A-Z]$/.test(w) && /^[0-9]{1,4}$/.test(words[last] ?? "")),
+  );
+  const letters = words.filter((w) => /[A-Za-z]{2,}/.test(w));
+  const mean = letters.reduce((n, w) => n + w.length, 0) / Math.max(1, letters.length);
+  const short = letters.filter((w) => w.length <= 2).length;
+  return ok && letters.length > 0 && mean >= 3 && short * 2 <= letters.length;
+}
+
 /** Hashes, commit shas, UUIDs and paths are identifiers provenance depends on — never redact them. */
 function looksLikeIdentifier(s: string): boolean {
   return (
     looksLikePath(s) ||
+    looksLikeCodeName(s) ||
     /^[0-9a-f]{32,64}$/i.test(s) ||
     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s) ||
     /^[0-9]+$/.test(s)

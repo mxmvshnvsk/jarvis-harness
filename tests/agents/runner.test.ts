@@ -465,8 +465,19 @@ context: { maxContext: 8000 }
     server.respond((req) => {
       const system = (req.body.messages as Array<{ content: string }>)[0]?.content ?? "";
       if (system.includes("# Agent: research")) {
-        // keeps exploring while it may: only the limit stops it
-        if (req.body.tools) return toolCallCompletion("repo.list", {});
+        // keeps exploring while it may, three calls an answer: only the limit stops it
+        if (req.body.tools) {
+          const reply = toolCallCompletion("repo.list", {});
+          const message = (reply.body as { choices: Array<{ message: { tool_calls: unknown[] } }> })
+            .choices[0]?.message;
+          if (message)
+            message.tool_calls = ["a", "b", "c"].map((id) => ({
+              id: `call_${id}`,
+              type: "function",
+              function: { name: "repo.list", arguments: "{}" },
+            }));
+          return reply;
+        }
         return completion(JSON.stringify(RESEARCH_DOC));
       }
       return completion("not a document");
@@ -483,7 +494,16 @@ context: { maxContext: 8000 }
     const finish = rt.events
       .list({ runId: run.id })
       .find((e) => e.kind === "agent.finish" && e.stepId === "research");
+    // two allowed, the third call of the same answer is skipped, not run (pilot: 41/40)
     expect(finish?.payload).toMatchObject({ toolCalls: 2, budgetExhausted: "tools" });
+    expect(rt.events.list({ runId: run.id }).filter((e) => e.kind === "tool.call")).toHaveLength(2);
+    expect(
+      server.requests.some((r) =>
+        JSON.stringify(r.body.messages).includes(
+          "[repo.list] skipped: the tool budget for this step is used up",
+        ),
+      ),
+    ).toBe(true);
     const start = rt.events.list({ runId: run.id }).find((e) => e.kind === "agent.start");
     expect(start?.payload).toMatchObject({ maxToolCalls: 2 });
     // the requirements agent reads research as incomplete

@@ -109,6 +109,8 @@ export function networkHint(code: string | undefined): string | undefined {
   }
   if (code === "ENOTFOUND" || code === "EAI_AGAIN") return "the host name does not resolve: VPN or DNS";
   if (code === "ECONNREFUSED") return "nothing listens at that address: check baseUrl";
+  if (code === "UND_ERR_HEADERS_TIMEOUT" || code === "UND_ERR_BODY_TIMEOUT")
+    return "the model did not answer within the HTTP client's timeout: raise models.<id>.timeoutMs (the request then waits that long)";
   return undefined;
 }
 

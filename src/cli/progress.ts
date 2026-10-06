@@ -36,6 +36,12 @@ export interface FollowOptions {
 
 const FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
+/** A task is often a paragraph: the first line, cut, in a header. */
+export function oneLine(text: string, max: number): string {
+  const line = text.split("\n")[0]?.trim() ?? "";
+  return [...line].length > max ? `${[...line].slice(0, max - 1).join("")}…` : line;
+}
+
 const shortId = (runId: string) => runId.replace(/^run_/, "").slice(0, 8);
 
 export function formatRunHeader(
@@ -44,7 +50,7 @@ export function formatRunHeader(
   st: Style,
 ): string[] {
   const lines = [
-    `${st.heading("▶")} ${st.heading(run.workflow)} ${st.muted("·")} ${run.task} ${st.muted(`· run ${shortId(run.id)}`)}`,
+    `${st.heading("▶")} ${st.heading(run.workflow)} ${st.muted("·")} ${oneLine(run.task, 90)} ${st.muted(`· run ${shortId(run.id)}`)}`,
   ];
   if (plan.length > 1) lines.push(`  ${st.muted(plan.join(" → "))}`);
   return lines;

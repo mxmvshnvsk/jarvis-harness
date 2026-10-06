@@ -216,7 +216,7 @@ export class LocalToolProvider implements ToolProvider {
         handler: async (args, ctx) => {
           try {
             const pattern = str(args, "pattern");
-            const { absolute, relative: rel } = resolveInWorkspace(ctx, str(args, "path", "."));
+            const { relative: rel } = resolveInWorkspace(ctx, str(args, "path", "."));
             const max = num(args, "maxResults", 200);
             const literal = args.literal === true;
             const globArg = typeof args.glob === "string" ? args.glob : undefined;
@@ -234,14 +234,16 @@ export class LocalToolProvider implements ToolProvider {
               if (literal) rgArgs.push("--fixed-strings");
               if (globArg) rgArgs.push("--glob", globArg);
               for (const d of SKIP_DIRS) rgArgs.push("--glob", `!${d}`);
-              rgArgs.push("-e", pattern, ".");
-              const r = await runCommand("rg", rgArgs, { cwd: absolute, timeoutMs: 60_000 });
+              // from the workspace root, so `path` may be a file as well as a directory (pilot: a file
+              // path made rg start in it — spawn ENOTDIR) and every hit carries its path from the root
+              rgArgs.push("--with-filename", "-e", pattern, rel === "." ? "." : rel);
+              const r = await runCommand("rg", rgArgs, { cwd: ctx.workspacePath, timeoutMs: 60_000 });
               if (r.code !== 0 && r.code !== 1)
                 return { ok: false, error: r.stderr || `rg exited ${r.code}` };
               const lines = r.stdout
                 .split("\n")
                 .filter((l) => l.length > 0)
-                .map((l) => (rel === "." ? l.replace(/^\.\//, "") : `${rel}/${l.replace(/^\.\//, "")}`))
+                .map((l) => l.replace(/^\.\//, ""))
                 .filter((l) => !ctx.pathPolicy.isDenied(l.split(":")[0] ?? ""));
               return {
                 ok: true,
@@ -253,7 +255,7 @@ export class LocalToolProvider implements ToolProvider {
               ? new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
               : new RegExp(pattern);
             const files = (await listFiles(ctx, ctx.workspacePath)).filter(
-              (f) => rel === "." || f.startsWith(`${rel}/`),
+              (f) => rel === "." || f === rel || f.startsWith(`${rel}/`),
             );
             const hits: string[] = [];
             for (const f of files) {
