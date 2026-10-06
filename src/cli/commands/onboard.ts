@@ -15,6 +15,7 @@ import { git } from "../../tools/local/exec.ts";
 import type { CliContext } from "../context.ts";
 import { CliExit, EXIT } from "../output.ts";
 import { followRun } from "../progress.ts";
+import { nameOf } from "./candidates.ts";
 import { loadForCli } from "./config.ts";
 
 /**
@@ -200,10 +201,9 @@ async function runModuleMap(
       if (result.problem) ctx.out.line(result.problem);
       if (result.candidateId) {
         ctx.out.line();
-        ctx.out.line(`candidate ${result.candidateId} (knowledge, paths: ${module}/**)`);
-        ctx.out.line(
-          `review: jarvis candidates list; accept: jarvis candidates promote ${result.candidateId} --id module-${module.replace(/[^\w-]+/g, "-")}`,
-        );
+        const name = nameOf({ kind: "knowledge", title: `module ${module}`, module });
+        ctx.out.line(`candidate ${name} (knowledge, paths: ${module}/**, ${result.candidateId})`);
+        ctx.out.line(`read: jarvis candidates show ${name}   ·   accept: jarvis candidates promote ${name}`);
       }
     });
     if (result.problem && !result.candidateId) throw new CliExit(EXIT.error);

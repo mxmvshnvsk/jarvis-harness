@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createRuntime } from "../../src/app/runtime.ts";
 import { run } from "../../src/cli/main.ts";
 import { loadConfig } from "../../src/core/config/load.ts";
+import { shortRunId } from "../../src/storage/runStore.ts";
 import { type Sandbox, sandbox } from "../helpers/tmp.ts";
 
 let sb: Sandbox;
@@ -181,5 +182,80 @@ describe("jarvis candidates", () => {
     const again = await jarvis(["candidates", "promote", c1.artifactId]);
     expect(again.code).toBe(1);
     expect(again.err).toContain("already exists");
+  });
+});
+
+describe("jarvis candidates: names", () => {
+  it("names module maps by module, tells duplicates apart by run and accepts any unique part", async () => {
+    const loaded = await loadConfig({ cwd: sb.project, homeDir: sb.home, env: ENV });
+    const rt = createRuntime(loaded, { env: ENV });
+    const newRun = () =>
+      rt.runs.create({
+        task: "onboard",
+        workflow: "onboard-module",
+        owner: { kind: "user", id: "me@corp", verified: false },
+        workspace: { mode: "cwd", repoRoot: sb.project, path: sb.project, baseRef: "HEAD" },
+        dataClass: "internal",
+      });
+    const put = (runId: string, module: string, review: string[]) =>
+      rt.artifacts.put({
+        runId,
+        type: "candidate",
+        name: "module.json",
+        content: JSON.stringify({
+          kind: "knowledge",
+          title: `module ${module}`,
+          module,
+          claims: { proposed: 5, kept: 4, dropped: 1 },
+          review,
+          rationale:
+            "Mapped by the onboarding agent; 4 of 5 claims were confirmed against the code, 1 dropped.",
+          evidence: [`${module}/a.ts:1`, `${module}/a.ts:9`, `${module}/b.ts:3`],
+          proposal: `---\nkind: module\n---\n# ${module}\n\n## Responsibilities\n- Does things.\n`,
+          status: "proposed",
+        }),
+        mediaType: "application/json",
+        provenance: { kind: "agent", agentId: "onboard-mapper" },
+        stepId: "map",
+        iteration: 1,
+      });
+    const older = newRun();
+    put(older.id, "packages/shared-lib/src/billing", []);
+    const plugins = newRun();
+    put(plugins.id, "server/plugins", ["Every request is logged by this plugin."]);
+    const newer = newRun();
+    put(newer.id, "packages/shared-lib/src/billing", []);
+    await rt.close();
+
+    const list = await jarvis(["candidates", "list"]);
+    expect(list.code).toBe(0);
+    expect(list.out).toContain("3 candidates");
+    expect(list.out).toContain("● shared-lib/billing\n");
+    expect(list.out).toContain(`● shared-lib/billing@${shortRunId(older.id)}\n`);
+    expect(list.out).toContain("● server/plugins\n");
+    expect(list.out).toContain("claims 4/5 confirmed, 1 dropped · 1 to check");
+    expect(list.out).toContain("evidence  plugins/a.ts, plugins/b.ts");
+    expect(list.out).toContain("? Every request is logged by this plugin.");
+    expect(list.out).toContain("jarvis candidates show <name>");
+
+    const show = await jarvis(["candidates", "show", "plugins"]);
+    expect(show.code).toBe(0);
+    expect(show.out).toContain("server/plugins — knowledge, open");
+    expect(show.out).toContain(join(".jarvis", "knowledge", "module-server-plugins.md"));
+    expect(show.out).toContain("  ? Every request is logged by this plugin.");
+    expect(show.out).toContain("## Responsibilities");
+
+    const ambiguous = await jarvis(["candidates", "show", "billing"]);
+    expect(ambiguous.code).toBe(1);
+    expect(ambiguous.err).toContain('"billing" matches 2 candidates');
+
+    const promoted = await jarvis(["candidates", "promote", "shared-lib/billing"]);
+    expect(promoted.code).toBe(0);
+    const file = join(sb.project, ".jarvis", "knowledge", "module-shared-lib-billing.md");
+    expect(readFileSync(file, "utf8")).toMatch(/^---\nsource: art_/);
+    // the promoted one is decided: the other billing map is the only open match now
+    const rest = await jarvis(["candidates", "reject", "billing"]);
+    expect(rest.code).toBe(0);
+    expect(rest.out).toContain(`rejected shared-lib/billing@${shortRunId(older.id)}`);
   });
 });

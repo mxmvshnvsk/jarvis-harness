@@ -5,6 +5,12 @@ import { packageInfo } from "../version.ts";
 import { cliLogger } from "./cliLog.ts";
 import { runAsk } from "./commands/ask.ts";
 import { runAuthRemove, runAuthSet, runAuthStatus } from "./commands/auth.ts";
+import {
+  runCandidatesList,
+  runCandidatesPromote,
+  runCandidatesReject,
+  runCandidatesShow,
+} from "./commands/candidates.ts";
 import { runCi, runExport, runImport } from "./commands/ci.ts";
 import { runConfigShow } from "./commands/config.ts";
 import { runContext, runReshape } from "./commands/context.ts";
@@ -15,14 +21,7 @@ import { runExplain } from "./commands/explain.ts";
 import { runHooksInstall, runHooksStatus, runHooksUninstall, runPrePush } from "./commands/hooks.ts";
 import { runAnswer, runAttach, runReviewStatus, runReviewSubmit, runThreads } from "./commands/human.ts";
 import { renderInit, runInit } from "./commands/init.ts";
-import {
-  runCandidatesList,
-  runCandidatesPromote,
-  runCandidatesReject,
-  runSkillsList,
-  runStandardsCheck,
-  runStandardsList,
-} from "./commands/knowledge.ts";
+import { runSkillsList, runStandardsCheck, runStandardsList } from "./commands/knowledge.ts";
 import {
   runKnowledgeIndex,
   runKnowledgeSearch,
@@ -586,22 +585,29 @@ export function buildProgram(options: RunOptions = {}): Command {
     .description("knowledge candidates from reviews (ADR-0020 §6)");
   candidates
     .command("list")
+    .description("open candidates by name, with where to look and what to check")
     .option("--all", "include decided candidates", false)
     .action(async (opts: { all: boolean }) => {
       await runCandidatesList(ctxFor(), opts);
     });
   candidates
-    .command("promote <artifactId>")
-    .description("write the candidate as a standard / knowledge file and record the decision")
-    .option("--id <id>", "file id (default: derived from the title)")
-    .action(async (artifactId: string, opts: { id?: string }) => {
-      await runCandidatesPromote(ctxFor(), artifactId, opts);
+    .command("show <name>")
+    .description("the document as promote would write it, with the claims to check first")
+    .action(async (name: string) => {
+      await runCandidatesShow(ctxFor(), name);
     });
   candidates
-    .command("reject <artifactId>")
+    .command("promote <name>")
+    .description("write the candidate as a standard / knowledge file and record the decision")
+    .option("--id <id>", "file id (default: derived from the name)")
+    .action(async (name: string, opts: { id?: string }) => {
+      await runCandidatesPromote(ctxFor(), name, opts);
+    });
+  candidates
+    .command("reject <name>")
     .option("--comment <text>")
-    .action(async (artifactId: string, opts: { comment?: string }) => {
-      await runCandidatesReject(ctxFor(), artifactId, opts);
+    .action(async (name: string, opts: { comment?: string }) => {
+      await runCandidatesReject(ctxFor(), name, opts);
     });
 
   const db = program.command("db").description("local database");

@@ -70,6 +70,10 @@ Remaining commands of ADR-0001 §15:
 - onboarding: a kept claim that generalises beyond its excerpts ("every…", "the only…", "no…", "каждый/только…") is
   marked in the candidate and listed by `onboard --module` for review first — the excerpt check proves a quote exists,
   not that it supports "every" (pilot: "every handler catch reports its error the same way" passed; most handler files did not)
+- candidates: human names instead of artifact ids (`shared-lib/billing`, `server/plugins`, `…@<run>` for an
+  older candidate about the same thing; any unique part works), `candidates show` prints the document as promote
+  would write it with the generalisations to check, `list` says where to look (code paths, most quoted files) and how
+  many claims to check; module maps are promoted to `module-<name>.md` without `--id`
 
 ADR-0001 §20 stage 12 (git hooks) — `f11ca47`:
 

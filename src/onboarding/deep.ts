@@ -145,6 +145,9 @@ export async function mapModule(runtime: Runtime, options: MapModuleOptions): Pr
       {
         kind: "knowledge",
         title: `module ${options.module}`,
+        module: options.module,
+        claims: { proposed, kept, dropped: verified.dropped.length },
+        review: sweeping,
         rationale: `Mapped by the onboarding agent; ${kept} of ${proposed} claims were confirmed against the code, ${verified.dropped.length} dropped${sweeping.length > 0 ? `; ${sweeping.length} generalise beyond their excerpts — check those (marked) before promoting` : ""}.`,
         evidence,
         proposal: markdown,

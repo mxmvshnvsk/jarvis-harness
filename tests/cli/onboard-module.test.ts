@@ -205,9 +205,13 @@ describe("jarvis onboard --module", () => {
     expect(r.code).toBe(0);
     expect(r.out).toContain("check before promoting — generalisations the excerpts cannot prove (1):");
     expect(r.out).toContain("  ? Every order applies discounts before tax, never after.");
-    const id = /candidate (art_\w+)/.exec(r.out)?.[1] as string;
-    expect((await jarvis(["candidates", "promote", id, "--id", "module-src-orders"])).code).toBe(0);
-    const text = readFileSync(join(sb.project, ".jarvis/knowledge/module-src-orders.md"), "utf8");
+    // a human name, not an artifact id: the module without `src`
+    expect(r.out).toContain("candidate orders (knowledge, paths: src/orders/**, art_");
+    expect(r.out).toContain(
+      "read: jarvis candidates show orders   ·   accept: jarvis candidates promote orders",
+    );
+    expect((await jarvis(["candidates", "promote", "orders"])).code).toBe(0);
+    const text = readFileSync(join(sb.project, ".jarvis/knowledge/module-orders.md"), "utf8");
     expect(text).toContain(
       "- Every order applies discounts before tax, never after. **[check: a generalisation; the excerpt shows one place]**",
     );
