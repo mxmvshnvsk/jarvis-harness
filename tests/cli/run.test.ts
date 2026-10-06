@@ -259,4 +259,85 @@ steps:
     expect(r.code).toBe(10);
     expect(r.out).not.toContain("decide later");
   });
+
+  describe("an approved spec goes on to the implementation", () => {
+    const SHORT = `name: short
+entry: write
+next: long
+steps:
+  - id: write
+    kind: deterministic
+    tool: artifact.write
+    args: { type: spec, name: spec.md, content: "# spec" }
+    outputs: [spec]
+    transitions: { onSuccess: approve }
+  - id: approve
+    kind: approval
+    artifactType: spec
+    transitions: { onSuccess: DONE }
+`;
+    const LONG = `name: long
+entry: write
+steps:
+  - id: write
+    kind: deterministic
+    tool: artifact.write
+    args: { type: spec, name: spec.md, content: "# spec" }
+    outputs: [spec]
+    transitions: { onSuccess: approve }
+  - id: approve
+    kind: approval
+    artifactType: spec
+    transitions: { onSuccess: build }
+  - id: build
+    kind: deterministic
+    tool: artifact.write
+    args: { type: note, name: built.md, content: "built" }
+    inputs: [spec]
+    outputs: [note]
+    transitions: { onSuccess: DONE }
+`;
+    beforeEach(() => {
+      sb.write("project/.jarvis/workflows/short.yaml", SHORT);
+      sb.write("project/.jarvis/workflows/long.yaml", LONG);
+    });
+
+    it("asks after the approval and goes on in the same command, from where the spec stopped", async () => {
+      const r = await jarvis(["work", "ABC-9", "--workflow", "short"], ON, ["a", ""]);
+      expect(r.code).toBe(0);
+      expect(r.out).toContain("Go on to the implementation? build");
+      expect(r.out).toMatch(/→ [0-9a-f]{8} long from build, with spec\.md of run [0-9a-f]{8}/);
+      expect(r.err).toContain("▶ long · ABC-9");
+      expect(r.err).toContain("✓ [3/3] build");
+      // the spec is not written again: one write step in the whole session
+      expect(r.err.match(/\] write /g)).toHaveLength(1);
+
+      const loaded = await loadConfig({ cwd: sb.project, homeDir: sb.home, env: {} });
+      const rt = createRuntime(loaded, { env: {} });
+      const long = rt.runs.list({ includeTerminal: true }).find((x) => x.workflow === "long");
+      const spec = rt.artifacts.listLatest(long?.id as string, "spec")[0];
+      expect(long?.state).toBe("COMPLETED");
+      expect(spec?.provenance).toMatchObject({ kind: "import" });
+      expect(rt.artifacts.isApproved(spec?.artifactId as string).approved).toBe(true);
+      expect(rt.artifacts.listLatest(long?.id as string, "note")).toHaveLength(1);
+      rt.close();
+    });
+
+    it("without a terminal: the summary says how, `continue <run>` goes on once", async () => {
+      const OFF = { JARVIS_INTERACTIVE: "off" };
+      const parked = await jarvis(["work", "ABC-10", "--workflow", "short"], OFF);
+      const id = /run ([0-9a-f]{8})/.exec(parked.err)?.[1] as string;
+      const approved = await jarvis(["approve", id, "--resume"], OFF);
+      expect(approved.code).toBe(0);
+      expect(approved.out).toContain(`jarvis continue ${id}`);
+      expect(approved.out).toContain("go on as long: the implementation");
+      expect(approved.out).not.toContain("Go on to the implementation?");
+
+      const on = await jarvis(["continue", id], OFF);
+      expect(on.code).toBe(0);
+      expect(on.out).toContain("COMPLETED");
+      const again = await jarvis(["continue", id], OFF);
+      expect(again.out).toMatch(new RegExp(`run ${id} went on as [0-9a-f]{8}`));
+    });
+  });
 });

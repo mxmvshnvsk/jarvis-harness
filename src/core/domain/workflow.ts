@@ -48,6 +48,8 @@ export const WorkflowDefinitionSchema = z
     version: z.int().positive().default(1),
     description: z.string().optional(),
     entry: z.string().min(1),
+    /** The longer workflow a finished run of this one may go on as (`spec` → `sdd`, src/app/handoff.ts). */
+    next: z.string().min(1).optional(),
     steps: z.array(StepDefinitionSchema).min(1),
   })
   .superRefine((workflow, ctx) => {

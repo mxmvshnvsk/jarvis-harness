@@ -311,7 +311,7 @@ export async function runCancel(ctx: CliContext, runRef: string): Promise<void> 
 }
 
 /** What a person can do next with a run in this state: commands, most likely first. */
-export function nextCommands(d: RunDetail): Array<{ cmd: string; why: string }> {
+export function nextCommands(d: RunDetail, goOn?: string): Array<{ cmd: string; why: string }> {
   const r = d.run;
   const id = shortRunId(r.id);
   const out: Array<{ cmd: string; why: string }> = [];
@@ -332,6 +332,7 @@ export function nextCommands(d: RunDetail): Array<{ cmd: string; why: string }> 
   } else if (r.state === "RUNNING" && !d.leaseLive) {
     out.push({ cmd: `jarvis resume ${id}`, why: "continue from the checkpoint" });
   } else if (r.state === "COMPLETED") {
+    if (goOn) out.push({ cmd: `jarvis continue ${id}`, why: `go on as ${goOn}: the implementation` });
     const main = [...d.artifacts].reverse().find((a) => GATED.has(a.type)) ?? d.artifacts.at(-1);
     if (main) out.push({ cmd: `jarvis show ${id} ${main.type}`, why: `read the ${main.type}` });
     if (r.workspace.mode === "worktree") {
@@ -354,7 +355,7 @@ function workedMs(d: RunDetail): number {
 }
 
 /** The end of a foreground run: state, cost, what it produced and what to do next. */
-export function renderSummary(ctx: CliContext, d: RunDetail): void {
+export function renderSummary(ctx: CliContext, d: RunDetail, options: { goOn?: string } = {}): void {
   const { out } = ctx;
   const st = out.style;
   const r = d.run;
@@ -387,7 +388,7 @@ export function renderSummary(ctx: CliContext, d: RunDetail): void {
         `${i === 0 ? f("artifacts") : " ".repeat(13)}${a.type}/${a.name}@${a.version}${step}${gate}${incomplete}`,
       );
     });
-  const next = nextCommands(d);
+  const next = nextCommands(d, options.goOn);
   const w = Math.max(...next.map((n) => n.cmd.length));
   next.forEach((n, i) => {
     out.line(`${i === 0 ? f("next") : " ".repeat(13)}${st.cmd(padEnd(n.cmd, w))}  ${st.muted(n.why)}`);

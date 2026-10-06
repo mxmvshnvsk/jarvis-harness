@@ -110,6 +110,10 @@ Remaining commands of ADR-0001 §15:
   Pilot: the second pass of `spec` got the same inputs as the first, re-researched for 13 minutes, hit its tool
   limit and asked the answered questions again; a resumed step's report counts the tool calls made before the
   interruption
+- an approved spec goes on (`src/app/handoff.ts`, workflow field `next:`): after a finished `spec`/`research` at a
+  terminal Jarvis asks to go on and starts an `sdd` run after the approval with the artifacts and approvals carried
+  over (provenance `import`); the engine enters a CREATED run at its `currentStep` when set; `jarvis continue <run>`
+  does the same without a terminal, once
 
 ADR-0001 §20 stage 12 (git hooks) — `f11ca47`:
 

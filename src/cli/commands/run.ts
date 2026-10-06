@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } f
 import { dirname, join, relative } from "node:path";
 import { awaitedArtifact, recordDecision } from "../../app/decide.ts";
 import { createEngine } from "../../app/engine.ts";
+import { continuationStep, continuedBy, handOff } from "../../app/handoff.ts";
 import { preflightMcp } from "../../app/preflight.ts";
 import { createRuntime, type Runtime } from "../../app/runtime.ts";
 import { runDetail } from "../../app/status.ts";
@@ -81,7 +82,31 @@ async function executeAndReport(
         );
       }
       const detail = runDetail(runtime, result.run);
-      ctx.out.result({ ...extra, ...detail, exitCode: result.exitCode }, () => renderSummary(ctx, detail));
+      const goOn =
+        result.run.state === "COMPLETED" && !continuedBy(runtime, result.run)
+          ? nextWorkflowOf(engine, result.run)
+          : undefined;
+      ctx.out.result({ ...extra, ...detail, exitCode: result.exitCode }, () =>
+        renderSummary(ctx, detail, goOn ? { goOn } : {}),
+      );
+      // an approved spec goes on to the implementation in the same command (pilot: the run just ended)
+      if (prompt && result.run.state === "COMPLETED" && !continuedBy(runtime, result.run)) {
+        const rest = restOf(engine, result.run);
+        if (rest) {
+          const st = ctx.out.style;
+          ctx.out.line();
+          ctx.out.line(`${st.heading("Go on to the implementation?")} ${st.muted(rest)}`);
+          const answer = (await prompt.ask(`${st.cmd("[Y/n] >")} `))?.toLowerCase();
+          if (
+            answer !== undefined &&
+            (answer === "" || answer === "y" || answer === "yes" || answer === "д" || answer === "да")
+          ) {
+            const next = await startContinuation(ctx, runtime, engine, result.run);
+            if (next) await executeAndReport(ctx, runtime, engine, next, false, {}, prompt);
+          } else
+            ctx.out.line(`${st.muted("later:")} ${st.cmd(`jarvis continue ${shortRunId(result.run.id)}`)}`);
+        }
+      }
       throw new CliExit(result.exitCode);
     }
   } catch (error) {
@@ -145,6 +170,14 @@ export async function runContinue(ctx: CliContext, ref: string | undefined): Pro
         .list({ state: ["WAITING_HUMAN", "WAITING_BUDGET", "RUNNING"], limit: 50 })
         .filter((r) => r.workspace.repoRoot === root || r.workspace.path === root)
         .filter((r) => r.state !== "RUNNING" || !r.lease || Date.parse(r.lease.until) < now);
+      // and an approved spec of the last days that has not gone on to the implementation yet
+      const ready = runtime.runs
+        .list({ state: "COMPLETED", limit: 50 })
+        .filter(
+          (r) => nextWorkflowOf(engine, r) && (r.workspace.repoRoot === root || r.workspace.path === root),
+        )
+        .filter((r) => now - Date.parse(r.updatedAt) < 3 * 86_400_000 && !continuedBy(runtime, r));
+      waiting.push(...ready);
       if (waiting.length === 0) {
         ctx.out.line(`nothing waits for you here ${st.muted("(`jarvis status --all` lists every run)")}`);
         return;
@@ -170,6 +203,20 @@ export async function runContinue(ctx: CliContext, ref: string | undefined): Pro
       }
     }
     if (!run) return;
+    if (run.state === "COMPLETED") {
+      // a finished spec: an explicit `continue` is the consent to go on to the implementation
+      const next = await startContinuation(ctx, runtime, engine, run);
+      if (!next) {
+        const by = continuedBy(runtime, run);
+        ctx.out.line(
+          by
+            ? `run ${shortRunId(run.id)} went on as ${st.name(shortRunId(by))} — \`jarvis continue ${shortRunId(by)}\``
+            : `run ${shortRunId(run.id)} is COMPLETED; nothing to go on with`,
+        );
+        return;
+      }
+      run = next;
+    }
     if (run.state === "WAITING_HUMAN") {
       for (const line of formatRunHeader(run, planOf(engine, run), st)) ctx.out.line(line);
       if (!prompt) {
@@ -192,9 +239,124 @@ export async function runContinue(ctx: CliContext, ref: string | undefined): Pro
 
 /** Why a run waits, in a word or two. */
 function waitsFor(r: Run): string {
+  if (r.state === "COMPLETED") return "ready to implement";
   if (r.state === "RUNNING") return "interrupted";
   if (r.state === "WAITING_BUDGET") return "quota";
   return r.waitingFor?.kind ?? "a decision";
+}
+
+/** The run's checkout: a worktree of its own (workspace.mode worktree), or the current one. */
+async function prepareWorkspace(
+  ctx: CliContext,
+  runtime: Runtime,
+  runId: string,
+  task: string,
+  base: string | undefined,
+): Promise<WorkspaceRef> {
+  const loaded = runtime.loaded;
+  const root = loaded.project?.root ?? ctx.cwd;
+  const useWorktree = loaded.config.workspace.mode === "worktree" && loaded.project?.isGitRepo === true;
+  if (!useWorktree) return { mode: "cwd", repoRoot: root, path: root, baseRef: base ?? "HEAD" };
+  if (await WorktreeWorkspace.isDirty(root)) {
+    ctx.out.note(
+      `${ctx.out.errStyle.warn("note:")} the working tree has uncommitted changes; the run starts from the last commit (ADR-0003 §2)`,
+    );
+  }
+  try {
+    const wt = await WorktreeWorkspace.create({
+      repoRoot: root,
+      worktreesDir: loaded.home.worktreesDir,
+      runId,
+      task,
+      ...(base ? { baseRef: base } : {}),
+      ...(loaded.config.workspace.setup ? { setup: loaded.config.workspace.setup } : {}),
+      setupTimeoutMs: loaded.config.tools.commandTimeoutMs,
+      env: ctx.env,
+    });
+    return wt.ref;
+  } catch (error) {
+    if (error instanceof WorktreeError) {
+      ctx.out.error(error.message);
+      throw new CliExit(EXIT.error);
+    }
+    throw error;
+  }
+}
+
+/**
+ * A finished `spec`/`research` run handed on to `sdd`, starting after what it already did
+ * (src/app/handoff.ts). Undefined when the run has nowhere to go on or went on already.
+ */
+async function startContinuation(
+  ctx: CliContext,
+  runtime: Runtime,
+  engine: LocalWorkflowEngine,
+  from: Run,
+): Promise<Run | undefined> {
+  const targetName = nextWorkflowOf(engine, from);
+  if (!targetName) return undefined;
+  const target = engine.workflow(targetName);
+  const startAt = continuationStep(from, target);
+  if (!startAt || continuedBy(runtime, from)) return undefined;
+  const actor = await actorFor(ctx, runtime);
+  const runId = newRunId();
+  const workspace = await prepareWorkspace(ctx, runtime, runId, from.task, undefined);
+  const run = runtime.runs.create({
+    id: runId,
+    task: from.task,
+    workflow: targetName,
+    owner: actor,
+    workspace,
+    dataClass: runtime.loaded.config.dataClass,
+    ...(runtime.loaded.config.profile ? { profile: runtime.loaded.config.profile } : {}),
+  });
+  const carried = handOff(runtime, from, run, startAt);
+  runtime.events.emit({
+    kind: "run.created",
+    runId: run.id,
+    actor: `${actor.kind}:${actor.id}`,
+    payload: {
+      task: from.task,
+      workflow: targetName,
+      continuedFrom: from.id,
+      startAt,
+      carried: carried.length,
+    },
+  });
+  const st = ctx.out.style;
+  ctx.out.line();
+  ctx.out.line(
+    `${st.ok("→")} ${st.name(shortRunId(run.id))} ${targetName} ${st.muted(`from ${startAt}, with ${carried.map((a) => a.name).join(", ")} of run ${shortRunId(from.id)}`)}`,
+  );
+  if (workspace.mode === "worktree")
+    ctx.out.line(
+      st.muted(`  works in its own checkout ${workspace.path}; yours stays as it is until \`jarvis apply\``),
+    );
+  else ctx.out.line(st.warn("  works in your checkout: changes land in your working tree"));
+  return runtime.runs.get(run.id);
+}
+
+/** The workflow a finished run goes on as (`next:` of its definition), if any. */
+function nextWorkflowOf(engine: LocalWorkflowEngine, run: Run): string | undefined {
+  try {
+    return engine.workflow(run.workflow).next;
+  } catch {
+    return undefined;
+  }
+}
+
+/** What the rest of the work is, for the question. */
+function restOf(engine: LocalWorkflowEngine, from: Run): string | undefined {
+  const targetName = nextWorkflowOf(engine, from);
+  if (!targetName) return undefined;
+  const target = engine.workflow(targetName);
+  const startAt = continuationStep(from, target);
+  if (!startAt) return undefined;
+  const ids = target.steps.map((s) => s.id);
+  return ids
+    .slice(ids.indexOf(startAt))
+    .filter((id) => !id.startsWith("approve-"))
+    .join(" → ");
 }
 
 /** `jarvis work <task>` — create a run and execute it in the foreground (ADR-0001 §15). */
@@ -222,41 +384,8 @@ export async function runWork(
       );
       throw new CliExit(EXIT.error);
     }
-    const root = loaded.project?.root ?? ctx.cwd;
     const runId = newRunId();
-    const useWorktree = loaded.config.workspace.mode === "worktree" && loaded.project?.isGitRepo === true;
-    let workspace: WorkspaceRef = {
-      mode: "cwd",
-      repoRoot: root,
-      path: root,
-      baseRef: options.base ?? "HEAD",
-    };
-    if (useWorktree) {
-      if (await WorktreeWorkspace.isDirty(root)) {
-        ctx.out.note(
-          `${ctx.out.errStyle.warn("note:")} the working tree has uncommitted changes; the run starts from the last commit (ADR-0003 §2)`,
-        );
-      }
-      try {
-        const wt = await WorktreeWorkspace.create({
-          repoRoot: root,
-          worktreesDir: loaded.home.worktreesDir,
-          runId,
-          task,
-          ...(options.base ? { baseRef: options.base } : {}),
-          ...(loaded.config.workspace.setup ? { setup: loaded.config.workspace.setup } : {}),
-          setupTimeoutMs: loaded.config.tools.commandTimeoutMs,
-          env: ctx.env,
-        });
-        workspace = wt.ref;
-      } catch (error) {
-        if (error instanceof WorktreeError) {
-          ctx.out.error(error.message);
-          throw new CliExit(EXIT.error);
-        }
-        throw error;
-      }
-    }
+    const workspace = await prepareWorkspace(ctx, runtime, runId, task, options.base);
     const run = runtime.runs.create({
       id: runId,
       task,

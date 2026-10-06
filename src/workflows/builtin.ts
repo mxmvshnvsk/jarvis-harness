@@ -163,6 +163,7 @@ name: research
 version: 1
 description: Research only — what the task touches and what is unknown (jarvis research)
 entry: discover
+next: sdd
 steps:
   - id: discover
     kind: deterministic
@@ -182,6 +183,7 @@ name: spec
 version: 1
 description: Research, requirements analysis and a specification up to its approval (jarvis spec)
 entry: discover
+next: sdd
 steps:
   - id: discover
     kind: deterministic

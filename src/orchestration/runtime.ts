@@ -411,7 +411,12 @@ export class LocalWorkflowEngine {
 
   private enter(run: Run, workflow: WorkflowDefinition): Run {
     if (run.state === "CREATED") {
-      const started = this.rt.runs.update(run.id, { currentStep: workflow.entry, currentIteration: 1 });
+      // a run handed on from a shorter workflow starts where that one stopped (src/app/handoff.ts)
+      const start =
+        run.currentStep && workflow.steps.some((s) => s.id === run.currentStep)
+          ? run.currentStep
+          : workflow.entry;
+      const started = this.rt.runs.update(run.id, { currentStep: start, currentIteration: 1 });
       const running = this.rt.runs.transition(started.id, "RUNNING", { reason: "started" });
       this.emit(running, "run.state", { state: running.state });
       return running;
