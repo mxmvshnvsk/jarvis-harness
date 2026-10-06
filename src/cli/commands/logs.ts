@@ -15,6 +15,11 @@ export interface LogsOptions {
   readonly since?: string;
   readonly path?: boolean;
   readonly full?: boolean;
+  /** Keep printing new records as they are written (Ctrl-C stops). */
+  readonly follow?: boolean;
+  /** For tests: how often to look, and when to stop. */
+  readonly pollMs?: number;
+  readonly until?: () => boolean;
 }
 
 const UNITS: Record<string, number> = { s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000 };
@@ -83,6 +88,34 @@ export async function runLogs(ctx: CliContext, run: string | undefined, options:
     }
     for (const r of records) ctx.out.line(formatRecord(r, options.full === true));
   });
+  if (!options.follow) return;
+  // `logs -f`: what is written from now on, as `tail -f` (one JSON line per record with --json)
+  const seen = new Set(records.map((r) => JSON.stringify(r)));
+  let since = records.at(-1)?.ts ?? new Date().toISOString();
+  let stop = false;
+  const onInterrupt = () => {
+    stop = true;
+  };
+  process.once("SIGINT", onInterrupt);
+  try {
+    while (!stop && !options.until?.()) {
+      await new Promise((resolve) => setTimeout(resolve, options.pollMs ?? 1000));
+      const fresh = readLogs(dir, {
+        level: level as LogLevel,
+        ...(run ? { run } : {}),
+        ...(options.event ? { event: options.event } : {}),
+        sinceMs: Math.max(0, Date.now() - Date.parse(since)) + 1000,
+      }).filter((r) => r.ts >= since && !seen.has(JSON.stringify(r)));
+      for (const r of fresh) {
+        seen.add(JSON.stringify(r));
+        if (r.ts > since) since = r.ts;
+        if (ctx.out.json) ctx.out.raw(JSON.stringify(r));
+        else ctx.out.line(formatRecord(r, options.full === true));
+      }
+    }
+  } finally {
+    process.removeListener("SIGINT", onInterrupt);
+  }
 }
 
 /** Size and age of the log directory for `jarvis doctor`. */

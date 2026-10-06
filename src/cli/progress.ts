@@ -40,6 +40,8 @@ export interface FollowOptions {
   readonly signals?: boolean;
   /** `plain` mode: a heartbeat line after this long without output (30 s). */
   readonly heartbeatMs?: number;
+  /** Replay the run's events from this sequence (`jarvis attach`: its course so far), not from now. */
+  readonly fromSeq?: number;
 }
 
 const FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -177,7 +179,7 @@ export function formatParked(run: Run, st: Style, plan: readonly string[] = []):
 
 export function followRun(ctx: CliContext, runtime: Runtime, options: FollowOptions = {}): Progress {
   const st = ctx.out.errStyle;
-  let seq = runtime.events.lastSeq();
+  let seq = options.fromSeq ?? runtime.events.lastSeq();
   let runId = options.runId;
   const plan = options.plan ?? [];
   const width = Math.max(0, ...plan.map((s) => s.length));
@@ -207,7 +209,12 @@ export function followRun(ctx: CliContext, runtime: Runtime, options: FollowOpti
       : [];
 
   const poll = () => {
-    for (const e of runtime.events.list({ afterSeq: seq, limit: 2000 })) {
+    // a known run from its start: only its events (the journal holds every run's)
+    const batch =
+      options.fromSeq !== undefined && runId
+        ? runtime.events.list({ runId, afterSeq: seq, limit: 2000 })
+        : runtime.events.list({ afterSeq: seq, limit: 2000 });
+    for (const e of batch) {
       seq = e.seq;
       // a new run announces itself; a resumed one is known up front
       if (!runId && e.kind === "run.created" && e.runId) runId = e.runId;

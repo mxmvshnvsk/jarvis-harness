@@ -38,6 +38,7 @@ import {
   runContinue,
   runDaemon,
   runDiff,
+  runFollow,
   runGc,
   runResume,
   runShow,
@@ -208,10 +209,19 @@ export function buildProgram(options: RunOptions = {}): Command {
     .option("--since <age>", "only records newer than 30m, 2h, 1d …")
     .option("--full", "do not shorten long values", false)
     .option("--path", "print the log directory", false)
+    .option("-f, --follow", "keep printing new records (Ctrl-C stops)", false)
     .action(
       async (
         run: string | undefined,
-        opts: { level: string; event?: string; tail: number; since?: string; full: boolean; path: boolean },
+        opts: {
+          level: string;
+          event?: string;
+          tail: number;
+          since?: string;
+          full: boolean;
+          path: boolean;
+          follow: boolean;
+        },
       ) => {
         await runLogs(ctxFor(), run, opts);
       },
@@ -301,6 +311,12 @@ export function buildProgram(options: RunOptions = {}): Command {
     .description("back to the run that waits for you (no id needed): decide right here and go on")
     .action(async (run: string | undefined) => {
       await runContinue(ctxFor(), run);
+    });
+  program
+    .command("follow [run]")
+    .description("follow a run that goes on elsewhere (another terminal, the daemon); Ctrl-C only detaches")
+    .action(async (run: string | undefined) => {
+      await runFollow(ctxFor(), run);
     });
   program
     .command("resume <run>")

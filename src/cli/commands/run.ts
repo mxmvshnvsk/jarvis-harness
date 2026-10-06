@@ -16,7 +16,7 @@ import { removeMarkers } from "../../interaction/review/collector.ts";
 import { daemonTick } from "../../orchestration/daemon.ts";
 import { interruption } from "../../orchestration/interrupt.ts";
 import { leaseOwner } from "../../orchestration/lease.ts";
-import type { LocalWorkflowEngine } from "../../orchestration/runtime.ts";
+import { exitCodeFor, type LocalWorkflowEngine } from "../../orchestration/runtime.ts";
 import { LeaseHeldError } from "../../orchestration/types.ts";
 import { gitIdentityEnv, WorktreeError, WorktreeWorkspace } from "../../orchestration/worktree.ts";
 import { LeaseLostError, newRunId, shortRunId } from "../../storage/runStore.ts";
@@ -822,6 +822,71 @@ function redactionsOf(
     byType: a.byType,
     samples: [...a.samples.values()],
   }));
+}
+
+/**
+ * `jarvis follow [run]`: follow a run that goes on in another terminal or the daemon — its course
+ * so far, then live, until it stops for a person, finishes or fails; Ctrl-C only detaches, the run
+ * goes on. Without an id: the run of this repository that runs now.
+ */
+export async function runFollow(
+  ctx: CliContext,
+  ref: string | undefined,
+  options: { pollMs?: number } = {},
+): Promise<void> {
+  const loaded = await loadForCli(ctx);
+  const runtime = createRuntime(loaded, { env: ctx.env });
+  try {
+    const engine = createEngine(runtime);
+    const root = loaded.project?.root ?? ctx.cwd;
+    const alive = (r: Run) => r.lease !== undefined && Date.parse(r.lease.until) >= Date.now();
+    let run: Run | undefined = ref
+      ? requireRun(ctx, runtime, ref)
+      : runtime.runs
+          .list({ state: "RUNNING", limit: 50 })
+          .find((r) => (r.workspace.repoRoot === root || r.workspace.path === root) && alive(r));
+    if (!run) {
+      ctx.out.line(`nothing runs here now ${ctx.out.style.muted("(`jarvis status` lists the runs)")}`);
+      return;
+    }
+    const progress = followRun(ctx, runtime, {
+      runId: run.id,
+      plan: planOf(engine, run),
+      header: true,
+      signals: false,
+      fromSeq: 0,
+    });
+    let detached = false;
+    const onInterrupt = () => {
+      detached = true;
+    };
+    process.once("SIGINT", onInterrupt);
+    try {
+      for (;;) {
+        const now = runtime.runs.require(run.id);
+        if (now.state !== "RUNNING" || !alive(now)) {
+          run = now;
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, options.pollMs ?? 1000));
+        if (detached) break;
+      }
+    } finally {
+      progress.stop();
+      process.removeListener("SIGINT", onInterrupt);
+    }
+    if (detached) {
+      ctx.out.note(`detached; the run goes on — \`jarvis follow ${shortRunId(run.id)}\` to come back`);
+      return;
+    }
+    const detail = runDetail(runtime, run);
+    ctx.out.result(detail, () =>
+      renderSummary(ctx, detail, { link: (a, label) => artifactLink(ctx.out.style, runtime, a, label) }),
+    );
+    throw new CliExit(exitCodeFor(run.state, run.stateReason));
+  } finally {
+    await runtime.close();
+  }
 }
 
 export async function runShow(

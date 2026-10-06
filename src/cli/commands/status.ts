@@ -102,7 +102,19 @@ function renderOverview(
           `${padEnd("run", 8)}  ${padEnd("task", w)}  ${padEnd("state", 15)}  ${padEnd("step", 22)}  ${padEnd("updated", 9)}  lease`,
         ),
       );
-      for (const r of overview.runs) {
+      // what needs a person first, then what stopped, then what runs; the newest first within each
+      const rank = (r: (typeof overview.runs)[number]) => {
+        if (r.state === "WAITING_HUMAN") return 0;
+        const live = r.lease && Date.parse(r.lease.until) >= now.getTime();
+        if ((r.state === "RUNNING" && !live) || r.state === "SUSPENDED" || r.state === "FAILED") return 1;
+        if (r.state === "WAITING_BUDGET") return 2;
+        if (r.state === "RUNNING") return 3;
+        return 4;
+      };
+      const ordered = [...overview.runs].sort(
+        (a, b) => rank(a) - rank(b) || b.updatedAt.localeCompare(a.updatedAt),
+      );
+      for (const r of ordered) {
         const step = r.currentStep ? `${r.currentStep}#${r.currentIteration}` : "-";
         const live = r.lease && Date.parse(r.lease.until) >= now.getTime();
         // RUNNING without a live lease: the process that ran it is gone (Ctrl-C, crash, closed terminal)
