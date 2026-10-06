@@ -25,7 +25,32 @@ export interface RedactionReport {
   readonly text: string;
   readonly count: number;
   readonly byType: Record<string, number>;
+  /**
+   * What the high-entropy guess masked, without the value: its first characters, length and kinds of
+   * characters, and the text just before it. A false positive (a long code name, a path) is told from
+   * a secret by this; known secrets and pattern matches (tokens, keys) are never described.
+   * Pilot: masked selector names were found only by reading the technical log.
+   */
+  readonly samples?: ReadonlyArray<RedactionSample>;
 }
+
+export interface RedactionSample {
+  readonly placeholder: string;
+  readonly shape: string;
+  readonly before: string;
+}
+
+/** `isN… 34 chars, letters` — enough to recognise a code name, too little to rebuild a secret. */
+export function shapeOf(value: string): string {
+  const kinds = [
+    /[a-z]/.test(value) && /[A-Z]/.test(value) ? "mixed case" : /[a-zA-Z]/.test(value) ? "letters" : "",
+    /\d/.test(value) ? "digits" : "",
+    /[^a-zA-Z\d]/.test(value) ? "symbols" : "",
+  ].filter(Boolean);
+  return `${value.slice(0, 3)}… ${value.length} chars, ${kinds.join(" + ")}`;
+}
+
+const MAX_SAMPLES = 5;
 
 /** ADR-0010 §2 (3): well-known shapes. Order matters — specific prefixes before generic ones. */
 export const DEFAULT_PATTERNS: readonly RedactionPattern[] = [
@@ -153,6 +178,7 @@ export class Redactor {
     let out = text;
     let count = 0;
     const byType: Record<string, number> = {};
+    const samples: RedactionSample[] = [];
     const bump = (type: string) => {
       count += 1;
       byType[type] = (byType[type] ?? 0) + 1;
@@ -194,11 +220,23 @@ export class Redactor {
         if (!/[:=]\s*["']?$|(?:key|token|secret|password)\s*["']?$/i.test(before)) return match;
         if (shannonEntropy(match) < 4.0) return match;
         bump("high-entropy");
-        return this.placeholder("high-entropy", match);
+        const placeholder = this.placeholder("high-entropy", match);
+        if (samples.length < MAX_SAMPLES)
+          samples.push({
+            placeholder,
+            shape: shapeOf(match),
+            // long runs before it may be secrets not replaced yet: never quoted
+            before: whole
+              .slice(Math.max(0, offset - 30), offset)
+              .replace(/[A-Za-z0-9+/=_-]{12,}/g, "…")
+              .replace(/\s+/g, " ")
+              .trimStart(),
+          });
+        return placeholder;
       }),
     );
 
-    return { text: out, count, byType };
+    return { text: out, count, byType, ...(samples.length > 0 ? { samples } : {}) };
   }
 
   /** Redacts every string inside a JSON-like value, keeping its shape. */

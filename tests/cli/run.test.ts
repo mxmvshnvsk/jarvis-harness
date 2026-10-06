@@ -86,6 +86,33 @@ describe("jarvis work / resume / approve / daemon", () => {
     expect(shown.out).toContain("# spec");
     expect(shown.out).toContain(`jarvis approve ${id} --resume`);
     expect((await jarvis(["show", id, "nope"])).err).toContain(`run ${id} has no artifact "nope"`);
+
+    // what the redactor masked in tool output: counts per step and the shape of high-entropy guesses
+    const loaded = await loadConfig({ cwd: sb.project, homeDir: sb.home, env: {} });
+    const rt = createRuntime(loaded, { env: {} });
+    const runId = rt.runs.list({ includeTerminal: true })[0]?.id as string;
+    rt.events.emit({
+      kind: "security.redaction",
+      runId,
+      stepId: "write",
+      payload: {
+        boundary: "tool",
+        count: 2,
+        byType: { "high-entropy": 1, bearer: 1 },
+        samples: [
+          {
+            placeholder: "[REDACTED:high-entropy:0a1b2c3d]",
+            shape: "isC… 34 chars, mixed case",
+            before: "const x = ",
+          },
+        ],
+      },
+    });
+    rt.close();
+    const masked = await jarvis(["show", id]);
+    expect(masked.out).toContain("masked in what agents read");
+    expect(masked.out).toContain("write  2 (high-entropy ×1, bearer ×1)");
+    expect(masked.out).toContain("const x = [REDACTED:high-entropy:0a1b2c3d]  isC… 34 chars, mixed case");
   });
 
   it("parks at the human gate (exit 10), approves, resumes to completion; daemon picks up approved runs", async () => {

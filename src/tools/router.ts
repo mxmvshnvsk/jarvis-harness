@@ -280,6 +280,7 @@ export class BoundTools {
           capability: capability.name,
           count: redactedText.count,
           byType: redactedText.byType,
+          ...(redactedText.samples ? { samples: redactedText.samples } : {}),
         },
       });
     }

@@ -107,6 +107,19 @@ describe("Redactor", () => {
     expect(r.count).toBe(0);
   });
 
+  it("describes what the high-entropy guess masked without the value, never a known secret", () => {
+    const r = redactor.redact("prev: Q9wErT5yUiO1pAsDfG0hJkLz and key: Ab3kX9fK2mP8qL4vN7bR1tY6wE3zA5cH0jD");
+    expect(r.samples?.at(-1)).toEqual({
+      placeholder: expect.stringMatching(/^\[REDACTED:high-entropy:[0-9a-f]{8}\]$/),
+      shape: "Ab3… 35 chars, mixed case + digits",
+      // the 30 characters before it, with a long run (a secret not replaced yet) never quoted
+      before: "… and key: ",
+    });
+    expect(JSON.stringify(r.samples)).not.toContain("Ab3kX9fK2mP8qL4vN7bR1tY6wE3zA5cH0jD");
+    expect(JSON.stringify(r.samples)).not.toContain("Q9wErT5yUiO1pAsDfG0hJkLz");
+    expect(redactor.redact("token corp-llm-token-9f8e7d6c5b4a").samples).toBeUndefined();
+  });
+
   it("keeps long names from code, still masks secret-looking values (pilot)", () => {
     const code = [
       "15:    isCompactModeEnabledForCustomerSelector,",

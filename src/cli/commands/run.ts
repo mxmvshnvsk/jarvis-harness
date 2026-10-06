@@ -778,6 +778,49 @@ export async function runGc(
  * (by type, name or any unique part of `type/name`) printed for reading. Pilot: `jarvis spec`
  * stopped at "awaiting approval" and there was no command to read the spec it asked to approve.
  */
+/** What the redactor masked in tool output, per step, with the shapes of the high-entropy guesses. */
+function redactionsOf(
+  runtime: Runtime,
+  runId: string,
+): Array<{
+  stepId: string;
+  count: number;
+  byType: Record<string, number>;
+  samples: Array<{ placeholder: string; shape: string; before: string }>;
+}> {
+  const by = new Map<
+    string,
+    {
+      count: number;
+      byType: Record<string, number>;
+      samples: Map<string, { placeholder: string; shape: string; before: string }>;
+    }
+  >();
+  for (const e of runtime.events.list({ runId, kind: "security.redaction" })) {
+    const p = (e.payload ?? {}) as {
+      count?: number;
+      byType?: Record<string, number>;
+      samples?: Array<{ placeholder: string; shape: string; before: string }>;
+    };
+    const step = e.stepId ?? "-";
+    const acc = by.get(step) ?? {
+      count: 0,
+      byType: {} as Record<string, number>,
+      samples: new Map<string, { placeholder: string; shape: string; before: string }>(),
+    };
+    acc.count += p.count ?? 0;
+    for (const [k, n] of Object.entries(p.byType ?? {})) acc.byType[k] = (acc.byType[k] ?? 0) + n;
+    for (const s of p.samples ?? []) if (acc.samples.size < 5) acc.samples.set(s.placeholder, s);
+    by.set(step, acc);
+  }
+  return [...by.entries()].map(([stepId, a]) => ({
+    stepId,
+    count: a.count,
+    byType: a.byType,
+    samples: [...a.samples.values()],
+  }));
+}
+
 export async function runShow(
   ctx: CliContext,
   ref: string,
@@ -803,8 +846,13 @@ export async function runShow(
           ? "approved"
           : "";
     if (!artifactRef) {
+      const masked = redactionsOf(runtime, run.id);
       ctx.out.result(
-        { run: run.id, artifacts: all.map((a) => ({ ...a, state: stateOf(a) || undefined })) },
+        {
+          run: run.id,
+          artifacts: all.map((a) => ({ ...a, state: stateOf(a) || undefined })),
+          ...(masked.length > 0 ? { redactions: masked } : {}),
+        },
         () => {
           ctx.out.line(`${st.heading("run")} ${st.name(id)}  ${run.task} ${st.muted(`· ${run.workflow}`)}`);
           if (all.length === 0) {
@@ -818,6 +866,22 @@ export async function runShow(
             ctx.out.line(
               `  ${padStyled(`${a.type}/${a.name}@${a.version}`, w)}  ${st.muted(padStyled(a.stepId ? `${a.stepId}${a.iteration && a.iteration > 1 ? `#${a.iteration}` : ""}` : "-", 16))} ${state === "approved" ? st.ok(state) : st.warn(state)}${partial ? ` ${st.warn(`⚠ incomplete (${partial.limit} limit)`)}` : ""}`.trimEnd(),
             );
+          }
+          if (masked.length > 0) {
+            ctx.out.line();
+            ctx.out.line(
+              `${st.heading("masked in what agents read")} ${st.muted("(a code name here is a false positive)")}`,
+            );
+            for (const m of masked) {
+              const kinds = Object.entries(m.byType)
+                .map(([k, n]) => `${k} ×${n}`)
+                .join(", ");
+              ctx.out.line(`  ${st.name(m.stepId)}  ${m.count} ${st.muted(`(${kinds})`)}`);
+              for (const s of m.samples)
+                ctx.out.line(
+                  `    ${st.muted(s.before ? `${s.before}` : "")}${st.warn(s.placeholder)}  ${st.muted(s.shape)}`,
+                );
+            }
           }
           ctx.out.line();
           ctx.out.line(`${st.muted("read")}  ${st.cmd(`jarvis show ${id} <type or name>`)}`);
