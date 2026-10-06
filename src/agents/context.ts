@@ -1,3 +1,5 @@
+import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { z } from "zod";
 import type { KnowledgeConfig } from "../core/config/schema.ts";
 import type { ArtifactVersion } from "../core/domain/artifact.ts";
@@ -119,6 +121,9 @@ export function buildBaseMessages(input: BuildInput): Message[] {
         `- ${i.artifact.type}/${i.artifact.name}@${i.artifact.version}${incompleteNote(i.artifact) ? " (incomplete: its agent ran out of budget)" : ""}`,
     );
   if (named.length > 0) l3.push(`## Other inputs (available on request)\n${named.join("\n")}`);
+  // bounded: every model call of the step re-sends it (no prefix cache on the pilot gateway)
+  const read = codeReadInRun(ctx, Math.min(Math.floor(inputBudget * 0.25), 40_000));
+  if (read) l3.push(read);
   // the version the human sent back comes first: the agent revises it rather than starting over
   if (review) l3.unshift(review.previous(perInput > 0 ? perInput : inputBudget));
 
@@ -175,6 +180,67 @@ export function humanReviewOf(
     previous: (chars) =>
       `## Your previous version ${ref} (sent back)\n${clip(ctx.runtime.artifacts.text(previous), chars)}`,
   };
+}
+
+/**
+ * The files earlier steps of this run (and of the run it went on from) read, in their current
+ * content, most read first: the next agent starts with them instead of reading them again. Pilot:
+ * research, requirements, spec and impact each re-read `order-form.tsx`, a model round trip
+ * (up to five minutes on the pilot gateway) every time.
+ */
+export function codeReadInRun(ctx: StepContext, chars: number): string | undefined {
+  const runs = [ctx.run.id];
+  const created = ctx.runtime.events.list({ runId: ctx.run.id, kind: "run.created", limit: 1 })[0];
+  const from = (created?.payload as { continuedFrom?: string } | undefined)?.continuedFrom;
+  if (from) runs.push(from);
+  const count = new Map<string, { n: number; last: number; steps: Set<string> }>();
+  for (const runId of runs) {
+    for (const e of ctx.runtime.events.list({ runId, kind: "tool.call", limit: 100_000 })) {
+      const p = (e.payload ?? {}) as { capability?: string; ok?: boolean; args?: string };
+      if (p.capability !== "repo.read" || p.ok === false || typeof p.args !== "string") continue;
+      let path: unknown;
+      try {
+        path = (JSON.parse(p.args) as { path?: unknown }).path;
+      } catch {
+        continue;
+      }
+      if (typeof path !== "string" || path.length === 0) continue;
+      const entry = count.get(path) ?? { n: 0, last: 0, steps: new Set<string>() };
+      entry.n += 1;
+      entry.last = Math.max(entry.last, e.seq);
+      if (e.stepId) entry.steps.add(e.stepId);
+      count.set(path, entry);
+    }
+  }
+  if (count.size === 0 || chars <= 0) return undefined;
+  const root = ctx.workspace.ref.path;
+  const ordered = [...count.entries()].sort((a, b) => b[1].n - a[1].n || b[1].last - a[1].last);
+  const sections: string[] = [];
+  let left = chars;
+  for (const [path, info] of ordered.slice(0, 8)) {
+    if (left < 2_000) break;
+    if (ctx.runtime.pathPolicy.isDenied(path)) continue;
+    const full = resolve(root, path);
+    if (!full.startsWith(`${resolve(root)}/`) || !existsSync(full)) continue;
+    const buffer = readFileSync(full);
+    if (buffer.includes(0)) continue;
+    const text = ctx.runtime.redactor.redact(buffer.toString("utf8")).text;
+    const numbered = text
+      .split("\n")
+      .map((l, i) => `${String(i + 1).padStart(5)}  ${l}`)
+      .join("\n");
+    const body = clip(numbered, Math.min(left, 16_000));
+    left -= body.length;
+    sections.push(
+      `### ${path} (read ${info.n} time${info.n === 1 ? "" : "s"} by ${[...info.steps].join(", ") || "earlier steps"})\n${body}`,
+    );
+  }
+  if (sections.length === 0) return undefined;
+  return [
+    "## Code already read in this run (current content)",
+    "These files are shown as they are now in the workspace. Do not read them again with repo.read: read other files, the part of a file cut off here (startLine), or a file here after you changed it.",
+    ...sections,
+  ].join("\n\n");
 }
 
 /** Resolved clarification threads of the run (ADR-0019 §4): rules agents must follow. */

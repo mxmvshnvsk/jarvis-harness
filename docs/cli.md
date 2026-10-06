@@ -165,6 +165,17 @@ Preflight (все MCP-серверы, до которых могут дотян�
 завершения или остановки. Коды выхода — [overview.md](overview.md#коды-выхода). Workflow по умолчанию
 `sdd`; `smoke` проверяет сам движок.
 
+### `jarvis fix <task> [--base <ref>]`
+
+Короткий путь для бага (встроенный workflow `fix`): `discover → research → spec → approve-spec →
+implementation → verify (standards, checks) → review → approve-impl`. Без анализа требований, impact, плана,
+документации, телеметрии и release notes — для однострочного исправления `sdd` запускал одиннадцать агентов,
+которые перечитывали одни и те же файлы. Implementation без плана реализует требования spec и пишет тесты,
+которых требуют её критерии приёмки. `verify` — без модели: стандарты и проверки проекта (`project.checks`):
+команды `tools.local` с именами `test*`/`typecheck*`, в пакете которых (`cd <dir> && …`) есть изменённый код;
+jest — только связанные тесты (`--findRelatedTests`). Упавшая проверка — возврат в implementation с командой и
+хвостом вывода. Для фич — `jarvis work` (`sdd`).
+
 ### `jarvis research <task> [--base <ref>]` / `jarvis spec <task> [--base <ref>]`
 
 Частичные прогоны: `research` выполняет только `discover → research`; `spec` — исследование, анализ

@@ -583,6 +583,59 @@ context: { maxContext: 8000 }
     expect(rt.artifacts.listLatest(run.id, "spec")[0]?.version).toBe(2);
   });
 
+  it("gives the next agent the code earlier steps read, as it is now (pilot: the same file re-read by four agents)", async () => {
+    sb.write("project/.jarvis/project.yaml", "version: 1\nworkspace: { mode: cwd }\n");
+    rt = await testRuntime(sb, { PATH: process.env.PATH ?? "" });
+    const wf = workflowOf({
+      name: "rr2",
+      entry: "research",
+      steps: [
+        {
+          id: "research",
+          kind: "agentic",
+          agent: "research",
+          outputs: ["research"],
+          transitions: { onSuccess: "requirements" },
+        },
+        {
+          id: "requirements",
+          kind: "agentic",
+          agent: "requirements",
+          inputs: ["research"],
+          outputs: ["requirements"],
+          transitions: { onSuccess: "DONE" },
+        },
+      ],
+    });
+    const engine = engineWith(rt, wf);
+    let readOnce = false;
+    server.respond((req) => {
+      const system = (req.body.messages as Array<{ content: string }>)[0]?.content ?? "";
+      if (system.includes("# Agent: research")) {
+        if (!readOnce) {
+          readOnce = true;
+          return toolCallCompletion("repo.read", { path: "src/onboarding.ts" });
+        }
+        return completion(JSON.stringify(RESEARCH_DOC));
+      }
+      return completion("not a document");
+    });
+    const run = createRun(rt, "rr2");
+    await engine.execute(run.id, { owner: "cli:t" });
+    const research = server.requests.find((r) =>
+      ((r.body.messages as Array<{ content: string }>)[0]?.content ?? "").includes("# Agent: research"),
+    );
+    expect(JSON.stringify(research?.body.messages)).not.toContain("Code already read in this run");
+    const next = server.requests.find((r) =>
+      ((r.body.messages as Array<{ content: string }>)[0]?.content ?? "").includes("# Agent: requirements"),
+    );
+    const messages = (next?.body.messages ?? []) as Array<{ content: string }>;
+    const text = messages[1]?.content ?? "";
+    expect(text).toContain("## Code already read in this run (current content)");
+    expect(text).toContain("### src/onboarding.ts (read 1 time by research)");
+    expect(text).toContain("    1  export function canRestartOnboarding() {");
+  });
+
   it("stores invalid structured output as an artifact and fails the step", async () => {
     sb.write("project/.jarvis/project.yaml", "version: 1\nworkspace: { mode: cwd }\n");
     rt = await testRuntime(sb, { PATH: process.env.PATH ?? "" });

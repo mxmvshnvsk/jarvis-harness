@@ -114,6 +114,12 @@ Remaining commands of ADR-0001 §15:
   terminal Jarvis asks to go on and starts an `sdd` run after the approval with the artifacts and approvals carried
   over (provenance `import`); the engine enters a CREATED run at its `currentStep` when set; `jarvis continue <run>`
   does the same without a terminal, once
+- less redundancy (pilot: `sdd` ran eleven agent steps for a one-line fix): `jarvis fix` (workflow `fix` — research,
+  spec, approval, implementation with its tests, verify without a model, review, approval); `project.checks` runs
+  the project's test*/typecheck* commands for the packages the change touches (jest: related tests only) in `fix`
+  and `sdd`; a step's `when: { affects: … }` skips it when the impact analysis names nothing of that kind (`sdd`
+  docs, telemetry); agents get the code earlier steps of the run (and of the run it went on from) read, in its
+  current content, instead of reading it again; the course of a run tracks parallel children by step id
 
 ADR-0001 §20 stage 12 (git hooks) — `f11ca47`:
 

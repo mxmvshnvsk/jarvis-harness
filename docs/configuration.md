@@ -249,7 +249,8 @@ incomplete»), в итоге прогона и в `jarvis show` («⚠ incomplet
 
 ```sh
 JARVIS_MODELS__DEEPSEEK_FLASH__BASEURL=http://localhost:8000/v1
-JARVIS_WORKSPACE__MODE=cwd
+JARVIS_WORKSPACE__MODE=cwd                 # в режиме cwd запись выключена: для реализации ещё
+JARVIS_WORKSPACE__ALLOW_WRITES=true        # и это — агент правит вашу рабочую копию
 JARVIS_HUMAN__GATES__SPEC__REQUIRED=false
 JARVIS_KNOWLEDGE__RETRIEVAL__RANKABOVE=2
 ```
