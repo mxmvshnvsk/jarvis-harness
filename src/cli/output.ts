@@ -43,6 +43,13 @@ export interface Output {
   /** One event as a JSON line on stderr (`progressMode` json). */
   event(value: unknown): void;
   /**
+   * Accessible mode (JARVIS_ACCESSIBLE=1): nothing redrawn, lines start with a word instead of a
+   * glyph (`done:`, `failed:`, `waiting:`), menus are numbered, a gate rings the bell.
+   */
+  readonly accessible: boolean;
+  /** The terminal bell, on stderr when it is a terminal (also when nothing is redrawn). */
+  bell(): void;
+  /**
    * Redraws the live region on stderr — one line, or a few (`string[]`); `undefined` clears it. Other
    * output clears it first. Each line is cut to the terminal's width (read on every draw, so a
    * resize is followed); the redraw is one synchronized update, so it does not flicker.
@@ -53,6 +60,19 @@ export interface Output {
 }
 
 export type ProgressMode = "live" | "plain" | "json";
+
+/** What a leading glyph says, for a screen reader (accessible mode). */
+const WORDS: Record<string, string> = {
+  "✓": "done",
+  "✗": "failed",
+  "⚠": "warning",
+  "⏸": "waiting",
+  "↻": "loop",
+  "▶": "run",
+  "◌": "preparing",
+  "–": "skipped",
+  "…": "still running",
+};
 
 /** `--progress auto|tty|plain|json` (or JARVIS_PROGRESS; `off` is the old spelling of `plain`). */
 export function progressModeOf(setting: string | undefined, json: boolean, tty: boolean): ProgressMode {
@@ -72,8 +92,10 @@ export function createOutput(
     progressSetting?: string;
     color?: boolean;
     env?: NodeJS.ProcessEnv;
+    accessible?: boolean;
   } = {},
 ): Output {
+  const accessible = options.accessible === true;
   const err = streams.err as NodeJS.WritableStream & { isTTY?: boolean; columns?: number };
   const env = options.env ?? {};
   const linksHere = supportsHyperlinks(terminalOf(env), env);
@@ -91,9 +113,16 @@ export function createOutput(
   const style = colors(streams.out as { isTTY?: boolean });
   const errStyle = colors(err);
   const glyph = (text: string) =>
-    text.replace(/^(⚠|⏸|✗)/, (g) => (g === "✗" ? errStyle.bad(g) : errStyle.warn(g)));
+    accessible
+      ? text.replace(
+          /^(\s*)(✓|✗|⚠|⏸|↻|▶|◌|–|…)\s?/u,
+          (_m, indent: string, g: string) => `${indent}${WORDS[g] ?? g}: `,
+        )
+      : text.replace(/^(⚠|⏸|✗)/, (g) => (g === "✗" ? errStyle.bad(g) : errStyle.warn(g)));
   const progressMode =
-    options.progress === false ? "plain" : progressModeOf(options.progressSetting, json, err.isTTY === true);
+    options.progress === false || (accessible && options.progressSetting !== "json")
+      ? "plain"
+      : progressModeOf(options.progressSetting, json, err.isTTY === true);
   const live = progressMode === "live";
   let shown = 0;
   /** Erases the live region: the current line, then each line above it that belongs to it. */
@@ -106,6 +135,7 @@ export function createOutput(
   return {
     json,
     live,
+    accessible,
     progressMode,
     event(value) {
       if (progressMode === "json") streams.err.write(`${JSON.stringify(value)}\n`);
@@ -114,7 +144,7 @@ export function createOutput(
     errStyle,
     line(text = "") {
       clear();
-      streams.out.write(`${style.inline(text)}\n`);
+      streams.out.write(`${accessible ? glyph(style.inline(text)) : style.inline(text)}\n`);
     },
     raw(text) {
       clear();
@@ -151,6 +181,9 @@ export function createOutput(
       // DEC 2026 synchronized output: terminals that know it paint the frame at once; others ignore it
       streams.err.write(`\u001b[?2026h${erase()}${body}\u001b[?2026l`);
       shown = lines.length;
+    },
+    bell() {
+      if (!json && err.isTTY === true) streams.err.write("\u0007");
     },
     terminal(sequence) {
       if (live) streams.err.write(sequence);

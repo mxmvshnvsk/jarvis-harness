@@ -94,6 +94,7 @@ export function buildProgram(options: RunOptions = {}): Command {
     const setting = opts.progress ?? env.JARVIS_PROGRESS;
     const out = createOutput(opts.json, streams, {
       ...(setting ? { progressSetting: setting } : {}),
+      accessible: /^(1|on|true|yes)$/i.test(env.JARVIS_ACCESSIBLE ?? ""),
       env,
       ...(opts.color !== undefined ? { color: opts.color } : {}),
     });

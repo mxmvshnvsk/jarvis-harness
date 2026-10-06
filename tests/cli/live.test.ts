@@ -100,3 +100,29 @@ describe("the anatomy of an error", () => {
     );
   });
 });
+
+describe("accessible mode", () => {
+  it("draws nothing over, and starts lines with a word instead of a glyph", () => {
+    let err = "";
+    const sink = Object.assign(
+      new Writable({
+        write(c, _e, cb) {
+          err += String(c);
+          cb();
+        },
+      }),
+      { isTTY: true },
+    );
+    const out = createOutput(false, { out: sink, err: sink }, { accessible: true, color: false });
+    expect(out.progressMode).toBe("plain");
+    expect(out.live).toBe(false);
+    out.progress("⠋ 0:01");
+    out.note("✓ [1/3] research  2m 10s");
+    out.note("⏸ [2/3] approve  waiting for approval");
+    out.note("  ◌ own checkout /tmp/x");
+    out.bell();
+    expect(err).toBe(
+      "done: [1/3] research  2m 10s\nwaiting: [2/3] approve  waiting for approval\n  preparing: own checkout /tmp/x\n\u0007",
+    );
+  });
+});

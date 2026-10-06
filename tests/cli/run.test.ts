@@ -336,6 +336,16 @@ steps:
     expect(none.out).toContain("nothing waits for you here");
   });
 
+  it("accessible mode: a numbered menu, answered with numbers", async () => {
+    const r = await jarvis(["work", "ABC-10", "--workflow", "gated"], { ...ON, JARVIS_ACCESSIBLE: "1" }, [
+      "2",
+    ]);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("  1. read it whole\n  2. accept\n  3. send back\n");
+    expect(r.out).toContain("done: accepted spec/spec.md@1");
+    expect(r.err).toContain("done: [1/2] write");
+  });
+
   it("without a person at the terminal nothing is asked", async () => {
     const r = await jarvis(["work", "ABC-7", "--workflow", "gated"], { JARVIS_INTERACTIVE: "off" }, ["a"]);
     expect(r.code).toBe(10);

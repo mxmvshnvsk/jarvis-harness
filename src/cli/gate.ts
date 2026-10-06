@@ -127,8 +127,18 @@ const KEYS: ReadonlyArray<[string, string, string]> = [
   ["?", "help", "what each key does"],
 ];
 
+/** Accessible mode: numbers instead of keys, one per line. */
+const NUMBERED: Record<string, string> = { "1": "", "2": "a", "3": "c", "4": "e", "5": "q", "6": "?" };
+
 function menu(ctx: CliContext): void {
   const st = ctx.out.style;
+  if (ctx.out.accessible) {
+    ctx.out.line();
+    KEYS.forEach(([, what], i) => {
+      ctx.out.line(`  ${i + 1}. ${what}`);
+    });
+    return;
+  }
   const item = (key: string, what: string) => `${st.cmd(key)} ${st.muted(what)}`;
   ctx.out.line();
   ctx.out.line(
@@ -288,7 +298,10 @@ export async function humanGate(
   const label = `${type}/${artifact.name}@${artifact.version}`;
   for (;;) {
     menu(ctx);
-    const input = await prompt.ask(`${st.cmd(">")} `);
+    if (ctx.out.accessible) ctx.out.bell(); // a decision is waiting
+    const answer = await prompt.ask(`${st.cmd(">")} `);
+    const input =
+      ctx.out.accessible && answer !== undefined && answer in NUMBERED ? NUMBERED[answer] : answer;
     if (input === undefined || input === "q") return "detached";
     if (input === "") {
       const whole = renderMarkdown((doc ? documentToMarkdown(doc) : text).trimEnd(), st);
