@@ -24,6 +24,8 @@ export interface StepReport {
   readonly outputTokens: number;
   readonly retries: number;
   readonly toolCalls: number;
+  /** Calls per capability, in the order first used. */
+  readonly tools?: Readonly<Record<string, number>>;
   readonly maxToolCalls?: number;
   /** The agent stopped on a limit, not because it was done: its document may be incomplete. */
   readonly budgetExhausted?: string;
@@ -61,6 +63,7 @@ interface Open {
   retries: number;
   toolCalls: number;
   quick?: { tool: string; used: boolean; reason?: string };
+  tools?: Record<string, number>;
   maxToolCalls?: number;
   budgetExhausted?: string;
 }
@@ -135,7 +138,14 @@ export class Journey {
         }
         return [];
       case "tool.call":
-        if (o) o.toolCalls += 1;
+        if (o) {
+          o.toolCalls += 1;
+          const capability = str(p.capability);
+          if (capability) {
+            o.tools ??= {};
+            o.tools[capability] = (o.tools[capability] ?? 0) + 1;
+          }
+        }
         return [];
       case "step.finish":
         return this.close(o, e, str(p.status) ?? "success", str(p.outcome), str(p.reason));
@@ -190,6 +200,7 @@ export class Journey {
       outputTokens: o.outputTokens,
       retries: o.retries,
       toolCalls: o.toolCalls,
+      ...(o.tools ? { tools: o.tools } : {}),
       ...(o.maxToolCalls ? { maxToolCalls: o.maxToolCalls } : {}),
       ...(o.budgetExhausted ? { budgetExhausted: o.budgetExhausted } : {}),
       ...(o.quick ? { quick: o.quick } : {}),

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { duration, Journey } from "../../src/app/journey.ts";
-import { formatLoop, formatStepReport } from "../../src/cli/progress.ts";
+import { formatLoop, formatStepReport, toolMix } from "../../src/cli/progress.ts";
 import { createStyle, stripAnsi } from "../../src/cli/style.ts";
 import type { StoredEvent } from "../../src/telemetry/events.ts";
 
@@ -37,6 +37,7 @@ describe("journey", () => {
         outputTokens: 2_000,
         retries: 1,
         toolCalls: 1,
+        tools: { "fs.read": 1 },
         maxToolCalls: 60,
       },
     });
@@ -44,13 +45,19 @@ describe("journey", () => {
     const plain = createStyle(false);
     const artifact = { name: "research.md", version: 1 } as never;
     expect(formatStepReport(line.report, [artifact], plain, 8)).toEqual([
-      "✓ [2/3] research  3m 12s  research · 2 calls · 28k→2.0k tok · 1/60 tools · 1 retry  → research.md",
+      "✓ [2/3] research  3m 12s  research · 2 calls · 28k→2.0k tok · read (1/60) · 1 retry  → research.md",
     ]);
     // coloured: the same text
     const coloured = formatStepReport(line.report, [artifact], createStyle(true), 8)[0] as string;
     expect(stripAnsi(coloured)).toBe(
-      "✓ [2/3] research  3m 12s  research · 2 calls · 28k→2.0k tok · 1/60 tools · 1 retry  → research.md",
+      "✓ [2/3] research  3m 12s  research · 2 calls · 28k→2.0k tok · read (1/60) · 1 retry  → research.md",
     );
+  });
+
+  it("names the tools an agent used, most used first", () => {
+    expect(toolMix({ "repo.read": 12, "repo.search": 4, "repo.edit": 2 })).toBe("read×12 search×4 edit×2");
+    expect(toolMix({ "repo.read": 3, "knowledge.read": 1 })).toBe("repo.read×3 knowledge.read");
+    expect(toolMix({ a: 5, b: 4, c: 3, d: 2, e: 1, f: 1 })).toBe("a×5 b×4 c×3 d×2 +2");
   });
 
   it("says when a quick tool answered for the agent", () => {

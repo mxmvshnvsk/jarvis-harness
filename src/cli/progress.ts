@@ -73,6 +73,24 @@ function producedOf(
     .join(", ");
 }
 
+/**
+ * What an agent did, by tool: `read×12 search×4 edit×2 +3`. The capability's last part names it
+ * unless two used ones share it (`repo.read`, `knowledge.read`); the four most used, then the rest
+ * as a count. Pilot: "41/40 tools" said how much, not what.
+ */
+export function toolMix(tools: Readonly<Record<string, number>>): string {
+  const entries = Object.entries(tools).sort((a, b) => b[1] - a[1]);
+  const short = (name: string) => name.slice(name.lastIndexOf(".") + 1);
+  const shared = new Set(
+    entries.map(([n]) => short(n)).filter((s, _i, all) => all.indexOf(s) !== all.lastIndexOf(s)),
+  );
+  const label = ([name, n]: [string, number]) =>
+    `${shared.has(short(name)) ? name : short(name)}${n > 1 ? `×${n}` : ""}`;
+  const shown = entries.slice(0, 4).map(label);
+  const rest = entries.slice(4).reduce((sum, [, n]) => sum + n, 0);
+  return [...shown, ...(rest > 0 ? [`+${rest}`] : [])].join(" ");
+}
+
 export function formatStepReport(
   r: StepReport,
   artifacts: readonly ArtifactVersion[],
@@ -100,8 +118,11 @@ export function formatStepReport(
     facts.push(`${r.modelCalls} call${r.modelCalls === 1 ? "" : "s"}`);
     facts.push(`${kilo(r.promptTokens)}→${kilo(r.outputTokens)} tok`);
   }
-  if (r.toolCalls > 0 || r.maxToolCalls)
-    facts.push(r.maxToolCalls ? `${r.toolCalls}/${r.maxToolCalls} tools` : `${r.toolCalls} tools`);
+  if (r.toolCalls > 0 || r.maxToolCalls) {
+    const of = r.maxToolCalls ? `${r.toolCalls}/${r.maxToolCalls}` : `${r.toolCalls}`;
+    const mix = r.tools ? toolMix(r.tools) : "";
+    facts.push(mix ? `${mix} (${of})` : `${of} tools`);
+  }
   const retries = r.retries > 0 ? ` ${st.warn(`· ${r.retries} retr${r.retries === 1 ? "y" : "ies"}`)}` : "";
   const limit = r.budgetExhausted
     ? ` ${st.warn(`· ${r.budgetExhausted === "model" ? "model call" : "tool"} limit reached, result may be incomplete`)}`
