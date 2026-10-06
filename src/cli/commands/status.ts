@@ -1,4 +1,5 @@
-import { formatActivity } from "../../app/activity.ts";
+import { formatActivity, kilo } from "../../app/activity.ts";
+import { duration } from "../../app/journey.ts";
 import { createRuntime } from "../../app/runtime.ts";
 import { type PoolStatus, type RunDetail, runDetail, runsOverview } from "../../app/status.ts";
 import { isTerminal } from "../../core/domain/run.ts";
@@ -303,4 +304,85 @@ export async function runCancel(ctx: CliContext, runRef: string): Promise<void> 
   } finally {
     await runtime.close();
   }
+}
+
+/** What a person can do next with a run in this state: commands, most likely first. */
+export function nextCommands(d: RunDetail): Array<{ cmd: string; why: string }> {
+  const r = d.run;
+  const id = shortRunId(r.id);
+  const out: Array<{ cmd: string; why: string }> = [];
+  const pending = d.pendingApprovals[0];
+  if (r.state === "WAITING_HUMAN" && r.waitingFor?.kind === "clarification") {
+    out.push({ cmd: `jarvis attach ${id}`, why: "read the questions and answer them" });
+  } else if (r.state === "WAITING_HUMAN" || pending) {
+    if (pending) out.push({ cmd: `jarvis show ${id} ${pending.type}`, why: `read the ${pending.type}` });
+    out.push({ cmd: `jarvis approve ${id} --resume`, why: "accept and go on" });
+    out.push({
+      cmd: `jarvis approve ${id} --request-changes --comment "…" --resume`,
+      why: "send it back with what to change",
+    });
+  } else if (r.state === "WAITING_BUDGET") {
+    out.push({ cmd: `jarvis resume ${id}`, why: "when the quota window frees up" });
+  } else if (r.state === "FAILED") {
+    out.push({ cmd: `jarvis logs ${id} --level error`, why: "what went wrong" });
+    out.push({ cmd: `jarvis resume ${id}`, why: "retry from the last checkpoint" });
+  } else if (r.state === "RUNNING" && !d.leaseLive) {
+    out.push({ cmd: `jarvis resume ${id}`, why: "continue from the checkpoint" });
+  } else if (r.state === "COMPLETED") {
+    const main = [...d.artifacts].reverse().find((a) => GATED.has(a.type)) ?? d.artifacts.at(-1);
+    if (main) out.push({ cmd: `jarvis show ${id} ${main.type}`, why: `read the ${main.type}` });
+    if (r.workspace.mode === "worktree") {
+      out.push({ cmd: `jarvis diff ${id}`, why: "the change" });
+      out.push({ cmd: `jarvis apply ${id}`, why: "bring it onto your branch" });
+    }
+  }
+  out.push({ cmd: `jarvis status ${id}`, why: "every detail of the run" });
+  return out;
+}
+
+const GATED = new Set(["spec", "plan", "review", "implementation", "research", "requirements"]);
+
+/** Time spent in steps (a run resumed a day later is not a day long). */
+function workedMs(d: RunDetail): number {
+  return d.steps.reduce(
+    (sum, s) => sum + (s.finishedAt ? Math.max(0, Date.parse(s.finishedAt) - Date.parse(s.startedAt)) : 0),
+    0,
+  );
+}
+
+/** The end of a foreground run: state, cost, what it produced and what to do next. */
+export function renderSummary(ctx: CliContext, d: RunDetail): void {
+  const { out } = ctx;
+  const st = out.style;
+  const r = d.run;
+  const f = (label: string) => `  ${st.muted(padEnd(label, 10))} `;
+  out.line();
+  out.line(
+    `${st.heading("run")} ${st.name(shortRunId(r.id))}  ${st.state(r.state)}  ${st.muted(`in ${duration(workedMs(d))}`)}`,
+  );
+  out.line(`${f("task")}${r.task} ${st.muted(`· workflow ${r.workflow}`)}`);
+  out.line(`${f("state")}${st.state(r.state)}${r.stateReason ? ` ${st.muted("—")} ${r.stateReason}` : ""}`);
+  const t = d.tokens;
+  if (t.calls > 0)
+    out.line(
+      `${f("model")}${t.calls} calls ${st.muted("·")} in ${kilo(t.promptTokens)} ${st.muted(`(${kilo(t.cachedTokens)} cached)`)} ${st.muted("·")} out ${kilo(t.outputTokens)}${t.retries > 0 ? ` ${st.muted("·")} ${st.warn(`${t.retries} retries`)}` : ""}`,
+    );
+  d.artifacts
+    .filter((a) => a.type !== "project-capabilities")
+    .forEach((a, i) => {
+      const gate = d.pendingApprovals.some((p) => p.artifactId === a.artifactId)
+        ? `  ${st.warn("awaiting approval")}`
+        : a.approved
+          ? `  ${st.ok("approved")}`
+          : "";
+      const step = a.stepId
+        ? st.muted(`  ${a.stepId}${a.iteration && a.iteration > 1 ? `#${a.iteration}` : ""}`)
+        : "";
+      out.line(`${i === 0 ? f("artifacts") : " ".repeat(13)}${a.type}/${a.name}@${a.version}${step}${gate}`);
+    });
+  const next = nextCommands(d);
+  const w = Math.max(...next.map((n) => n.cmd.length));
+  next.forEach((n, i) => {
+    out.line(`${i === 0 ? f("next") : " ".repeat(13)}${st.cmd(padEnd(n.cmd, w))}  ${st.muted(n.why)}`);
+  });
 }

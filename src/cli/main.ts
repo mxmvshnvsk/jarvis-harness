@@ -32,7 +32,16 @@ import { runLogs } from "./commands/logs.ts";
 import { runMcpList, runMcpServe } from "./commands/mcp.ts";
 import { runModelsList, runModelsProbe } from "./commands/models.ts";
 import { runOnboard } from "./commands/onboard.ts";
-import { runApply, runApprove, runDaemon, runDiff, runGc, runResume, runWork } from "./commands/run.ts";
+import {
+  runApply,
+  runApprove,
+  runDaemon,
+  runDiff,
+  runGc,
+  runResume,
+  runShow,
+  runWork,
+} from "./commands/run.ts";
 import { runCancel, runStatus } from "./commands/status.ts";
 import { type CliContext, defaultContext } from "./context.ts";
 import { CliExit, createOutput, EXIT } from "./output.ts";
@@ -202,6 +211,13 @@ export function buildProgram(options: RunOptions = {}): Command {
     )
     .action(async (target: string) => {
       await runExplain(ctxFor(), target);
+    });
+  program
+    .command("show <run> [artifact]")
+    .description("what a run produced: the list, or one artifact (type, name or a unique part) to read")
+    .option("--out <file>", "write the artifact to a file instead of printing it")
+    .action(async (run: string, artifact: string | undefined, opts: { out?: string }) => {
+      await runShow(ctxFor(), run, artifact, opts.out ? { out: opts.out } : {});
     });
   program
     .command("diff <run>")

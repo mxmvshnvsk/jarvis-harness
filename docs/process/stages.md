@@ -78,6 +78,11 @@ Remaining commands of ADR-0001 §15:
   dim, commands cyan, ok/additions green, warnings yellow, errors/removals red), backticked spans render as commands,
   `jarvis diff` coloured like git, `candidates show` renders the markdown; errors are prefixed `error:`, notices go
   through `Output.note`; colour only on a terminal, `--color`/`--no-color`, `NO_COLOR`, `FORCE_COLOR`, `TERM=dumb`
+- the course of a run (`src/app/journey.ts`, `src/cli/progress.ts`): a header with the plan, a line that stays per
+  finished step (`[k/N]`, time, agent, calls, tokens, tools of the limit, retries, outcome, artifacts produced), loop
+  backs and parking as lines; the live line under them; the run ends with a summary and `next` commands instead of
+  the full status. `jarvis show <run> [artifact]` reads what a run produced — the pilot's `spec` stopped at
+  "awaiting approval" with no command to read the spec; `workflow.loop` carries `max`
 
 ADR-0001 §20 stage 12 (git hooks) — `f11ca47`:
 

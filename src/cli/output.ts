@@ -1,4 +1,4 @@
-import { colorEnabled, createStyle, type Style } from "./style.ts";
+import { colorEnabled, createStyle, type Style, stripAnsi } from "./style.ts";
 
 /** Exit codes (ADR-0009 §3). */
 export const EXIT = {
@@ -14,6 +14,8 @@ export interface Output {
   readonly json: boolean;
   /** Styling for stdout (a no-op unless stdout is a colour terminal, see style.ts). */
   readonly style: Style;
+  /** Styling for stderr: notices, the course of a run, the progress line. */
+  readonly errStyle: Style;
   /** A line of the result on stdout; `backticked` spans render as commands. */
   line(text?: string): void;
   /** Text written as is (a diff, a document already rendered): no backtick handling. */
@@ -60,6 +62,7 @@ export function createOutput(
     json,
     live,
     style,
+    errStyle,
     line(text = "") {
       clear();
       streams.out.write(`${style.inline(text)}\n`);
@@ -86,7 +89,9 @@ export function createOutput(
       if (!live) return;
       if (text === undefined) return clear();
       const width = Math.max(20, (err.columns ?? 120) - 1);
-      const line = [...text].length > width ? `${[...text].slice(0, width - 1).join("")}…` : text;
+      // a styled line that does not fit loses its colours rather than get an escape cut in half
+      const plain = stripAnsi(text);
+      const line = [...plain].length > width ? `${[...plain].slice(0, width - 1).join("")}…` : text;
       streams.err.write(`\r\u001b[2K${line}`);
       shown = true;
     },

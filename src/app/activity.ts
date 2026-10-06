@@ -186,7 +186,7 @@ export function clock(ms: number): string {
   return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${sec}` : `${m}:${sec}`;
 }
 
-function kilo(n: number): string {
+export function kilo(n: number): string {
   return n >= 10_000 ? `${Math.round(n / 1000)}k` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
 }
 
@@ -205,7 +205,18 @@ function tail(text: string, max: number): string {
   return out.length < text.length ? `…/${out}`.slice(0, max) : out.slice(0, max);
 }
 
+/** Colours for a line, structurally the CLI's Style (the app layer does not depend on the CLI). */
+export interface Paint {
+  name(text: string): string;
+  muted(text: string): string;
+  warn(text: string): string;
+  bad(text: string): string;
+}
+
+const NO_PAINT: Paint = { name: (t) => t, muted: (t) => t, warn: (t) => t, bad: (t) => t };
+
 export interface FormatOptions {
+  readonly paint?: Paint;
   /** Model timeout: a wait past it is a hang, not a slow answer. */
   readonly timeoutMs?: number;
   /** Per-step output token cap (budget.perStep.outputTokens). */
@@ -218,9 +229,12 @@ export interface FormatOptions {
  * much of its tool budget is used, which bounds the step.
  */
 export function formatActivity(a: Activity, options: FormatOptions = {}): string {
-  const parts: string[] = [clock(a.elapsedMs)];
+  const st = options.paint ?? NO_PAINT;
+  const parts: string[] = [st.muted(clock(a.elapsedMs))];
   if (a.step) {
-    parts.push(`${a.step.id}#${a.step.iteration}${a.step.agent ? ` ${a.step.agent}` : ""}`);
+    parts.push(
+      `${st.name(a.step.id)}${st.muted(`#${a.step.iteration}`)}${a.step.agent ? ` ${st.muted(a.step.agent)}` : ""}`,
+    );
     const avg = a.avgLatencyMs !== undefined ? `, avg ${clock(a.avgLatencyMs)}` : "";
     let wait = "";
     if (a.waitingMs !== undefined) {
@@ -233,7 +247,7 @@ export function formatActivity(a: Activity, options: FormatOptions = {}): string
             ? " — slower than usual"
             : "";
       const retry = a.retrying ? `, retry ${a.retrying.attempt} after ${a.retrying.reason}` : "";
-      wait = `, waiting ${clock(a.waitingMs)}${retry}${late}`;
+      wait = `, waiting ${clock(a.waitingMs)}${retry || late ? st.warn(`${retry}${late}`) : ""}`;
     }
     // while waiting, name the call in flight: "0 calls, waiting 2:02" read as if nothing was asked (pilot)
     parts.push(
@@ -249,12 +263,12 @@ export function formatActivity(a: Activity, options: FormatOptions = {}): string
   }
   const cap = options.stepOutputTokens ? `/${kilo(options.stepOutputTokens)}` : "";
   parts.push(`tokens in ${kilo(a.promptTokens)} out ${kilo(a.outputTokens)}${cap}`);
-  if (a.retries > 0) parts.push(`${a.retries} retr${a.retries === 1 ? "y" : "ies"}`);
+  if (a.retries > 0) parts.push(st.warn(`${a.retries} retr${a.retries === 1 ? "y" : "ies"}`));
   if (a.lastTool) {
     const detail = a.lastTool.detail ? ` ${tail(a.lastTool.detail, 40)}` : "";
-    parts.push(`last ${a.lastTool.capability}${detail}${a.lastTool.ok ? "" : " ✗"}`);
+    parts.push(st.muted(`last ${a.lastTool.capability}${detail}`) + (a.lastTool.ok ? "" : ` ${st.bad("✗")}`));
   }
-  return parts.join(" · ");
+  return parts.join(st.muted(" · "));
 }
 
 /** `HH:MM:SS` in local time — notices sit in a terminal next to the clock on the wall. */

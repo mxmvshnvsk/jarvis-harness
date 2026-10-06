@@ -19,9 +19,10 @@ import { git } from "../../tools/local/exec.ts";
 import type { CliContext } from "../context.ts";
 import { CliExit, EXIT } from "../output.ts";
 import { followRun } from "../progress.ts";
-import { renderDiff } from "../render.ts";
+import { renderDiff, renderMarkdown } from "../render.ts";
+import { padStyled } from "../style.ts";
 import { loadForCli } from "./config.ts";
-import { renderDetail } from "./status.ts";
+import { renderSummary } from "./status.ts";
 
 async function actorFor(ctx: CliContext, runtime: Runtime): Promise<Actor> {
   const resolved = await resolveActor(runtime.loaded.config, ctx.env, runtime.loaded.project?.root);
@@ -52,13 +53,17 @@ async function executeAndReport(
   extra: Record<string, unknown> = {},
 ): Promise<never> {
   const owner = leaseOwner(runtime.loaded.config.interactive ? "cli" : "ci");
-  const progress = followRun(ctx, runtime, { runId: run.id });
+  let plan: string[] = [];
+  try {
+    plan = engine.workflow(run.workflow).steps.map((s) => s.id);
+  } catch {
+    // an unknown workflow fails in execute with its own message
+  }
+  const progress = followRun(ctx, runtime, { runId: run.id, plan });
   try {
     const result = await engine.execute(run.id, { owner, steal }).finally(() => progress.stop());
     const detail = runDetail(runtime, result.run);
-    ctx.out.result({ ...extra, ...detail, exitCode: result.exitCode }, () =>
-      renderDetail(ctx, detail, new Date(), 8),
-    );
+    ctx.out.result({ ...extra, ...detail, exitCode: result.exitCode }, () => renderSummary(ctx, detail));
     throw new CliExit(result.exitCode);
   } catch (error) {
     if (error instanceof LeaseHeldError) {
@@ -109,8 +114,8 @@ export async function runWork(
     };
     if (useWorktree) {
       if (await WorktreeWorkspace.isDirty(root)) {
-        ctx.out.error(
-          "note: the working tree has uncommitted changes; the run starts from the last commit (ADR-0003 §2)",
+        ctx.out.note(
+          `${ctx.out.errStyle.warn("note:")} the working tree has uncommitted changes; the run starts from the last commit (ADR-0003 §2)`,
         );
       }
       try {
@@ -450,5 +455,114 @@ export async function runGc(
     });
   } finally {
     await runtime.close();
+  }
+}
+
+/**
+ * `jarvis show <run> [artifact] [--out <file>]` — what a run produced: the list, or one artifact
+ * (by type, name or any unique part of `type/name`) printed for reading. Pilot: `jarvis spec`
+ * stopped at "awaiting approval" and there was no command to read the spec it asked to approve.
+ */
+export async function runShow(
+  ctx: CliContext,
+  ref: string,
+  artifactRef: string | undefined,
+  options: { out?: string },
+): Promise<void> {
+  const loaded = await loadForCli(ctx);
+  const runtime = createRuntime(loaded, { env: ctx.env });
+  try {
+    const run = requireRun(ctx, runtime, ref);
+    const id = shortRunId(run.id);
+    const st = ctx.out.style;
+    const all = runtime.artifacts.listLatest(run.id).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    const pending = new Set(
+      runtime.artifacts
+        .pendingApprovals(run.id, ["spec", "plan", "review", "implementation"])
+        .map((a) => a.artifactId),
+    );
+    const stateOf = (a: (typeof all)[number]) =>
+      pending.has(a.artifactId)
+        ? "awaiting approval"
+        : runtime.artifacts.isApproved(a.artifactId).approved
+          ? "approved"
+          : "";
+    if (!artifactRef) {
+      ctx.out.result(
+        { run: run.id, artifacts: all.map((a) => ({ ...a, state: stateOf(a) || undefined })) },
+        () => {
+          ctx.out.line(`${st.heading("run")} ${st.name(id)}  ${run.task} ${st.muted(`· ${run.workflow}`)}`);
+          if (all.length === 0) {
+            ctx.out.line(st.muted("  no artifacts yet"));
+            return;
+          }
+          const w = Math.max(...all.map((a) => `${a.type}/${a.name}@${a.version}`.length));
+          for (const a of all) {
+            const state = stateOf(a);
+            ctx.out.line(
+              `  ${padStyled(`${a.type}/${a.name}@${a.version}`, w)}  ${st.muted(padStyled(a.stepId ? `${a.stepId}${a.iteration && a.iteration > 1 ? `#${a.iteration}` : ""}` : "-", 16))} ${state === "approved" ? st.ok(state) : st.warn(state)}`,
+            );
+          }
+          ctx.out.line();
+          ctx.out.line(`${st.muted("read")}  ${st.cmd(`jarvis show ${id} <type or name>`)}`);
+        },
+      );
+      return;
+    }
+    const exact = all.filter(
+      (a) => a.type === artifactRef || a.name === artifactRef || a.artifactId === artifactRef,
+    );
+    const matches = exact.length > 0 ? exact : all.filter((a) => `${a.type}/${a.name}`.includes(artifactRef));
+    if (matches.length !== 1) {
+      ctx.out.error(
+        matches.length === 0
+          ? `run ${id} has no artifact "${artifactRef}" (see \`jarvis show ${id}\`)`
+          : `"${artifactRef}" matches ${matches.length} artifacts: ${matches.map((a) => `${a.type}/${a.name}`).join(", ")}`,
+      );
+      throw new CliExit(EXIT.error);
+    }
+    const a = matches[0] as (typeof all)[number];
+    const text = runtime.artifacts.text(a);
+    if (options.out) {
+      mkdirSync(dirname(options.out), { recursive: true });
+      writeFileSync(options.out, text);
+      ctx.out.result({ artifact: a, file: options.out }, () =>
+        ctx.out.line(`${st.ok("✓")} ${a.type}/${a.name}@${a.version} ${st.muted("→")} ${options.out}`),
+      );
+      return;
+    }
+    const state = stateOf(a);
+    ctx.out.result({ artifact: a, state: state || undefined, content: text }, () => {
+      const who =
+        a.provenance.kind === "agent"
+          ? `agent ${a.provenance.agentId}`
+          : a.provenance.kind === "human"
+            ? `human ${a.provenance.actor.id}`
+            : a.provenance.kind;
+      ctx.out.line(
+        `${st.name(`${a.type}/${a.name}@${a.version}`)}  ${st.muted(`run ${id} · ${a.stepId ?? "-"} · ${who}`)}${state ? `  ${state === "approved" ? st.ok(state) : st.warn(state)}` : ""}`,
+      );
+      ctx.out.line(st.muted("─".repeat(60)));
+      const body = a.name.endsWith(".json") ? prettyJson(text) : text;
+      ctx.out.raw(renderMarkdown(body.trimEnd(), st));
+      ctx.out.line(st.muted("─".repeat(60)));
+      if (state === "awaiting approval") {
+        ctx.out.line(`${st.muted("accept ")} ${st.cmd(`jarvis approve ${id} --resume`)}`);
+        ctx.out.line(
+          `${st.muted("changes")} ${st.cmd(`jarvis approve ${id} --request-changes --comment "…" --resume`)}`,
+        );
+      }
+      ctx.out.line(`${st.muted("save   ")} ${st.cmd(`jarvis show ${id} ${a.type} --out <file>`)}`);
+    });
+  } finally {
+    await runtime.close();
+  }
+}
+
+function prettyJson(text: string): string {
+  try {
+    return JSON.stringify(JSON.parse(text), null, 2);
+  } catch {
+    return text;
   }
 }

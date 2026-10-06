@@ -187,6 +187,35 @@ usual», дольше `timeoutMs` модели — «past the model timeout»), 
 
 Одинаковое `after 5:00` у всех попыток — признак того, что запрос обрывает шлюз, а не модель.
 
+Ход прогона. `work`, `spec`, `research`, `resume` и `approve --resume` печатают в stderr шапку (workflow,
+задача, короткий id run и план шагов), а каждый завершённый шаг оставляет строку-отчёт — под ней дальше
+рисуется живая строка следующего шага. Остановка на человеке или квоте и падение — тоже строкой:
+
+```
+▶ spec · ABC-1 · run 1a2b3c4d
+  discover → research → requirements → spec → approve-spec
+✓ [1/5] discover      0.4s    deterministic  → project-capabilities.json
+✓ [2/5] research      3m 12s  research · 9 calls · 182k→6.1k tok · 23/60 tools  → research.md
+✗ [3/5] requirements  1m 02s  requirements · 4 calls · 61k→2.0k tok · 12/60 tools
+  error: …
+↻ approve-spec → spec request_changes, round 1/3 — слишком общо
+⏸ [5/5] approve-spec  waiting for approval — approve spec (spec.md@1)
+```
+
+Позиция `[k/N]` — место шага в workflow (`#2` — повторный проход), время шага, агент, вызовы модели,
+токены (вход→выход), инструменты из лимита («tool limit reached», если упёрся), повторы, исход, отличный
+от успеха, и `→` артефакты, которые шаг создал. Строки идут и в pipe, и с `--json` (stdout остаётся JSON).
+В конце в stdout — итог: состояние, время в шагах, модель, артефакты с отметкой утверждения и `next` —
+команды для следующего шага (прочитать артефакт, утвердить или вернуть с замечаниями, `diff`/`apply`,
+`logs` при падении, `status` для подробностей).
+
+### `jarvis show <run> [artifact] [--out <file>]`
+
+Что создал run. Без артефакта — список: `тип/имя@версия`, шаг, «awaiting approval»/«approved». С
+артефактом (тип, имя или однозначная часть `тип/имя`) — содержимое для чтения (markdown подсвечен, JSON
+отформатирован) и подсказки, как утвердить или вернуть на доработку; `--out` пишет его в файл как есть.
+`--json` — метаданные и содержимое.
+
 ### `jarvis cancel <run>`
 
 Немедленно, если run не исполняется; иначе — в ближайшей безопасной точке (граница шага).

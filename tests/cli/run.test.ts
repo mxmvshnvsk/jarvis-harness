@@ -64,6 +64,29 @@ describe("jarvis work / resume / approve / daemon", () => {
     expect(r.out).toContain("note/hello.md@1");
   });
 
+  it("narrates the run: a header, a line per finished step, the parking line, then a summary with next commands", async () => {
+    const r = await jarvis(["work", "ABC-4", "--workflow", "gated"]);
+    expect(r.code).toBe(10);
+    const id = /run ([0-9a-z]{8})/.exec(r.err)?.[1] as string;
+    expect(r.err).toContain(`▶ gated · ABC-4 · run ${id}`);
+    expect(r.err).toContain("  write → approve");
+    expect(r.err).toMatch(/✓ \[1\/2\] write {2}\s*\d+\.\ds\s+deterministic\s+→ spec\.md/);
+    expect(r.err).toContain("⏸ [2/2] approve  waiting for approval — approve spec (spec.md@1)");
+    expect(r.out).toContain(`run ${id}  WAITING_HUMAN`);
+    expect(r.out).toContain("spec/spec.md@1  write  awaiting approval");
+    expect(r.out).toContain(`jarvis show ${id} spec`);
+    expect(r.out).toContain(`jarvis approve ${id} --resume`);
+
+    const list = await jarvis(["show", id]);
+    expect(list.code).toBe(0);
+    expect(list.out).toMatch(/spec\/spec\.md@1\s+write\s+awaiting approval/);
+    const shown = await jarvis(["show", id, "spec"]);
+    expect(shown.code).toBe(0);
+    expect(shown.out).toContain("# spec");
+    expect(shown.out).toContain(`jarvis approve ${id} --resume`);
+    expect((await jarvis(["show", id, "nope"])).err).toContain(`run ${id} has no artifact "nope"`);
+  });
+
   it("parks at the human gate (exit 10), approves, resumes to completion; daemon picks up approved runs", async () => {
     const parked = await jarvis(["--json", "work", "ABC-2", "--workflow", "gated"]);
     expect(parked.code).toBe(10);

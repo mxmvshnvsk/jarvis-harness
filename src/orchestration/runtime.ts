@@ -355,7 +355,12 @@ export class LocalWorkflowEngine {
         return { run: parked, stop: true };
       }
       iterations[transition.edgeId] = count;
-      this.emit(run, "workflow.loop", { edge: transition.edgeId, iteration: count, reasons: outcome.reason });
+      this.emit(run, "workflow.loop", {
+        edge: transition.edgeId,
+        iteration: count,
+        max,
+        reasons: outcome.reason,
+      });
     }
 
     if (transition.to === STEP_DONE) {
