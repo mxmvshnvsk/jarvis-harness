@@ -17,6 +17,7 @@
 | [adr/0001-target-architecture.md](adr/0001-target-architecture.md) | целевая архитектура: что строим, что реализовано, что нет |
 | [adr/](adr/) | решения: ADR-0001 … ADR-0021 |
 | [process/stages.md](process/stages.md) | журнал реализации по этапам |
+| [process/tui.md](process/tui.md) | терминальный интерфейс: паттерны хороших CLI и план улучшений |
 
 Демонстрации в [assets/](assets/) записаны скриптом `scripts/demo/record.ts` против поддельной модели и
 отрисованы `scripts/demo/render.py`.
