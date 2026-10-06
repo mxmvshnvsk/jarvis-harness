@@ -10,6 +10,9 @@ import type { Output } from "./output.ts";
 export interface Prompt {
   /** The answer, trimmed; undefined when input ended (Ctrl-D, closed pipe). */
   ask(question: string): Promise<string | undefined>;
+  /** Stops reading stdin while another program owns the terminal (a shell from the card), and back. */
+  pause?(): void;
+  resume?(): void;
   close(): void;
 }
 
@@ -41,6 +44,12 @@ export function createPrompt(input: NodeJS.ReadableStream, out: Output): Prompt 
         return undefined;
       }
       return String(next.value).trim();
+    },
+    pause() {
+      rl.pause();
+    },
+    resume() {
+      rl.resume();
     },
     close() {
       if (closed) return;

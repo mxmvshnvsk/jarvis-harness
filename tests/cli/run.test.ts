@@ -371,11 +371,9 @@ steps:
     });
     rt.close();
 
-    // a "shell" that fixes the checkout, as a person would
-    sb.write("project/tmp-probe.txt", "abc");
-    sb.write("fix.sh", `#!/bin/sh\nrm tmp-probe.txt && echo "$JARVIS_RUN" > fixed-by-shell\n`);
-    const SHELL = { ...ON, SHELL: `sh ${sb.root}/fix.sh`, HOME: sb.home };
-    const later = await jarvis(["c"], SHELL, ["", "s", "q"]);
+    // a "shell" left with exit: back on the card, which says what changed and what r does
+    sb.write("leave.sh", "#!/bin/sh\nexit 0\n");
+    const later = await jarvis(["c"], { ...ON, SHELL: `sh ${sb.root}/leave.sh` }, ["", "s", "q"]);
     expect(later.code).toBe(10);
     expect(later.out).toContain(
       "⏸ write sent the work back 2 times — write → write, defects_found; no rounds left",
@@ -386,27 +384,40 @@ steps:
     expect(later.out).toContain(
       "enter reasons in full    s a shell in the checkout    r run write again    q later",
     );
-    expect(later.out).toContain("a shell in");
-    expect(existsSync(join(sb.project, "tmp-probe.txt"))).toBe(false);
-    expect(readFileSync(join(sb.project, "fixed-by-shell"), "utf8").trim()).toMatch(/^[0-9a-f]{8}$/);
+    expect(later.out).toContain("fix what is listed above, then type jarvis c — write runs again from here");
+    expect(later.out).toContain("back from the shell — r runs write again with what you changed");
     expect(later.out).toContain("left waiting; come back with jarvis continue");
 
-    const again = await jarvis(["c"], ON, ["r", "a"]);
+    // a "shell" where the person fixes the checkout and types `jarvis c`: the card closes it and goes on
+    sb.write("project/tmp-probe.txt", "abc");
+    sb.write(
+      "fix.sh",
+      `#!/bin/sh\nrm tmp-probe.txt && echo "$JARVIS_SHELL" > fixed-by-shell\nprintf go-on > "$JARVIS_SHELL_REQUEST"\nexec sleep 20\n`,
+    );
+    const again = await jarvis(["c"], { ...ON, SHELL: `sh ${sb.root}/fix.sh` }, ["s", "a"]);
     expect(again.code).toBe(0);
+    expect(existsSync(join(sb.project, "tmp-probe.txt"))).toBe(false);
+    expect(readFileSync(join(sb.project, "fixed-by-shell"), "utf8").trim()).toMatch(/^[0-9a-f]{8}$/);
     expect(again.out).toContain("↻ running write again");
     expect(again.out).toContain("✓ accepted spec/spec.md@1");
     expect(again.out).toContain("COMPLETED");
 
+    // what `jarvis c` does in that shell: asks the card to go on (JARVIS_RUN is no config key)
+    const request = join(sb.root, "request");
+    const inShell = await jarvis(["c"], {
+      ...ON,
+      JARVIS_RUN: "4c3b2a1d",
+      JARVIS_SHELL: "4c3b2a1d",
+      JARVIS_SHELL_REQUEST: request,
+      JARVIS_SHELL_PARENT: String(process.pid),
+    });
+    expect(inShell.code).toBe(0);
+    expect(inShell.out).toContain("↩ back to the card of run 4c3b2a1d — it goes on");
+    expect(readFileSync(request, "utf8")).toBe("go-on");
+    expect((await jarvis(["config", "show"], { JARVIS_RUN: "4c3b2a1d" })).code).toBe(0);
+
     const path = await jarvis(["shell", "--print"], {});
     expect(path.out.trim()).toBe(sb.project);
-
-    // `jarvis c` typed in that shell: back to the card, not a second run (JARVIS_RUN is no config key)
-    const nested = await jarvis(["c"], { ...ON, JARVIS_SHELL: "4c3b2a1d", JARVIS_RUN: "4c3b2a1d" });
-    expect(nested.code).toBe(1);
-    expect(nested.err).toContain(
-      "this is the shell jarvis opened for run 4c3b2a1d: `exit` (Ctrl-D) goes back",
-    );
-    expect((await jarvis(["config", "show"], { JARVIS_RUN: "4c3b2a1d" })).code).toBe(0);
   });
 
   it("accessible mode: a numbered menu, answered with numbers", async () => {

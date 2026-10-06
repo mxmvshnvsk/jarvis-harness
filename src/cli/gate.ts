@@ -7,10 +7,12 @@ import type { Runtime } from "../app/runtime.ts";
 import type { Actor } from "../core/domain/actor.ts";
 import type { ArtifactVersion } from "../core/domain/artifact.ts";
 import type { Run } from "../core/domain/run.ts";
+import { shortRunId } from "../storage/runStore.ts";
 import { git } from "../tools/local/exec.ts";
 import { changesIn, checkoutLink, formatChanges, homePath, type ShellIn, systemShell } from "./checkout.ts";
 import { clarifyLoop } from "./commands/human.ts";
 import type { CliContext } from "./context.ts";
+import { passthrough, titleSequence } from "./notify.ts";
 import type { Prompt } from "./prompt.ts";
 import { documentToMarkdown, renderMarkdown } from "./render.ts";
 import { cutStyled, incompleteOf } from "./style.ts";
@@ -294,6 +296,7 @@ async function loopGate(
   const reasons = reasonsOf(typeof doc?.reason === "string" ? doc.reason : "");
   const step = run.currentStep ?? "the step";
   const dir = run.workspace.path;
+  const env = ctx.env ?? {};
   const width = ctx.out.columns - 1;
   ctx.out.line();
   ctx.out.line(
@@ -331,19 +334,39 @@ async function loopGate(
       continue;
     }
     if (input === "s") {
+      const rule = st.muted("─".repeat(Math.max(10, Math.min(width, 72) - 4)));
+      ctx.out.line();
+      ctx.out.line(`  ${rule}`);
       ctx.out.line(
-        st.muted(
-          `  a shell in ${homePath(dir, ctx.homeDir)} — fix, then \`exit\` (Ctrl-D) back to this card and r`,
-        ),
+        `  ${st.heading(`a shell in the run's checkout`)} ${st.muted(homePath(dir, ctx.homeDir))}`,
       );
-      if (!shell(dir, run)) {
+      ctx.out.line(
+        `  fix what is listed above, then type ${st.cmd("jarvis c")} — ${step} runs again from here`,
+      );
+      ctx.out.line(st.muted(`  exit (Ctrl-D) — back to this card without going on`));
+      ctx.out.line(`  ${rule}`);
+      if (env.JARVIS_TITLE !== "off")
+        ctx.out.terminal(
+          passthrough(titleSequence(`jarvis ${shortRunId(run.id)} · fix, then jarvis c`), env),
+        );
+      prompt.pause?.();
+      const end = await shell(dir, run).finally(() => prompt.resume?.());
+      if (end === "failed") {
         ctx.out.line(st.warn(`  could not start a shell; the checkout is ${dir}`));
         continue;
       }
+      ctx.out.line();
       const changes = changesIn(dir);
       if (changes && changes.length > 0)
         ctx.out.line(cutStyled(`  ${st.muted("changed:")} ${formatChanges(changes, st)}`, width));
       else if (changes) ctx.out.line(st.muted("  nothing changed in the checkout"));
+      if (end === "go-on") {
+        ctx.out.line(`${st.warn("↻")} running ${step} again`);
+        return "decided";
+      }
+      if (env.JARVIS_TITLE !== "off")
+        ctx.out.terminal(passthrough(titleSequence(`⏸ jarvis ${shortRunId(run.id)}`), env));
+      ctx.out.line(st.muted(`  back from the shell — r runs ${step} again with what you changed`));
       continue;
     }
     if (input === "r") {

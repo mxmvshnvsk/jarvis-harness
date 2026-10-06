@@ -1,8 +1,10 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { Run } from "../core/domain/run.ts";
 import { shortRunId } from "../storage/runStore.ts";
 import type { CliContext } from "./context.ts";
-import { CliExit, EXIT } from "./output.ts";
 import type { Style } from "./style.ts";
 
 /**
@@ -23,25 +25,84 @@ export function checkoutLink(st: Style, path: string, homeDir: string): string {
   return st.link(`file://${encodeURI(path)}`, homePath(path, homeDir));
 }
 
-/** Opens a shell in `dir` and waits until the person leaves it; false when it could not start. */
-export type ShellIn = (dir: string, run: Run) => boolean;
+/**
+ * How a shell opened from a card ended: `go-on` — the person typed `jarvis continue` in it (the card
+ * closed the shell and goes on); `left` — they left it themselves (`exit`, Ctrl-D); `failed` — it did
+ * not start.
+ */
+export type ShellEnd = "go-on" | "left" | "failed";
+
+/** Opens a shell in `dir` and waits until the person goes on or leaves it. */
+export type ShellIn = (dir: string, run: Run) => Promise<ShellEnd>;
+
+/** What the shell's `jarvis continue` asks the card for (src/cli/commands/run.ts). */
+export const GO_ON = "go-on";
 
 /**
- * `$SHELL` (or `sh`), interactive, with `JARVIS_RUN` and `JARVIS_SHELL` set to the run's short id, so
- * a `jarvis continue` typed in it says to go back instead of starting the run a second time.
+ * `$SHELL` (or `sh`), interactive, in the run's checkout. The card stays in charge: `JARVIS_SHELL_REQUEST`
+ * names a file where `jarvis continue` typed in the shell asks to go on; the card then closes the
+ * shell (SIGHUP, as closing a terminal tab) and runs the step again. Pilot: the way back was `exit`,
+ * which nobody guessed, and `jarvis c` in the shell failed.
  */
 export function systemShell(ctx: CliContext): ShellIn {
-  return (dir, run) => {
-    const env = ctx.env ?? {};
-    const shell = env.SHELL || "/bin/sh";
-    const r = spawnSync(`${shell} -i`, {
-      cwd: dir,
-      stdio: "inherit",
-      shell: true,
-      env: { ...process.env, ...env, JARVIS_RUN: shortRunId(run.id), JARVIS_SHELL: shortRunId(run.id) },
+  return (dir, run) =>
+    new Promise((resolve) => {
+      const env = ctx.env ?? {};
+      const [command, ...args] = (env.SHELL || "/bin/sh").split(/\s+/).filter(Boolean);
+      const box = mkdtempSync(join(tmpdir(), "jarvis-shell-"));
+      const request = join(box, "request");
+      const done = (end: ShellEnd) => {
+        clearInterval(poll);
+        rmSync(box, { recursive: true, force: true });
+        resolve(end);
+      };
+      const child = spawn(command ?? "/bin/sh", [...args, "-i"], {
+        cwd: dir,
+        stdio: "inherit",
+        env: {
+          ...process.env,
+          ...env,
+          JARVIS_RUN: shortRunId(run.id),
+          JARVIS_SHELL: shortRunId(run.id),
+          JARVIS_SHELL_REQUEST: request,
+          JARVIS_SHELL_PARENT: String(process.pid),
+        },
+      });
+      let asked = false;
+      const poll = setInterval(() => {
+        if (!asked && existsSync(request)) {
+          asked = true;
+          child.kill("SIGHUP");
+        }
+      }, 200);
+      child.on("error", () => done("failed"));
+      child.on("exit", () => {
+        // a shell closed by a signal may leave the terminal as its line editor had it
+        if (asked && (process.stdin as { isTTY?: boolean }).isTTY)
+          spawnSync("stty", ["sane"], { stdio: "inherit" });
+        done(asked || existsSync(request) ? "go-on" : "left");
+      });
     });
-    return !r.error;
-  };
+}
+
+/**
+ * `jarvis continue` typed in the shell a card opened: asks the card to go on and returns true; false
+ * when this is no such shell or its card is gone (then the command does its usual work).
+ */
+export function askCardToGoOn(ctx: CliContext): boolean {
+  const request = ctx.env?.JARVIS_SHELL_REQUEST;
+  const parent = Number(ctx.env?.JARVIS_SHELL_PARENT);
+  if (!request || !Number.isInteger(parent) || parent <= 0) return false;
+  try {
+    process.kill(parent, 0); // the card's process is still there
+    writeFileSync(request, GO_ON);
+  } catch {
+    return false;
+  }
+  ctx.out.line(
+    `${ctx.out.style.warn("↩")} back to the card of run ${ctx.env?.JARVIS_SHELL ?? "?"} — it goes on`,
+  );
+  return true;
 }
 
 export interface Change {
@@ -72,17 +133,4 @@ export function formatChanges(changes: readonly Change[], st: Style, shown = 5):
   };
   const more = changes.length > shown ? `  ${st.muted(`+${changes.length - shown}`)}` : "";
   return `${changes.slice(0, shown).map(label).join("  ")}${more}`;
-}
-
-/**
- * In the shell a run's card opened (`s`), `jarvis continue` would run the step under the card that is
- * still waiting: say how to get back instead. Pilot: typed there out of habit.
- */
-export function refuseInsideRunShell(ctx: CliContext): void {
-  const id = ctx.env?.JARVIS_SHELL;
-  if (!id) return;
-  ctx.out.error(
-    `this is the shell jarvis opened for run ${id}: \`exit\` (Ctrl-D) goes back to its card, then r runs the step again`,
-  );
-  throw new CliExit(EXIT.error);
 }

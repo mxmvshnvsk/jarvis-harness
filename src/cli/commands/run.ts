@@ -22,10 +22,10 @@ import { gitIdentityEnv, WorktreeError, WorktreeWorkspace } from "../../orchestr
 import { LeaseLostError, newRunId, shortRunId } from "../../storage/runStore.ts";
 import { git } from "../../tools/local/exec.ts";
 import {
+  askCardToGoOn,
   changesIn,
   checkoutLink,
   formatChanges,
-  refuseInsideRunShell,
   type ShellIn,
   systemShell,
 } from "../checkout.ts";
@@ -174,7 +174,8 @@ function promptFor(ctx: CliContext, runtime: Runtime): Prompt | undefined {
  * given one. At a terminal it asks right there and goes on; a parked, failed or crashed run resumes.
  */
 export async function runContinue(ctx: CliContext, ref: string | undefined): Promise<void> {
-  refuseInsideRunShell(ctx);
+  // typed in the shell a card opened (`s`): the card goes on, the shell closes
+  if (!ref && askCardToGoOn(ctx)) return;
   const loaded = await loadForCli(ctx);
   const runtime = createRuntime(loaded, { env: ctx.env });
   const prompt = promptFor(ctx, runtime);
@@ -1082,7 +1083,7 @@ export async function runShellIn(
     ctx.out.line(
       `${st.muted("a shell in the checkout of run")} ${st.name(shortRunId(run.id))} ${checkoutLink(st, dir, ctx.homeDir)} ${st.muted("— exit (Ctrl-D) to come back")}`,
     );
-    (options.shell ?? systemShell(ctx))(dir, run);
+    await (options.shell ?? systemShell(ctx))(dir, run);
     const changes = changesIn(dir);
     if (changes && changes.length > 0) ctx.out.line(`${st.muted("changed:")} ${formatChanges(changes, st)}`);
     if (run.state === "WAITING_HUMAN" || run.state === "SUSPENDED" || run.state === "WAITING_BUDGET")
