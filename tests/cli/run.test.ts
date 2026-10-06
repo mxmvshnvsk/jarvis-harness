@@ -431,6 +431,32 @@ steps:
       const again = await jarvis(["continue", id], OFF);
       expect(again.out).toMatch(new RegExp(`run ${id} went on as [0-9a-f]{8}`));
     });
+
+    it("a cancelled continuation does not count: the approved spec goes on again", async () => {
+      const OFF = { JARVIS_INTERACTIVE: "off" };
+      const parked = await jarvis(["work", "ABC-12", "--workflow", "short"], OFF);
+      const id = /run ([0-9a-f]{8})/.exec(parked.err)?.[1] as string;
+      await jarvis(["approve", id, "--resume"], OFF);
+      // a continuation that was started and then cancelled (the gateway was down, say)
+      const loaded = await loadConfig({ cwd: sb.project, homeDir: sb.home, env: {} });
+      const rt = createRuntime(loaded, { env: {} });
+      const spec = rt.runs.resolve(id);
+      const cancelled = rt.runs.create({
+        task: "ABC-12",
+        workflow: "long",
+        owner: { kind: "user", id: "me@corp", verified: false },
+        workspace: { mode: "cwd", repoRoot: sb.project, path: sb.project, baseRef: "HEAD" },
+        dataClass: "internal",
+      });
+      rt.events.emit({ kind: "run.created", runId: cancelled.id, payload: { continuedFrom: spec?.id } });
+      rt.runs.transition(cancelled.id, "CANCELLED", { reason: "cancelled" });
+      rt.close();
+
+      const on = await jarvis(["continue", id], OFF);
+      expect(on.code).toBe(0);
+      expect(on.out).toContain("COMPLETED");
+      expect(on.out).not.toContain("went on as");
+    });
   });
 
   it("skips a step with nothing to do: `when: { affects: docs }` and an impact without docs", async () => {

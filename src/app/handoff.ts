@@ -22,11 +22,16 @@ export function continuationStep(from: Run, target: WorkflowDefinition): string 
 
 /** The run that took this one on, if any. */
 export function continuedBy(runtime: Runtime, from: Run): string | undefined {
+  let found: string | undefined;
   for (const e of runtime.events.list({ kind: "run.created", limit: 100_000 })) {
     const p = (e.payload ?? {}) as { continuedFrom?: string };
-    if (p.continuedFrom === from.id && e.runId) return e.runId;
+    if (p.continuedFrom !== from.id || !e.runId) continue;
+    // a continuation that was cancelled does not count: the approved spec can go on again
+    // (pilot: an implementation cancelled while the gateway was down left its spec stranded)
+    if (runtime.runs.get(e.runId)?.state === "CANCELLED") continue;
+    found = e.runId;
   }
-  return undefined;
+  return found;
 }
 
 /**
