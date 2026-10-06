@@ -46,7 +46,11 @@ const events = [
   ev("run.created", { task: "T" }, 0),
   ev("step.start", { stepId: "spec", iteration: 1 }, 1),
   ev("agent.start", { agent: "specification", modelId: "flash", maxToolCalls: 20 }, 2),
-  ev("tool.call", { capability: "repo.read", ok: true, args: '{"path":"src/shared/delivery-fields.ts"}' }, 30),
+  ev(
+    "tool.call",
+    { capability: "repo.read", ok: true, args: '{"path":"src/shared/delivery-fields.ts"}' },
+    30,
+  ),
   ev("model.call", { promptTokens: 9000, outputTokens: 300, latencyMs: 40_000 }, 70),
   ev("tool.call", { capability: "repo.search", ok: true, args: '{"pattern":"compact"}' }, 71),
   ev("model.progress", { outputChars: 0, reasoningChars: 8000 }, 100),
@@ -116,7 +120,9 @@ describe("output snapshots", () => {
     expect(asciiOnly({ LANG: "en_US.UTF-8" })).toBe(false);
     expect(asciiOnly({ LANG: "C" })).toBe(false);
     expect(asciiOnly({ LANG: "en_US.UTF-8", JARVIS_ASCII: "1" })).toBe(true);
-    expect(toAscii(formatStepReport(report, [artifact], createStyle(false), 8)[0] as string)).toMatchInlineSnapshot(
+    expect(
+      toAscii(formatStepReport(report, [artifact], createStyle(false), 8)[0] as string),
+    ).toMatchInlineSnapshot(
       `"v [2/9] research  3m 12s  research . 6 calls . 98k->4.1k tok . repo.readx12 searchx6 knowledge.readx3 (21/40) . 1 retry  -> research.json"`,
     );
     const ascii = frame(80, { JARVIS_ASCII: "1" });
