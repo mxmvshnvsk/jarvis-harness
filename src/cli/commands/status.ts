@@ -93,7 +93,9 @@ function renderOverview(
     if (overview.runs.length === 0) {
       ctx.out.line(options.all ? "no runs" : "no active runs (use --all to include completed and cancelled)");
     } else {
-      const w = Math.max(...overview.runs.map((r) => r.task.length), 4);
+      // a task can be a paragraph (onboarding prompts): its first line, cut, plain — a column, not a document
+      const taskOf = (task: string) => oneLine(task.replace(/`/g, ""), 48);
+      const w = Math.max(...overview.runs.map((r) => [...taskOf(r.task)].length), 4);
       const st = ctx.out.style;
       ctx.out.line(
         st.heading(
@@ -113,7 +115,7 @@ function renderOverview(
               ? st.warn("cancel requested")
               : st.muted("-");
         ctx.out.line(
-          `${st.name(padEnd(shortRunId(r.id), 8))}  ${padEnd(r.task, w)}  ${st.byState(r.state, padEnd(r.state, 15))}  ${padEnd(step, 22)}  ${st.muted(padEnd(ago(r.updatedAt, now), 9))}  ${lease}`,
+          `${st.name(padEnd(shortRunId(r.id), 8))}  ${padEnd(taskOf(r.task), w)}  ${st.byState(r.state, padEnd(r.state, 15))}  ${padEnd(step, 22)}  ${st.muted(padEnd(ago(r.updatedAt, now), 9))}  ${lease}`,
         );
       }
     }
@@ -150,7 +152,7 @@ export function renderDetail(ctx: CliContext, d: RunDetail, now: Date, eventLimi
   const r = d.run;
   out.line(`${st.heading("run")} ${st.name(r.id)}  ${st.muted(`(${shortRunId(r.id)})`)}`);
   out.line(
-    `${f("task")}${r.task}    ${st.muted("workflow")} ${r.workflow}    ${st.muted("dataClass")} ${r.dataClass}${r.profile ? `    ${st.muted("profile")} ${r.profile}` : ""}`,
+    `${f("task")}${oneLine(r.task, 120)}    ${st.muted("workflow")} ${r.workflow}    ${st.muted("dataClass")} ${r.dataClass}${r.profile ? `    ${st.muted("profile")} ${r.profile}` : ""}`,
   );
   out.line(
     `${f("state")}${st.state(r.state)}${r.stateReason ? ` ${st.muted("—")} ${r.stateReason}` : ""}${r.cancelRequested ? `  ${st.warn("(cancel requested)")}` : ""}`,

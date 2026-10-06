@@ -162,6 +162,24 @@ describe("jarvis status", () => {
     expect(c.out).toContain("cancelled");
   });
 
+  it("keeps one line per run when a task is a paragraph (pilot: onboarding prompts)", async () => {
+    const loaded = await loadConfig({ cwd: sb.project, homeDir: sb.home, env: {} });
+    const rt = createRuntime(loaded, { env: {} });
+    rt.runs.create({
+      task: "Map the module `packages/shared` of this repository for onboarding.\nDeterministic facts: 3 files.\nStay inside `packages/shared`.",
+      workflow: "onboard-module",
+      owner: { kind: "user", id: "me@corp", verified: false },
+      workspace: { mode: "cwd", repoRoot: sb.project, path: sb.project, baseRef: "HEAD" },
+      dataClass: "internal",
+    });
+    rt.close();
+    const all = await jarvis(["status", "--all"]);
+    const rows = all.out.split("\n").filter((l) => /^[0-9a-f]{8} /.test(l));
+    expect(rows).toHaveLength(2);
+    expect(all.out).toContain("Map the module packages/shared of this reposito…");
+    expect(all.out).not.toContain("Deterministic facts");
+  });
+
   it("says a finished run has nothing to cancel instead of requesting a cancel (pilot)", async () => {
     expect((await jarvis(["cancel", runId])).code).toBe(0);
     const again = await jarvis(["cancel", runId]);
