@@ -120,7 +120,7 @@ export const QuotaPoolSchema = z.strictObject({
    * perRun) of calls on this pool grow this many times: the pool lets everything through, a step
    * that loops still ends.
    */
-  unlimitedScale: z.number().min(1).default(5),
+  unlimitedScale: z.number().min(1).default(10),
   /** The zone of `unlimited` (IANA, e.g. Europe/Moscow); none — the machine's. */
   timezone: z.string().refine(knownZone, "an IANA time zone, e.g. Europe/Moscow").optional(),
 });

@@ -94,7 +94,7 @@ Remaining commands of ADR-0001 §15:
 - quota pools: unlimited hours (`quotaPools.<pool>.unlimited`: days and/or HH:MM in `timezone`; touching spans run
   together) — admission lets calls through, what was spent then is not counted in the window afterwards, a pool
   that waits goes on when its window frees or its unlimited hours begin; in those hours agent limits and
-  `budget.perStep/perRun` grow `unlimitedScale` times (default 5, read at every check, grants on top); a call that
+  `budget.perStep/perRun` grow `unlimitedScale` times (default 10, read at every check, grants on top); a call that
   does not fit its pool goes to the role's next model in another pool (`model.failover`, back once the first has
   room); `jarvis models` and the models button in `jarvis ui` (`∞ until 07:00`, `∞`) show it; the window in the
   popover shows input tokens too

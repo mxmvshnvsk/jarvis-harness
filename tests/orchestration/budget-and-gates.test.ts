@@ -113,7 +113,7 @@ describe("budget in the pool's unlimited hours", () => {
     );
     sb.write("project/.jarvis/project.yaml", "version: 1\nbudget:\n  perStep: { inputTokens: 100 }\n");
     rt = await testRuntime(sb);
-    expect(rt.budget.scaleNow("night")).toBe(5);
+    expect(rt.budget.scaleNow("night")).toBe(10);
     server.respond(() => completion("ok")); // 42 prompt tokens per call
     const wf = workflowOf({
       name: "bn",
@@ -132,8 +132,8 @@ describe("budget in the pool's unlimited hours", () => {
     });
     const run = createRun(rt, "bn");
     const result = await engine.execute(run.id, owner);
-    expect(result.run.stateReason).toContain("budget.perStep.inputTokens exceeded: 504 of 500");
-    expect(server.requests).toHaveLength(12); // 0 … 462 used → allowed; 504 ≥ 100 × 5 → refused
+    expect(result.run.stateReason).toContain("budget.perStep.inputTokens exceeded: 1008 of 1000");
+    expect(server.requests).toHaveLength(24); // 0 … 966 used → allowed; 1008 ≥ 100 × 10 → refused
   });
 });
 
