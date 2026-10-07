@@ -328,4 +328,30 @@ describe("Knowledge → Modules", () => {
     expect(r.location).toBe("/knowledge/modules?path=src%2Forders&notice=resumed");
     expect(adopted).toEqual([run.id]);
   });
+
+  it("Cancel on a run's page: at once when nothing runs it, at the next safe point when something does", async () => {
+    const mk = () =>
+      rt.runs.create({
+        task: "Map the module `src/orders` of this repository for onboarding.",
+        workflow: "onboard-module",
+        owner: DEV,
+        workspace: { mode: "cwd", repoRoot: sb.project, path: sb.project, baseRef: "HEAD" },
+        dataClass: "internal",
+      });
+    const idle = mk();
+    rt.runs.transition(idle.id, "RUNNING");
+    rt.runs.transition(idle.id, "WAITING_BUDGET", { reason: "quota" });
+    const short = (id: string) => id.replace(/^run_/, "").slice(0, 8);
+    expect(await page(`/runs/${short(idle.id)}`)).toContain("Cancel run…");
+    expect((await post(`/runs/${short(idle.id)}/cancel`, [])).location).toContain("notice=cancelled");
+    expect(rt.runs.get(idle.id)?.state).toBe("CANCELLED");
+    expect(await page(`/runs/${short(idle.id)}`)).not.toContain("Cancel run…");
+    expect((await post(`/runs/${short(idle.id)}/cancel`, [])).location).toContain("notice=already-ended");
+
+    const busy = mk();
+    rt.runs.acquireLease(busy.id, "cli:elsewhere", 60_000);
+    rt.runs.transition(busy.id, "RUNNING");
+    expect((await post(`/runs/${short(busy.id)}/cancel`, [])).location).toContain("notice=cancel-requested");
+    expect(rt.runs.get(busy.id)).toMatchObject({ state: "RUNNING", cancelRequested: true });
+  });
 });

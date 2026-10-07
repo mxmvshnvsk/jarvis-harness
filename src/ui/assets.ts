@@ -261,6 +261,13 @@ tr:last-child td{border-bottom:0}
 .tail{margin:6px 0 0;padding:10px 12px;border-radius:8px;background:var(--sunken);border:1px solid var(--line);font-size:12px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere;max-height:240px;overflow:auto}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 .tabs a[aria-current=page]{color:var(--ink);font-weight:600;border-bottom:2px solid var(--ink)}
+.cancel{align-self:flex-start}
+.cancel>summary{list-style:none;width:max-content}
+.cancel>summary::-webkit-details-marker{display:none}
+.cancel[open]>summary{border-color:var(--ink-2)}
+.cancel .row{margin-top:8px}
+.btn.danger{color:var(--bad);border-color:var(--bad)}
+.btn.danger:hover{background:var(--bad-bg);color:var(--bad)}
 /* Knowledge: overview, documents, standards, skills, glossary */
 .row>.grow,.mpath>.grow{flex:1 1 280px;min-width:0}
 .ksearch,.kbox{padding:18px 20px;display:flex;flex-direction:column;gap:12px}

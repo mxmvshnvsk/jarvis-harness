@@ -40,7 +40,7 @@ import { modelsHealthOf } from "../app/modelHealth.ts";
 import type { Runtime } from "../app/runtime.ts";
 import { type OpenIn, reviewFiles } from "../cli/checkout.ts";
 import type { Actor } from "../core/domain/actor.ts";
-import type { Run } from "../core/domain/run.ts";
+import { isTerminal, type Run } from "../core/domain/run.ts";
 import { loadKnowledgeDocs } from "../knowledge/resolver.ts";
 import { loadGlossary } from "../knowledge/retrieval/glossary.ts";
 import type { RetrievalResult } from "../knowledge/retrieval/retriever.ts";
@@ -410,6 +410,9 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
       "not-waiting": html`<div class="banner bad">The run no longer waits here: nothing recorded</div>`,
       amount: html`<div class="banner bad">Say how many more — a whole number above zero</div>`,
       resumed: html`<div class="banner ok">Resumed — it goes on in the background; if the window is still full, it waits again</div>`,
+      cancelled: html`<div class="banner ok">Cancelled — nothing runs it any more; its checkout and artifacts stay</div>`,
+      "cancel-requested": html`<div class="banner ok">Cancel requested — the process running it stops at its next safe point (after the current model or tool call)</div>`,
+      "already-ended": html`<div class="banner bad">The run has ended already: nothing to cancel</div>`,
       resuming: html`<div class="banner ok">It is being resumed already</div>`,
       "no-launcher": html`<div class="banner bad">This page cannot start runs: resume it with <code>jarvis resume</code></div>`,
       started: html`<div class="banner ok">Started — it prepares its checkout and shows up under Running; where it needs you, it waits here</div>`,
@@ -954,7 +957,7 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
         "Cache-Control": "no-store",
       });
     }
-    const m = /^\/runs\/([^/]+)\/(decide|rerun|open|budget|resume)$/.exec(r.url.pathname);
+    const m = /^\/runs\/([^/]+)\/(decide|rerun|open|budget|resume|cancel)$/.exec(r.url.pathname);
     const run = m ? resolveRun(m[1] as string) : undefined;
     if (!m || !run || !actions) return notFound(r, `Nothing to do at ${r.url.pathname}.`);
     const form = await formOf(r.req);
@@ -987,6 +990,22 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
         editor
           ? `/runs/${short}?notice=opened&editor=${encodeURIComponent(editor)}`
           : `/runs/${short}?notice=no-editor`,
+      );
+    }
+    if (m[2] === "cancel") {
+      // as `jarvis cancel`: at once when nothing executes it, else at its next safe point (ADR-0002 §6)
+      if (isTerminal(run.state)) return redirect(r, `/runs/${short}?notice=already-ended`);
+      const who = await actor();
+      const updated = runtime.runs.requestCancel(run.id);
+      runtime.events.emit({
+        kind: "run.cancel",
+        runId: run.id,
+        ...(who ? { actor: `${who.kind}:${who.id}` } : {}),
+        payload: { immediate: updated.state === "CANCELLED", by: "ui" },
+      });
+      return redirect(
+        r,
+        `/runs/${short}?notice=${updated.state === "CANCELLED" ? "cancelled" : "cancel-requested"}`,
       );
     }
     if (m[2] === "resume") {

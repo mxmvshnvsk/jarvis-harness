@@ -8,7 +8,7 @@ import type { Change } from "../cli/checkout.ts";
 import { toolMix } from "../cli/progress.ts";
 import { documentToMarkdown } from "../cli/render.ts";
 import { incompleteOf } from "../cli/style.ts";
-import type { Run } from "../core/domain/run.ts";
+import { isTerminal, type Run } from "../core/domain/run.ts";
 import type { EgressNotice } from "../security/policy/egress.ts";
 import { shortRunId } from "../storage/runStore.ts";
 import { type DiffFile, escapeHtml, type Html, html, join, markdownToHtml, type Part } from "./html.ts";
@@ -624,6 +624,14 @@ ${card.decision ? "" : terminalHint(card, page.terminal, page.run)}
 </section>`;
 }
 
+/** Cancel, in two clicks (no dialogs): as `jarvis cancel` — at once when idle, else at the next safe point. */
+function cancelHtml(run: Run, actions: Actions): Html {
+  const short = shortRunId(run.id);
+  return html`<details class="cancel"><summary class="btn small">Cancel run…</summary>
+<div class="row">${form(actions, `/runs/${encodeURIComponent(short)}/cancel`, html`<button type="submit" class="btn small danger">Yes, cancel ${short}</button>`)}<span class="hint">${run.lease && Date.parse(run.lease.until) >= Date.now() ? "a process runs it: it stops after its current model or tool call" : "nothing runs it now: it is cancelled at once"}; the checkout and the artifacts stay.</span></div>
+</details>`;
+}
+
 /** A run parked on a quota window or a model: not failed — when it goes on, and who resumes it. */
 function waitHtml(page: RunPage, wait: BudgetWait, now: number, actions?: Actions): Html {
   const short = shortRunId(page.run.id);
@@ -697,6 +705,7 @@ export function runContent(page: RunPage, now: number, actions?: Actions, notice
 <h1>${firstLine(r.task, 300)}</h1>
 ${rest ? html`<p class="muted" style="white-space:pre-wrap">${cut(rest, 600)}</p>` : ""}
 ${r.stateReason && r.state !== "RUNNING" && r.state !== "WAITING_BUDGET" ? html`<p class="muted">${r.stateReason}</p>` : ""}
+${actions && !isTerminal(r.state) ? cancelHtml(r, actions) : ""}
 </div>
 ${notice ?? ""}
 <div class="cols">
