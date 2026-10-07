@@ -1,4 +1,5 @@
 import type { DeterministicTool } from "../orchestration/executors.ts";
+import { type AnchorHit, anchorsIn, anchorsSection, hitOf } from "./anchors.ts";
 import { type ContractCheck, checkContracts, contractsSection } from "./contracts.ts";
 import { figmaLinksIn } from "./figma.ts";
 
@@ -68,12 +69,31 @@ export const collectSources: DeterministicTool = async (ctx, args) => {
         ...(contracts.unreadable.length > 0 ? { unreadable: contracts.unreadable } : {}),
       },
     });
-  if (read.length > 0 || contracts) {
+  // the code names and interface texts they mention, found in the code: where the agents start
+  const anchors: AnchorHit[] = [];
+  if (available.has("repo.search"))
+    for (const anchor of anchorsIn(sources.map((s) => s.text))) {
+      const r = await ctx.tools.invoke("repo.search", {
+        pattern: anchor.value,
+        literal: true,
+        maxResults: 200,
+      });
+      if (r.ok) anchors.push(hitOf(anchor, withoutHead(r.text).split("\n").filter(Boolean)));
+    }
+  if (anchors.length > 0)
+    ctx.runtime.events.emit({
+      kind: "sources.anchors",
+      runId: ctx.run.id,
+      stepId: ctx.step.id,
+      iteration: ctx.iteration,
+      payload: { anchors: anchors.length, found: anchors.filter((a) => a.total > 0).length },
+    });
+  if (read.length > 0 || contracts || anchors.length > 0) {
     const artifact = ctx.runtime.artifacts.put({
       runId: ctx.run.id,
       type: "sources",
       name: "sources.md",
-      content: sourcesDoc(read, contracts),
+      content: sourcesDoc(read, contracts, anchors),
       provenance: { kind: "tool", capability: "sources.collect" },
       stepId: ctx.step.id,
       iteration: ctx.iteration,
@@ -168,7 +188,11 @@ export const collectSources: DeterministicTool = async (ctx, args) => {
 const withoutHead = (text: string): string => text.replace(/^\[[a-z.]+\] ok\n/, "");
 
 /** The issues and pages as read, in order, each clipped, all within the total. */
-function sourcesDoc(read: ReadonlyArray<{ from: string; text: string }>, contracts?: ContractCheck): string {
+function sourcesDoc(
+  read: ReadonlyArray<{ from: string; text: string }>,
+  contracts?: ContractCheck,
+  anchors: readonly AnchorHit[] = [],
+): string {
   let left: number = SOURCES_LIMITS.total;
   const parts = read.map((s) => {
     const room = Math.max(0, Math.min(SOURCES_LIMITS.perSource, left));
@@ -186,6 +210,7 @@ function sourcesDoc(read: ReadonlyArray<{ from: string; text: string }>, contrac
     "",
     parts.join("\n\n"),
     ...(contracts ? ["", contractsSection(contracts)] : []),
+    ...(anchors.length > 0 ? ["", anchorsSection(anchors)] : []),
     "",
   ].join("\n");
 }

@@ -77,6 +77,9 @@ export function systemLayer(
     "Rules:",
     "- You act inside one repository workspace through the tools listed below; nothing else exists.",
     "- Evidence first: read files before making claims; cite paths and line numbers as sources.",
+    // pilot: 44 of 58 model calls asked for two tools, mostly independent reads; every call re-sends the
+    // whole prompt and takes its seconds, so the count of calls is the run's time
+    "- Batch what is independent: every read, search or listing you already know you need goes into the same turn as parallel tool calls (up to 8 at once). One call per turn only when the next depends on its result.",
     "- Never invent file contents, APIs, tickets or test results. What you cannot verify is an unknown.",
     "- Secrets in tool output appear as [REDACTED:…]; never try to recover or guess them.",
     "- Tool calls that are denied by policy are final; do not retry them with other arguments.",

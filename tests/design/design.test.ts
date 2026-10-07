@@ -347,6 +347,27 @@ ${extra.yaml ?? ""}
     });
   });
 
+  it("the names the task mentions, found in the code through the router: where the agents start", async () => {
+    const { run } = await setup(
+      false,
+      () => sb.write("project/src/api/slots.ts", "export function getDeliverySlots() {\n  return [];\n}\n"),
+      { task: "ABC-42: show what getDeliverySlots returns; isCourierFree is new" },
+    );
+    const runtime = rt as Runtime;
+    const text = runtime.artifacts.text(runtime.artifacts.listLatest(run.run.id, "sources")[0] as never);
+    expect(text).toContain("## Where the sources' names and texts are in the code");
+    expect(text).toContain("- `getDeliverySlots` — src/api/slots.ts:1");
+    expect(text).toContain("- `isCourierFree` — not in the code");
+    const searches = runtime.events
+      .list({ runId: run.run.id, kind: "tool.call" })
+      .filter((e) => e.payload?.capability === "repo.search");
+    expect(searches).toHaveLength(2);
+    expect(runtime.events.list({ runId: run.run.id, kind: "sources.anchors" })[0]?.payload).toEqual({
+      anchors: 2,
+      found: 1,
+    });
+  });
+
   it("design.collect, the step's first name, still runs it: workflows of a project may use it", async () => {
     const { run } = await setup(false, undefined, { tool: "design.collect" });
     expect(run.run.state).toBe("COMPLETED");
