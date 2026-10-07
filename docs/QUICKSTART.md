@@ -75,7 +75,7 @@ list`, `jarvis skills list` — что получит агент для этог
 
 ```sh
 jarvis work ABC-42                  # ветка jarvis/ABC-42/<run8>, checkout ~/.jarvis/worktrees/<repo>/<run8>-ABC-42;
-                                    # граф sdd: discover → design → research → requirements → spec → [gate] →
+                                    # граф sdd: discover → sources → research → requirements → spec → [gate] →
                                     # impact → plan → implementation → verify(tests, standards, checks, docs, telemetry)
                                     # → review → [gate] → release-notes
 jarvis status <run> --watch 5       # id прогона из вывода work; без аргумента — все активные
@@ -84,7 +84,7 @@ jarvis c                            # вернуться к прогону, ко
 
 Короче: `jarvis fix ABC-43` — путь для бага (research → spec → [gate] → implementation → standards и checks →
 review → [gate]); `jarvis research ABC-44` — только исследование, ничего не меняя; `jarvis spec ABC-42` — до
-одобренной spec. Шаг `design` читает задачу, её страницы Confluence и макеты Figma без модели.
+одобренной spec. Шаг `sources` без модели читает задачу, её страницы Confluence и макеты Figma и сверяет упомянутые методы API с картой контрактов.
 
 Коды выхода: `0` готово, `1` ошибка, `10` ждёт человека, `11` ждёт квоту или модель, `12` отказ policy,
 `13` потеря аренды, `130` остановлен Ctrl-C (прогон сохранил место) (ADR-0009 §3). Run durable: закрыли терминал —

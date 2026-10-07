@@ -201,7 +201,7 @@ Preflight (все MCP-серверы, до которых могут дотян�
 
 ### `jarvis fix <task> [--base <ref>] [--fresh design]`
 
-Короткий путь для бага (встроенный workflow `fix`): `discover → design → research → spec → approve-spec →
+Короткий путь для бага (встроенный workflow `fix`): `discover → sources → research → spec → approve-spec →
 implementation → verify (standards, checks) → review → approve-impl`. Без анализа требований, impact, плана,
 документации, телеметрии и release notes — для однострочного исправления `sdd` запускал одиннадцать агентов,
 которые перечитывали одни и те же файлы. Implementation без плана реализует требования spec и пишет тесты,
@@ -212,20 +212,21 @@ jest — только связанные тесты (`--findRelatedTests`). Уп
 
 ### `jarvis research <task> [--base <ref>] [--fresh design]` / `jarvis spec <task> [--base <ref>] [--fresh design]`
 
-Частичные прогоны: `research` выполняет только `discover → design → research`; `spec` — исследование, анализ
+Частичные прогоны: `research` выполняет только `discover → sources → research`; `spec` — исследование, анализ
 требований и спецификацию до её утверждения (выход 10 на гейте; `jarvis approve <run> --resume` завершает run).
 Это встроенные workflow `research` и `spec`; их можно заменить файлами `.jarvis/workflows/research.yaml` и
 `spec.yaml`. Остальное — как у `work`.
 
-Шаг `design` модель не вызывает: читает задачу из Jira по ключу (`ABC-123`) и связанные страницы Confluence и
-пишет артефакт `sources`; если доступен `figma.get` — описывает макеты в артефакте `design`. Агенты research и
+Шаг `sources` модель не вызывает: читает задачу из Jira по ключу (`ABC-123`) и связанные страницы Confluence и
+пишет артефакт `sources`; с `contracts` в конфиге проекта сверяет упомянутые методы API (`GET /path`) с картой и
+дописывает итог туда же; если доступен `figma.get` — описывает макеты в артефакте `design`. Агенты research и
 requirements получают оба на вход и задачу со страницами заново не читают.
 
 Макеты Jarvis хранит сутки (см. [integrations.md](integrations.md)): если дизайн поменяли по той же ссылке, следующая
 задача в течение суток получит старый. `--fresh design` (у `work`, `fix`, `spec`, `research`; в UI — галочка «Read
 the Figma frames again» в New task) читает все фреймы задачи из Figma заново, мимо кэша, и кладёт новые версии в
 кэш — следующие задачи получат уже их. Флаг хранится в run: resume и повтор шага тоже читают заново. Каждый фрейм —
-запрос к Figma API; строка шага `design` и `design.md` пишут «read again from Figma, past the cache».
+запрос к Figma API; строка шага `sources` и `design.md` пишут «read again from Figma, past the cache».
 
 Противоречия в требованиях research не разрешает молча, а выносит отдельным списком `contradictions`. Это два
 источника, которые спорят, одно правило, дающее разным веткам одно и то же условие, текст против макета. Код, который
@@ -463,7 +464,7 @@ usual», дольше `timeoutMs` модели — «past the model timeout»), 
 
 ```
 ▶ spec · ABC-1 · run 1a2b3c4d
-  discover → design → research → requirements → spec → approve-spec
+  discover → sources → research → requirements → spec → approve-spec
 ✓ [1/6] discover      0.4s    deterministic  → project-capabilities.json
 ✓ [2/6] design        2.1s    deterministic  → sources.md, design.md
 ✓ [3/6] research      3m 12s  research · 9 calls · 182k→6.1k tok · 23/60 tools  → research.md

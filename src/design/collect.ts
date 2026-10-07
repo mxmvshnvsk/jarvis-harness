@@ -1,4 +1,5 @@
 import type { DeterministicTool } from "../orchestration/executors.ts";
+import { type ContractCheck, checkContracts, contractsSection } from "./contracts.ts";
 import { figmaLinksIn } from "./figma.ts";
 
 /** How far the step goes without a model: issues named by the task, their pages, the frames found. */
@@ -10,16 +11,18 @@ const num = (v: unknown, fallback: number) => (typeof v === "number" && v > 0 ? 
 export const SOURCES_LIMITS = { perSource: 20_000, total: 60_000 } as const;
 
 /**
- * `design.collect` — the task's sources and their design frames, read by code before any agent runs:
- * the issues the task names (`jira.get`), the Confluence pages they link (`confluence.get`, embedded
- * frames included), every Figma frame link found there (`figma.get`, described by code). Two artifacts
- * the agents get as inputs: `sources` (the issues and pages as read) and `design` (the frames). Every
+ * `sources.collect` (step `sources`; `design.collect` is its first name) — the task's inputs, read by
+ * code before any agent runs: the issues the task names (`jira.get`), the Confluence pages they link
+ * (`confluence.get`, embedded frames included), the API methods they name checked against the project's
+ * contract maps (src/design/contracts.ts), every Figma frame link found there (`figma.get`, described by
+ * code). Two artifacts the agents get as inputs: `sources` (the issues and pages as read, the methods
+ * checked) and `design` (the frames). Every
  * call goes through the Tool Router like an agent's — policy, the egress exception, the journal.
  * Pilot: the research agent read 2 of 7 frames and spent its tool calls deciding which; and with the
  * pages read here only for their links, it read the issue and a page three times each and never
  * opened the page with the API the task needed.
  */
-export const collectDesign: DeterministicTool = async (ctx, args) => {
+export const collectSources: DeterministicTool = async (ctx, args) => {
   const limits = {
     issues: num(args.maxIssues, DESIGN_LIMITS.issues),
     pages: num(args.maxPages, DESIGN_LIMITS.pages),
@@ -50,13 +53,28 @@ export const collectDesign: DeterministicTool = async (ctx, args) => {
     }
   const outputs: string[] = [];
   const read = sources.slice(1);
-  if (read.length > 0) {
+  // the API methods they name, checked against the project's contract maps: settled before the agents
+  const contracts = checkContracts(ctx.workspace.ref.path, ctx.runtime.loaded.config.contracts, sources);
+  if (contracts)
+    ctx.runtime.events.emit({
+      kind: "sources.contracts",
+      runId: ctx.run.id,
+      stepId: ctx.step.id,
+      iteration: ctx.iteration,
+      payload: {
+        files: contracts.files,
+        mentions: contracts.results.length,
+        found: contracts.results.filter((r) => r.matches.length > 0).length,
+        ...(contracts.unreadable.length > 0 ? { unreadable: contracts.unreadable } : {}),
+      },
+    });
+  if (read.length > 0 || contracts) {
     const artifact = ctx.runtime.artifacts.put({
       runId: ctx.run.id,
       type: "sources",
       name: "sources.md",
-      content: sourcesDoc(read),
-      provenance: { kind: "tool", capability: "design.collect" },
+      content: sourcesDoc(read, contracts),
+      provenance: { kind: "tool", capability: "sources.collect" },
       stepId: ctx.step.id,
       iteration: ctx.iteration,
     });
@@ -131,7 +149,7 @@ export const collectDesign: DeterministicTool = async (ctx, args) => {
     type: "design",
     name: "design.md",
     content: `${doc}\n`,
-    provenance: { kind: "tool", capability: "design.collect" },
+    provenance: { kind: "tool", capability: "sources.collect" },
     stepId: ctx.step.id,
     iteration: ctx.iteration,
   });
@@ -150,7 +168,7 @@ export const collectDesign: DeterministicTool = async (ctx, args) => {
 const withoutHead = (text: string): string => text.replace(/^\[[a-z.]+\] ok\n/, "");
 
 /** The issues and pages as read, in order, each clipped, all within the total. */
-function sourcesDoc(read: ReadonlyArray<{ from: string; text: string }>): string {
+function sourcesDoc(read: ReadonlyArray<{ from: string; text: string }>, contracts?: ContractCheck): string {
   let left: number = SOURCES_LIMITS.total;
   const parts = read.map((s) => {
     const room = Math.max(0, Math.min(SOURCES_LIMITS.perSource, left));
@@ -167,6 +185,7 @@ function sourcesDoc(read: ReadonlyArray<{ from: string; text: string }>): string
     "Read by Jarvis before the agents, without a model: the issues the task names and the Confluence pages they link, as the tools returned them. Quote them by the issue key or the page id; ask jira.get / confluence.get only for what is not here.",
     "",
     parts.join("\n\n"),
+    ...(contracts ? ["", contractsSection(contracts)] : []),
     "",
   ].join("\n");
 }

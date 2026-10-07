@@ -40,6 +40,9 @@ version: 1
 # public | internal | confidential. Omitted means confidential (ADR-0016 §1).
 dataClass: confidential
 # language: ru               # what agents write for people (documents, answers); keys, code, quotes stay
+# contracts:                 # API maps the task's GET /path mentions are checked against, before the agents
+#   - files: ["server/__snapshots__/services-*.json"]
+#     about: the BFF's routes, kept true by a test
 
 roles:
   # research:       { models: [deepseek-flash] }   # order = preference (ADR-0007 §3)

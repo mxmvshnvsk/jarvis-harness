@@ -103,7 +103,7 @@ Remaining commands of ADR-0001 §15:
   run nobody moves on (decided, SUSPENDED, RUNNING without its process, parked on a quota window)
 - compaction: up to 8000 output tokens for the summary (pilot: a reasoning model spent 2000 thinking — one handoff
   empty, the next cut off, the agent re-read everything); an empty or cut-off summary is completed with the record of
-  the calls and the task's sources as read (`context.compacted` … `fallback`); `design.collect` writes the issue and
+  the calls and the task's sources as read (`context.compacted` … `fallback`); `sources.collect` writes the issue and
   its Confluence pages as read to a `sources` artifact, an input of research and requirements
 - `jarvis ui` New task offers research first and selects it
 - research lists contradictions in the requirements (`contradictions`: both sides, sources, one question for the

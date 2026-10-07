@@ -30,9 +30,9 @@ Workflow — YAML-граф шагов. `LocalWorkflowEngine` исполняет 
 | Workflow | Команда | Шаги |
 |---|---|---|
 | `sdd` | `jarvis work` | полный путь, граф ниже |
-| `fix` | `jarvis fix` | discover → design → research → spec → approve-spec → implementation → verify → review → approve-impl |
-| `spec` | `jarvis spec` | discover → design → research → requirements → spec → approve-spec; одобренная spec продолжается в `sdd` (`next:`) |
-| `research` | `jarvis research` | discover → design → research; продолжается в `sdd` (`next:`) |
+| `fix` | `jarvis fix` | discover → sources → research → spec → approve-spec → implementation → verify → review → approve-impl |
+| `spec` | `jarvis spec` | discover → sources → research → requirements → spec → approve-spec; одобренная spec продолжается в `sdd` (`next:`) |
+| `research` | `jarvis research` | discover → sources → research; продолжается в `sdd` (`next:`) |
 | `onboard-module` | `jarvis onboard --module` | map (агент `onboard-mapper`) → verify (`onboard.verify`: утверждения сверяются с кодом, выжившее — `candidate`) |
 | `ask` | `jarvis ask` | answer (агент `knowledge-answerer`) |
 | `review-diff` | `jarvis prepush` | review (семантическое ревью диапазона) |
@@ -69,7 +69,7 @@ flowchart LR
 | Шаг | Вид | Входы | Выход |
 |---|---|---|---|
 | discover | deterministic `project.discover` | — | `project-capabilities` |
-| design | deterministic `design.collect` | — | `sources` (задача и её страницы), `design` (если есть фреймы) |
+| sources | deterministic `sources.collect` (прежнее имя `design.collect` работает) | — | `sources` (задача, её страницы, сверка методов API с `contracts`), `design` (если есть фреймы) |
 | research | agent `research` | sources, design | `research` |
 | requirements | agent `requirements` | sources, research, design | `requirements` |
 | spec | agent `specification` | research, requirements, design | `spec` |

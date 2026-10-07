@@ -5,7 +5,7 @@ import type { Runtime } from "../../src/app/runtime.ts";
 import type { RunOptions } from "../../src/core/domain/run.ts";
 import { describeFrame, type FigmaDesign, figmaLinksIn, parseFigmaDesign } from "../../src/design/figma.ts";
 import { McpResultStore } from "../../src/mcp/client/results.ts";
-import { createRun, engineFor, testRuntime, workflowOf } from "../helpers/engine.ts";
+import { ACTOR, engineFor, testRuntime, workflowOf } from "../helpers/engine.ts";
 import { type Sandbox, sandbox } from "../helpers/tmp.ts";
 
 /** A design frame read by code, and the `design` step that reads the task's frames before any agent. */
@@ -177,7 +177,11 @@ ${extra}`;
     existsSync(join(sb.root, "figma.log"))
       ? readFileSync(join(sb.root, "figma.log"), "utf8").split("\n").filter(Boolean)
       : [];
-  async function setup(withFigma: boolean, before?: () => void) {
+  async function setup(
+    withFigma: boolean,
+    before?: () => void,
+    extra: { task?: string; yaml?: string; tool?: string } = {},
+  ) {
     sb.write("home/.jarvis/config.yaml", "version: 1\nactor: { id: me@corp }\n");
     sb.write(
       "project/.jarvis/project.yaml",
@@ -189,6 +193,7 @@ mcp:
 ${server("atl", "      profile: atlassian")}
 ${withFigma ? server("design", `      profile: figma\n      network: internet\n      env: { FAKE_MCP_FIGMA_LOG: "${join(sb.root, "figma.log")}" }`) : ""}
 ${withFigma ? 'egressExceptions:\n  - server: design\n    reason: "frames of the team\'s designs"' : ""}
+${extra.yaml ?? ""}
 `,
     );
     rt = await testRuntime(sb, {
@@ -198,20 +203,27 @@ ${withFigma ? 'egressExceptions:\n  - server: design\n    reason: "frames of the
     before?.();
     const wf = workflowOf({
       name: "d",
-      entry: "design",
+      entry: "sources",
       steps: [
         {
-          id: "design",
+          id: "sources",
           kind: "deterministic",
-          tool: "design.collect",
-          outputs: ["design"],
+          tool: extra.tool ?? "sources.collect",
+          outputs: ["sources", "design"],
           transitions: { onSuccess: "DONE" },
         },
       ],
     });
     const runtime = rt;
     const go = async (options?: RunOptions) => {
-      const run = createRun(runtime, "d", "ABC-42: order form phone mask", options);
+      const run = runtime.runs.create({
+        task: extra.task ?? "ABC-42: order form phone mask",
+        workflow: "d",
+        owner: ACTOR,
+        workspace: { mode: "cwd", repoRoot: sb.project, path: sb.project, baseRef: "HEAD" },
+        dataClass: runtime.loaded.config.dataClass,
+        ...(options ? { options } : {}),
+      });
       return engineFor(runtime, [wf]).execute(run.id, { owner: "cli:t" });
     };
     return { run: await go(), again: go };
@@ -222,7 +234,7 @@ ${withFigma ? 'egressExceptions:\n  - server: design\n    reason: "frames of the
     expect(run.run.state).toBe("COMPLETED");
     const runtime = rt as Runtime;
     const design = runtime.artifacts.listLatest(run.run.id, "design")[0];
-    expect(design?.provenance).toMatchObject({ kind: "tool", capability: "design.collect" });
+    expect(design?.provenance).toMatchObject({ kind: "tool", capability: "sources.collect" });
     const text = runtime.artifacts.text(design as never);
     expect(text).toContain("1 frame read, 1 not");
     expect(text).toContain("## 1. [D] UniversalModalHeader (Content=True)");
@@ -239,7 +251,7 @@ ${withFigma ? 'egressExceptions:\n  - server: design\n    reason: "frames of the
     expect(calls).toEqual(["jira.get", "confluence.get", "figma.get", "figma.get"]);
     // the issue and its page as read: an input of the agents, so they do not read them again
     const sources = runtime.artifacts.listLatest(run.run.id, "sources")[0];
-    expect(sources?.provenance).toMatchObject({ kind: "tool", capability: "design.collect" });
+    expect(sources?.provenance).toMatchObject({ kind: "tool", capability: "sources.collect" });
     const read = runtime.artifacts.text(sources as never);
     expect(read).toContain("## Issue ABC-42");
     expect(read).toContain("(77770077)");
@@ -295,6 +307,50 @@ ${withFigma ? 'egressExceptions:\n  - server: design\n    reason: "frames of the
     // what it read is the cache now: the task after it does not ask for that frame
     await again();
     expect(reads()).toEqual(["12-345", "66-77", "66-77", "12-345", "66-77", "66-77"]);
+  });
+
+  it("the API methods the task names, checked against the contract maps by code: in sources, settled", async () => {
+    const map = (app: string) =>
+      JSON.stringify({
+        "orders.close": {
+          path: "/api/{companyType}/{orderId}/close",
+          url: `http://SERVICE_HOST/orders-api/${app}/close/{orderId}`,
+        },
+        "logistics.dates": { path: "/api/logistics/dates", url: "http://SERVICE_HOST/logistics-api/dates" },
+      });
+    const { run } = await setup(
+      false,
+      () => {
+        sb.write("project/server/__snapshots__/services-web.json", map("web"));
+        sb.write("project/server/__snapshots__/services-admin.json", map("admin"));
+      },
+      {
+        task: "ABC-42: delivery slots — GET /logistics-api/delivery-slots for the form, and POST /api/{companyType}/{orderId}/close.",
+        yaml: 'contracts:\n  - files: ["server/__snapshots__/services-*.json"]\n    about: the BFF\'s routes, kept true by a test',
+      },
+    );
+    expect(run.run.state).toBe("COMPLETED");
+    const runtime = rt as Runtime;
+    const text = runtime.artifacts.text(runtime.artifacts.listLatest(run.run.id, "sources")[0] as never);
+    expect(text).toContain("## API methods named in the sources, checked against the contract map");
+    expect(text).toContain(
+      "`server/__snapshots__/services-admin.json`, `server/__snapshots__/services-web.json` (4 entries — the BFF's routes, kept true by a test)",
+    );
+    expect(text).toContain("- `GET /logistics-api/delivery-slots` (the task) — **not in the map**");
+    // one entry in both apps' maps: one line per entry as each app has it
+    expect(text).toMatch(
+      /- `POST \/api\/\{companyType\}\/\{orderId\}\/close` \(the task\) — in the map: `orders.close`/,
+    );
+    expect(runtime.events.list({ runId: run.run.id, kind: "sources.contracts" })[0]?.payload).toMatchObject({
+      mentions: 2,
+      found: 1,
+    });
+  });
+
+  it("design.collect, the step's first name, still runs it: workflows of a project may use it", async () => {
+    const { run } = await setup(false, undefined, { tool: "design.collect" });
+    expect(run.run.state).toBe("COMPLETED");
+    expect((rt as Runtime).artifacts.listLatest(run.run.id, "sources")).toHaveLength(1);
   });
 
   it("the step under a rate limit: nothing asked, every frame listed with until when", async () => {

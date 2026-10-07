@@ -59,7 +59,7 @@ Roslyn-процесс) по плану ADR-0021 §8 — отдельные па�
 MCP — `src/mcp/provider.ts`.
 
 Детерминированные шаги workflow (`tool: <name>`) находят либо встроенную функцию
-(`src/orchestration/tools/builtin.ts`: `artifact.write`, `project.discover`, `design.collect`, `standards.check`,
+(`src/orchestration/tools/builtin.ts`: `artifact.write`, `project.discover`, `sources.collect`, `standards.check`,
 `project.checks`, `impact.quick`, `onboard.verify`, `noop`, `fail`), либо любую возможность реестра
 (`project.tests`, `code.diagnostics`).
 

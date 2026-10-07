@@ -465,6 +465,15 @@ export const UserConfigSchema = z.strictObject({
 });
 export type UserConfig = z.infer<typeof UserConfigSchema>;
 
+/**
+ * A map of the project's API contracts the design step checks the task's `METHOD /path` against
+ * (src/design/contracts.ts): JSON, an object of key → { path, url, method? } or an array of them.
+ */
+export const ContractMapSchema = z.strictObject({
+  files: z.array(z.string().min(1)).min(1),
+  about: z.string().min(1).optional(),
+});
+
 /** `.jarvis/project.yaml` — the project and the team (ADR-0017 §1). */
 export const ProjectConfigSchema = z.strictObject({
   version: z.literal(CONFIG_VERSION),
@@ -490,6 +499,8 @@ export const ProjectConfigSchema = z.strictObject({
   stackScopes: z.record(z.string().min(1), z.array(z.string().min(1))).optional(),
   /** The team's language for what agents write (project over user). */
   language: LanguageSchema.optional(),
+  /** Contract maps the task's API methods are checked against before the agents (design step). */
+  contracts: z.array(ContractMapSchema).optional(),
 });
 export type ProjectConfig = z.infer<typeof ProjectConfigSchema>;
 
@@ -520,6 +531,7 @@ export const ResolvedConfigSchema = z.strictObject({
   stack: z.array(z.string().min(1)).default([]),
   stackScopes: z.record(z.string().min(1), z.array(z.string().min(1))).prefault({}),
   language: LanguageSchema.optional(),
+  contracts: z.array(ContractMapSchema).default([]),
   /** Capability patterns denied by the active profile (ADR-0009 §1); applied by the Tool Router. */
   deniedCapabilities: z.array(z.string().min(1)).default([]),
   /** Name of the applied profile, if any. */

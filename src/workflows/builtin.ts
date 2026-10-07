@@ -12,11 +12,12 @@ steps:
     kind: deterministic
     tool: project.discover
     outputs: [project-capabilities]
-    transitions: { onSuccess: design }
-  # the task's issue and its pages as read, and their design frames described — by code, no model
-  - id: design
+    transitions: { onSuccess: sources }
+  # the task's inputs, by code, no model: its issue and pages as read, the API methods they name checked
+  # against the contract maps, their design frames described
+  - id: sources
     kind: deterministic
-    tool: design.collect
+    tool: sources.collect
     outputs: [sources, design]
     transitions: { onSuccess: research }
   - id: research
@@ -186,11 +187,12 @@ steps:
     kind: deterministic
     tool: project.discover
     outputs: [project-capabilities]
-    transitions: { onSuccess: design }
-  # the task's issue and its pages as read, and their design frames described — by code, no model
-  - id: design
+    transitions: { onSuccess: sources }
+  # the task's inputs, by code, no model: its issue and pages as read, the API methods they name checked
+  # against the contract maps, their design frames described
+  - id: sources
     kind: deterministic
-    tool: design.collect
+    tool: sources.collect
     outputs: [sources, design]
     transitions: { onSuccess: research }
   - id: research
@@ -213,11 +215,12 @@ steps:
     kind: deterministic
     tool: project.discover
     outputs: [project-capabilities]
-    transitions: { onSuccess: design }
-  # the task's issue and its pages as read, and their design frames described — by code, no model
-  - id: design
+    transitions: { onSuccess: sources }
+  # the task's inputs, by code, no model: its issue and pages as read, the API methods they name checked
+  # against the contract maps, their design frames described
+  - id: sources
     kind: deterministic
-    tool: design.collect
+    tool: sources.collect
     outputs: [sources, design]
     transitions: { onSuccess: research }
   - id: research
@@ -324,11 +327,12 @@ steps:
     kind: deterministic
     tool: project.discover
     outputs: [project-capabilities]
-    transitions: { onSuccess: design }
-  # the task's issue and its pages as read, and their design frames described — by code, no model
-  - id: design
+    transitions: { onSuccess: sources }
+  # the task's inputs, by code, no model: its issue and pages as read, the API methods they name checked
+  # against the contract maps, their design frames described
+  - id: sources
     kind: deterministic
-    tool: design.collect
+    tool: sources.collect
     outputs: [sources, design]
     transitions: { onSuccess: research }
   - id: research

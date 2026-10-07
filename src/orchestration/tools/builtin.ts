@@ -1,7 +1,7 @@
 import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { CapabilityRegistry } from "../../capabilities/registry.ts";
-import { collectDesign } from "../../design/collect.ts";
+import { collectSources } from "../../design/collect.ts";
 import { changedFiles, checkStandards } from "../../knowledge/check.ts";
 import { impactOf, repoIdOf, updateGraph } from "../../knowledge/graph/update.ts";
 import { loadStandards } from "../../knowledge/standards.ts";
@@ -37,8 +37,10 @@ export function filesNamedIn(text: string, workspace: string): string[] {
 export const BUILTIN_TOOLS: Record<string, DeterministicTool> = {
   noop: async () => ({ status: "success" }),
 
-  /** The design frames of the task, read and described by code (src/design/collect.ts). */
-  "design.collect": collectDesign,
+  /** The task's inputs read by code (src/design/collect.ts): its issues and pages, API methods, design frames. */
+  "sources.collect": collectSources,
+  /** The step's first name, when it read only design frames: workflows of a project may still use it. */
+  "design.collect": collectSources,
 
   /** The onboarding mapper's claims against the code; the survivors become a candidate. */
   "onboard.verify": verifyModuleStep,
