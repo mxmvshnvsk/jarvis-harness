@@ -292,6 +292,8 @@ export interface FormatOptions {
   readonly timeoutMs?: number;
   /** Per-step output token cap (budget.perStep.outputTokens). */
   readonly stepOutputTokens?: number;
+  /** Per-step input token cap (budget.perStep.inputTokens). */
+  readonly stepInputTokens?: number;
   /** Name the last tool at the end of the line (false when a line of its own shows the recent ones). */
   readonly lastTool?: boolean;
 }
@@ -348,11 +350,16 @@ export function formatActivity(a: Activity, options: FormatOptions = {}): string
         : `tools ${a.step.toolCalls}`,
     );
   }
-  // the run's totals; the per-step cap is compared with the step's own output (pilot: "out 80k/60k")
-  const cap =
+  // the run's totals; the per-step caps are compared with the step's own use (pilot: "out 80k/60k")
+  const caps = [
+    options.stepInputTokens && a.step
+      ? `in ${kilo(a.step.promptTokens ?? 0)}/${kilo(options.stepInputTokens)}`
+      : "",
     options.stepOutputTokens && a.step
-      ? ` ${st.muted(`(step ${kilo(a.step.outputTokens ?? 0)}/${kilo(options.stepOutputTokens)})`)}`
-      : "";
+      ? `${kilo(a.step.outputTokens ?? 0)}/${kilo(options.stepOutputTokens)}`
+      : "",
+  ].filter(Boolean);
+  const cap = caps.length > 0 ? ` ${st.muted(`(step ${caps.join(", ")})`)}` : "";
   parts.push(`tokens in ${kilo(a.promptTokens)} out ${kilo(a.outputTokens)}${cap}`);
   if (a.retries > 0) parts.push(st.warn(`${a.retries} retr${a.retries === 1 ? "y" : "ies"}`));
   if (a.lastTool && options.lastTool !== false) {

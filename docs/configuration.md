@@ -124,8 +124,10 @@ modelWait:                     # модель недоступна после п
   checkEveryMinutes: 5         # как часто проверять (одна попытка, без повторов)
   giveUpAfterHours: 12         # дольше — прогон падает, как раньше
 budget:                        # ADR-0018 §4 — лимиты сверх пулов
-  perRun:  { outputTokens: 200000, requests: 400 }
-  perStep: { outputTokens: 40000, requests: 80 }
+  perRun:  { inputTokens: 3000000, outputTokens: 200000, requests: 400 }
+  perStep: { inputTokens: 800000, outputTokens: 40000, requests: 80 }
+  # inputTokens — сумма промптов: без кэша префикса каждый вызов шлёт весь разговор шага заново, и вход
+  # растёт быстрее числа вызовов (пилот: research 15 вызовов — 0,55M, 39 — 1,84M, 51 — 2,47M)
 
 humanGate: artifact            # fail | artifact | skip-if-approved — что делать на гейте без человека
                                # (неинтерактивный режим, ADR-0009 §2)

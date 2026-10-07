@@ -371,10 +371,12 @@ export function followRun(ctx: CliContext, runtime: Runtime, options: FollowOpti
     const modelId = activity.step?.modelId;
     const timeoutMs = modelId ? runtime.loaded.config.models[modelId]?.timeoutMs : undefined;
     const stepOutputTokens = runtime.loaded.config.budget.perStep.outputTokens;
+    const stepInputTokens = runtime.loaded.config.budget.perStep.inputTokens;
     const format = {
       paint: st,
       ...(timeoutMs !== undefined ? { timeoutMs } : {}),
       ...(stepOutputTokens !== undefined ? { stepOutputTokens } : {}),
+      ...(stepInputTokens !== undefined ? { stepInputTokens } : {}),
     };
     // two lines while an agent works: where it is and what it waits for, then its last tool calls
     const recent = formatRecent(activity, format);

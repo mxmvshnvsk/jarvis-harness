@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { type BudgetStop, budgetStopOf, grantBudget } from "../../src/app/budgetStop.ts";
+import { type BudgetStop, budgetStopOf, grantBudget, unitOf } from "../../src/app/budgetStop.ts";
 import type { Runtime } from "../../src/app/runtime.ts";
 import { ACTOR, createRun, engineFor, testRuntime, workflowOf, writeArtifact } from "../helpers/engine.ts";
 import { completion, type FakeOpenAi, startFakeOpenAi } from "../helpers/fakeOpenAi.ts";
@@ -100,6 +100,54 @@ describe("per-run / per-step budget (ADR-0018 §4)", () => {
     const again = await engine.execute(run.id, owner);
     expect(again.run.state).toBe("WAITING_HUMAN");
     expect(server.requests).toHaveLength(5); // 21, 28 < 34 allowed; 35 ≥ 34 refused
+  });
+});
+
+describe("input tokens as a cap (the real cost when every call re-sends the conversation)", () => {
+  it("stops the step once its prompts reach budget.perStep.inputTokens; a grant of input goes on", async () => {
+    sb.write("home/.jarvis/config.yaml", userConfig());
+    sb.write("project/.jarvis/project.yaml", "version: 1\nbudget:\n  perStep: { inputTokens: 100 }\n");
+    rt = await testRuntime(sb);
+    server.respond(() => completion("ok")); // 42 prompt tokens per call
+    const wf = workflowOf({
+      name: "bi",
+      entry: "work",
+      steps: [{ id: "work", kind: "agentic", agent: "work", transitions: { onSuccess: "DONE" } }],
+    });
+    const engine = engineFor(rt, [wf], {
+      work: async (ctx) => {
+        for (;;)
+          await ctx.gateway.call({
+            modelId: "flash",
+            role: "work",
+            messages: [{ role: "user", content: "go" }],
+          });
+      },
+    });
+    const run = createRun(rt, "bi");
+    const result = await engine.execute(run.id, owner);
+    expect(result.run.state).toBe("WAITING_HUMAN");
+    expect(result.run.stateReason).toContain("budget.perStep.inputTokens exceeded: 126 of 100");
+    expect(server.requests).toHaveLength(3); // 0, 42, 84 used → allowed; 126 ≥ 100 → refused
+    const stop = budgetStopOf(rt, result.run);
+    expect(stop).toMatchObject({
+      scope: "perStep",
+      dimension: "inputTokens",
+      used: 126,
+      cap: 100,
+      suggested: 100_000,
+    });
+    expect(unitOf("inputTokens")).toBe("input tokens");
+    grantBudget(
+      rt,
+      result.run,
+      stop as BudgetStop,
+      { kind: "user", id: "dev@example.com", verified: false },
+      { more: 50 },
+      "cli",
+    );
+    expect((await engine.execute(run.id, owner)).run.state).toBe("WAITING_HUMAN");
+    expect(server.requests).toHaveLength(4); // 126 < 150 → one more; 168 ≥ 150 → refused
   });
 });
 

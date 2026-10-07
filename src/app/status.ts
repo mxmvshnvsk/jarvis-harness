@@ -160,11 +160,13 @@ function activityFields(
   const modelId = activity.step?.modelId;
   const timeoutMs = modelId ? runtime.loaded.config.models[modelId]?.timeoutMs : undefined;
   const stepOutputTokens = runtime.loaded.config.budget.perStep.outputTokens;
+  const stepInputTokens = runtime.loaded.config.budget.perStep.inputTokens;
   return {
     activity,
     activityOptions: {
       ...(timeoutMs !== undefined ? { timeoutMs } : {}),
       ...(stepOutputTokens !== undefined ? { stepOutputTokens } : {}),
+      ...(stepInputTokens !== undefined ? { stepInputTokens } : {}),
     },
   };
 }

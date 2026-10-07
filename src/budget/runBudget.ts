@@ -9,12 +9,13 @@ import type { ModelRequest, ModelResponse } from "../models/types.ts";
  */
 export interface StepUsage {
   readonly outputTokens: number;
+  readonly inputTokens: number;
   readonly requests: number;
 }
 
 export class BudgetExceededError extends Error {
   readonly scope: "perRun" | "perStep";
-  readonly dimension: "outputTokens" | "requests";
+  readonly dimension: "outputTokens" | "inputTokens" | "requests";
   readonly used: number;
   readonly cap: number;
   constructor(
@@ -46,8 +47,8 @@ export interface Grants {
 }
 
 export const NO_GRANTS: Grants = {
-  perRun: { outputTokens: 0, requests: 0 },
-  perStep: { outputTokens: 0, requests: 0 },
+  perRun: { outputTokens: 0, inputTokens: 0, requests: 0 },
+  perStep: { outputTokens: 0, inputTokens: 0, requests: 0 },
   toolCalls: 0,
   modelCalls: 0,
   finish: false,
@@ -72,6 +73,7 @@ export function grantsFromEvents(db: DatabaseSync, runId: string, stepId: string
     const here = row.stepId === stepId && row.iteration === iteration;
     const add = (u: StepUsage): StepUsage => ({
       outputTokens: u.outputTokens + n(p.outputTokens),
+      inputTokens: u.inputTokens + n(p.inputTokens),
       requests: u.requests + n(p.requests),
     });
     if (p.scope === "perRun") grants = { ...grants, perRun: add(grants.perRun) };
@@ -105,11 +107,12 @@ export function usageFromEvents(
   }
   const row = db
     .prepare(
-      `SELECT COUNT(*) AS requests, COALESCE(SUM(json_extract(payload_json, '$.outputTokens')), 0) AS output
+      `SELECT COUNT(*) AS requests, COALESCE(SUM(json_extract(payload_json, '$.outputTokens')), 0) AS output,
+              COALESCE(SUM(json_extract(payload_json, '$.promptTokens')), 0) AS input
        FROM events WHERE ${clauses.join(" AND ")}`,
     )
-    .get(...params) as { requests: number; output: number };
-  return { outputTokens: row.output, requests: row.requests };
+    .get(...params) as { requests: number; output: number; input: number };
+  return { outputTokens: row.output, inputTokens: row.input, requests: row.requests };
 }
 
 export interface BudgetScope {
@@ -143,20 +146,28 @@ export class BudgetedGateway implements ModelCaller {
     const plus = (cap: number | undefined, extra: number) => (cap === undefined ? undefined : cap + extra);
     const perRun = {
       outputTokens: plus(this.budget.perRun.outputTokens, grants.perRun.outputTokens),
+      inputTokens: plus(this.budget.perRun.inputTokens, grants.perRun.inputTokens),
       requests: plus(this.budget.perRun.requests, grants.perRun.requests),
     };
     const perStep = {
       outputTokens: plus(this.budget.perStep.outputTokens, grants.perStep.outputTokens),
+      inputTokens: plus(this.budget.perStep.inputTokens, grants.perStep.inputTokens),
       requests: plus(this.budget.perStep.requests, grants.perStep.requests),
     };
     if (perRun.outputTokens !== undefined && run.outputTokens >= perRun.outputTokens) {
       throw new BudgetExceededError("perRun", "outputTokens", run.outputTokens, perRun.outputTokens);
+    }
+    if (perRun.inputTokens !== undefined && run.inputTokens >= perRun.inputTokens) {
+      throw new BudgetExceededError("perRun", "inputTokens", run.inputTokens, perRun.inputTokens);
     }
     if (perRun.requests !== undefined && run.requests + 1 > perRun.requests) {
       throw new BudgetExceededError("perRun", "requests", run.requests, perRun.requests);
     }
     if (perStep.outputTokens !== undefined && step.outputTokens >= perStep.outputTokens) {
       throw new BudgetExceededError("perStep", "outputTokens", step.outputTokens, perStep.outputTokens);
+    }
+    if (perStep.inputTokens !== undefined && step.inputTokens >= perStep.inputTokens) {
+      throw new BudgetExceededError("perStep", "inputTokens", step.inputTokens, perStep.inputTokens);
     }
     if (perStep.requests !== undefined && step.requests + 1 > perStep.requests) {
       throw new BudgetExceededError("perStep", "requests", step.requests, perStep.requests);

@@ -220,6 +220,8 @@ export const WorkspaceConfigSchema = z.strictObject({
 
 const BudgetCapSchema = z.strictObject({
   outputTokens: z.int().positive().optional(),
+  /** Prompt tokens sent: the real cost when every call re-sends the conversation (no prefix cache). */
+  inputTokens: z.int().positive().optional(),
   requests: z.int().positive().optional(),
 });
 

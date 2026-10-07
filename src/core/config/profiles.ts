@@ -80,7 +80,7 @@ export function applyProfile(
     for (const scope of ["perRun", "perStep"] as const) {
       const baseCap = base.budget[scope];
       const cap = overlay.budget[scope];
-      for (const key of ["outputTokens", "requests"] as const) {
+      for (const key of ["outputTokens", "inputTokens", "requests"] as const) {
         const value = cap[key];
         if (value === undefined) continue;
         const current = baseCap[key];

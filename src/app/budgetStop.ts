@@ -11,7 +11,7 @@ import type { Runtime } from "./runtime.ts";
  * from the terminal card or the page alike. Pilot: such a stop parked the run with an empty card.
  */
 export type BudgetScope = "perRun" | "perStep" | "agent";
-export type BudgetDimension = "outputTokens" | "requests" | "toolCalls" | "modelCalls";
+export type BudgetDimension = "outputTokens" | "inputTokens" | "requests" | "toolCalls" | "modelCalls";
 
 export interface BudgetStop {
   readonly scope: BudgetScope;
@@ -34,14 +34,18 @@ export interface BudgetGrant {
 }
 
 const SCOPES: readonly string[] = ["perRun", "perStep", "agent"];
-const DIMENSIONS: readonly string[] = ["outputTokens", "requests", "toolCalls", "modelCalls"];
-/** "Finish" after a cap of the run or the step: enough for the result document and its repairs. */
-export const FINISH_ALLOWANCE = { requests: 4, outputTokens: 32_000 } as const;
+const DIMENSIONS: readonly string[] = ["outputTokens", "inputTokens", "requests", "toolCalls", "modelCalls"];
+/**
+ * "Finish" after a cap of the run or the step: enough for the result document and its repairs — a few
+ * calls, each re-sending the conversation (input) and writing the document (output).
+ */
+export const FINISH_ALLOWANCE = { requests: 4, outputTokens: 32_000, inputTokens: 400_000 } as const;
 
 /** Units for people: "tool calls", "output tokens". */
 export function unitOf(dimension: BudgetDimension): string {
   return {
     outputTokens: "output tokens",
+    inputTokens: "input tokens",
     requests: "model requests",
     toolCalls: "tool calls",
     modelCalls: "model calls",
@@ -57,6 +61,7 @@ export function sourceOf(stop: Pick<BudgetStop, "scope" | "agent">): string {
 
 export function suggestedMore(dimension: BudgetDimension, cap: number): number {
   if (dimension === "outputTokens") return Math.max(5_000, Math.round(cap / 2 / 1_000) * 1_000);
+  if (dimension === "inputTokens") return Math.max(100_000, Math.round(cap / 2 / 10_000) * 10_000);
   return Math.max(10, Math.round(cap / 2));
 }
 
