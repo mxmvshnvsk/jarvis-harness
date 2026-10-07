@@ -109,6 +109,9 @@ Remaining commands of ADR-0001 §15:
 - research lists contradictions in the requirements (`contradictions`: both sides, sources, one question for the
   analyst) instead of copying a contradictory rule — pilot: both branches of one rule had «flag = true»; they come
   first in the document and are counted on the step's line; requirements settles each or treats it as blocking
+- research tells this repository's requirements from other systems': theirs go to `dependencies` (what this
+  repository needs from them), a contradiction names its `owner` — pilot: a backend method's spec read as front-end
+  work and its inconsistency put to the front's analyst
 - a file read again in a step: a pointer while its text is still above, else the text pinned against trimming;
   compaction shows while it runs (`context.compacting`) and leaves a line; unlimitedScale defaults to 10
 - output styling: one palette for every command (`src/cli/style.ts`; headings bold, the subject bold cyan, metadata

@@ -36,6 +36,8 @@ describe("contradictions in the requirements are never buried", () => {
     expect(facts?.counts).toContainEqual({ text: "1 contradiction", warn: true });
     // a result without any parses as before
     expect(ResearchResult.parse({ summary: "x", findings: [] }).contradictions).toEqual([]);
+    // asked of this repository's analyst unless the spec is another system's
+    expect(research.contradictions[0]?.owner).toBe("this repository");
   });
 
   it("the step's line says how many there are", () => {
@@ -54,5 +56,37 @@ describe("contradictions in the requirements are never buried", () => {
     expect(formatStepReport(line.report, [], createStyle(false), 8)[0]).toContain(
       "⚠ 2 contradictions in the requirements",
     );
+  });
+
+  it("another system's requirements are a contract this repository depends on, not its work", () => {
+    const withDeps = ResearchResult.parse({
+      summary: "Orders: delivery slots come from the logistics service.",
+      findings: [],
+      dependencies: [
+        {
+          system: "logistics-api",
+          need: "GET /slots?date= returning [{ from, to, free }]",
+          status: "missing",
+          sources: ["CONF-13"],
+        },
+      ],
+      contradictions: [
+        {
+          statement: "Slots: the table says only free slots are returned",
+          conflictsWith: "the example response lists busy slots too",
+          question: "Does GET /slots return busy slots (with free: false) or only free ones?",
+          owner: "logistics-api",
+        },
+      ],
+    });
+    expect(withDeps.dependencies[0]).toMatchObject({ system: "logistics-api", status: "missing" });
+    expect(
+      ResearchResult.parse({ summary: "x", findings: [], dependencies: [{ system: "s", need: "n" }] })
+        .dependencies[0]?.status,
+    ).toBe("unknown");
+    const md = documentToMarkdown(withDeps as unknown as Record<string, unknown>);
+    expect(md).toContain("## Dependencies");
+    expect(md).toContain("GET /slots?date=");
+    expect(md).toMatch(/Owner: logistics-api/);
   });
 });

@@ -35,7 +35,32 @@ const Contradiction = z.object({
       "what contradicts it: another source, another branch of the same rule, the design; the code only when it shows the requirement cannot hold",
     ),
   sources: z.array(Source).default([]),
-  question: z.string().min(1).describe("the one question for the analyst that settles it"),
+  question: z.string().min(1).describe("the one question that settles it"),
+  owner: z
+    .string()
+    .min(1)
+    .default("this repository")
+    .describe('who answers: "this repository" (its analyst) or the other system whose spec it is (name it)'),
+});
+
+/**
+ * What this repository needs from systems outside it (other teams' services, APIs). Pilot: a backend
+ * method's spec read as front-end work, and a contradiction inside it put to the front's analyst.
+ */
+const Dependency = z.object({
+  system: z
+    .string()
+    .min(1)
+    .describe("the other system or service, as the project knowledge or the sources name it"),
+  need: z
+    .string()
+    .min(1)
+    .describe("what this repository needs from it: a method, a field, a format, a behaviour"),
+  status: z
+    .enum(["exists", "missing", "unknown"])
+    .default("unknown")
+    .describe("whether this repository already calls it (exists), it is new (missing), or not known"),
+  sources: z.array(Source).default([]),
 });
 
 export const ResearchResult = z.object({
@@ -46,6 +71,12 @@ export const ResearchResult = z.object({
   affectedAreas: z.array(z.string()).default([]).describe("directories, modules, services"),
   existingImplementations: z.array(z.string()).default([]).describe("where similar behaviour already exists"),
   unknowns: z.array(z.string()).default([]).describe("what could not be established from the sources"),
+  dependencies: z
+    .array(Dependency)
+    .default([])
+    .describe(
+      "what this repository needs from other systems: their requirements are contracts here, not work",
+    ),
   contradictions: z
     .array(Contradiction)
     .default([])
