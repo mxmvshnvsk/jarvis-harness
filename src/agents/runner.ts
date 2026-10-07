@@ -7,6 +7,7 @@ import {
   summarizerMessages,
 } from "../context/index.ts";
 import type { ArtifactVersion } from "../core/domain/artifact.ts";
+import { NOTE_DELIVERED, notesOf, notesText } from "../interaction/notes.ts";
 import { ModelError } from "../models/errors.ts";
 import { resolveModel } from "../models/router.ts";
 import {
@@ -174,6 +175,8 @@ export class AgentRuntimeRunner implements AgentRunner {
         budget: { chars },
       });
     let base = buildBase(charBudget);
+    // a person's notes while the step works: the ones before it are in the base, the rest come live
+    const notesSeen = new Set(notesOf(rt, ctx.run.id).map((n) => n.seq));
 
     const restored = ctx.restored as Partial<TranscriptState> | undefined;
     let transcript: Message[] = restored?.transcriptRef
@@ -360,6 +363,25 @@ export class AgentRuntimeRunner implements AgentRunner {
           { role: "user", content: "Your tool budget for this step is used up. Finish with what you have." },
         ];
         budgetExhaustedNotice = true;
+      }
+      const fresh = notesOf(rt, ctx.run.id).filter((n) => !notesSeen.has(n.seq));
+      if (fresh.length > 0) {
+        for (const n of fresh) {
+          notesSeen.add(n.seq);
+          rt.events.emit({
+            kind: NOTE_DELIVERED,
+            runId: ctx.run.id,
+            stepId: ctx.step.id,
+            payload: { seq: n.seq, agent: def.id },
+          });
+        }
+        transcript = [
+          ...transcript,
+          {
+            role: "user",
+            content: `A note from a person while you work (binding — it overrides the inputs where they differ):\n${notesText(fresh)}`,
+          },
+        ];
       }
       let response: Awaited<ReturnType<typeof ctx.gateway.call>>;
       try {

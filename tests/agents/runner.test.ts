@@ -8,6 +8,7 @@ import { AgentRuntimeRunner, inParallel } from "../../src/agents/runner.ts";
 import { type BudgetStop, budgetGranted, budgetStopOf, grantBudget } from "../../src/app/budgetStop.ts";
 import type { Runtime } from "../../src/app/runtime.ts";
 import { recordGiven } from "../../src/interaction/answers.ts";
+import { addNote, notesOf } from "../../src/interaction/notes.ts";
 import { AgenticExecutor, DeterministicExecutor } from "../../src/orchestration/executors.ts";
 import { LocalWorkflowEngine } from "../../src/orchestration/runtime.ts";
 import { BUILTIN_TOOLS } from "../../src/orchestration/tools/builtin.ts";
@@ -971,6 +972,48 @@ context: { maxContext: 8000 }
     const all = JSON.stringify(server.requests.at(-1)?.body.messages);
     expect(all).toContain("12 model calls and no edit yet");
     expect(all).toContain("36 model calls without a single edit: stop reading");
+  });
+
+  it("a person's note while the step works reaches its agent before the next model call", async () => {
+    sb.write("project/.jarvis/project.yaml", "version: 1\nworkspace: { mode: cwd }\n");
+    rt = await testRuntime(sb, { PATH: process.env.PATH ?? "" });
+    const wf = workflowOf({
+      name: "noted",
+      entry: "research",
+      steps: [
+        {
+          id: "research",
+          kind: "agentic",
+          agent: "research",
+          outputs: ["research"],
+          transitions: { onSuccess: "DONE" },
+        },
+      ],
+    });
+    const engine = engineWith(rt, wf);
+    const run = createRun(rt, "noted");
+    let round = 0;
+    server.respond(() => {
+      round += 1;
+      if (round === 1) {
+        // the person writes while the first call is answered
+        const live = rt as Runtime;
+        addNote(
+          live,
+          live.runs.get(run.id) as never,
+          "The slots method serves the courier app too",
+          "dev@example.com",
+        );
+        return toolCallCompletion("repo.search", { pattern: "deliverySlots" });
+      }
+      return completion(JSON.stringify(RESEARCH_DOC));
+    });
+    await engine.execute(run.id, { owner: "cli:t" });
+    expect(JSON.stringify(server.requests[0]?.body.messages)).not.toContain("serves the courier app");
+    const second = JSON.stringify(server.requests[1]?.body.messages);
+    expect(second).toContain("A note from a person while you work (binding");
+    expect(second).toContain("The slots method serves the courier app too");
+    expect(notesOf(rt, run.id)[0]?.delivered).toBe(true);
   });
 
   it("gives the next agent the code earlier steps read, as it is now (pilot: the same file re-read by four agents)", async () => {

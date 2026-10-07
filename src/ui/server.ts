@@ -56,6 +56,7 @@ import {
   suggestionsFor,
 } from "../interaction/answers.ts";
 import { earlierRulesFor } from "../interaction/clarify.ts";
+import { addNote } from "../interaction/notes.ts";
 import { answerFromKnowledge, plan } from "../knowledge/ask.ts";
 import { loadKnowledgeDocs } from "../knowledge/resolver.ts";
 import { loadGlossary } from "../knowledge/retrieval/glossary.ts";
@@ -439,6 +440,8 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
       "no-launcher": html`<div class="banner bad">This page cannot start runs: resume it with <code>jarvis resume</code></div>`,
       started: html`<div class="banner ok">Started — it prepares its checkout and shows up under Running; where it needs you, it waits here</div>`,
       "no-task": html`<div class="banner bad">Say what to do and pick a workflow</div>`,
+      noted: html`<div class="banner ok">The note goes to the agent with its next model call — binding, and for every step after it</div>`,
+      "no-note": html`<div class="banner bad">Write the note first</div>`,
       "eval-made": html`<div class="banner ok">The eval case is written: review its case.yaml, then record it once</div>`,
       "eval-failed": html`<div class="banner bad">No eval case written — see the log of <code>jarvis ui</code> (a run that ended, a repository git can archive)</div>`,
       "eval-suite": html`<div class="banner bad">A suite is a short name: lowercase letters, digits and dashes</div>`,
@@ -1146,7 +1149,7 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
         "Cache-Control": "no-store",
       });
     }
-    const m = /^\/runs\/([^/]+)\/(decide|rerun|open|budget|resume|cancel|continue|clarify|eval)$/.exec(
+    const m = /^\/runs\/([^/]+)\/(decide|rerun|open|budget|resume|cancel|continue|clarify|eval|note)$/.exec(
       r.url.pathname,
     );
     const run = m ? resolveRun(m[1] as string) : undefined;
@@ -1161,6 +1164,16 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
     const goOn = (r: Run): void => {
       if (options.launcher && !waitingCard(runtime, r.id)) options.launcher.adopt(r);
     };
+    if (m[2] === "note") {
+      // a note to the running step: binding for its agent from its next model call, and for the rest
+      const text = (form.get("text") ?? "").trim();
+      if (!text) return redirect(r, `/runs/${short}?notice=no-note`);
+      if (isTerminal(run.state)) return redirect(r, `/runs/${short}?notice=already-ended`);
+      const who = await actor();
+      if (!who) return redirect(r, `/runs/${short}?notice=actor`);
+      addNote(runtime, run, text, who.id);
+      return redirect(r, `/runs/${short}?notice=noted`);
+    }
     if (m[2] === "eval") {
       // «Make an eval case»: as `jarvis evals run-to-case <run> --suite <suite>`
       const suite = (form.get("suite") ?? "pilot").trim();

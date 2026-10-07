@@ -6,6 +6,7 @@ import { stableJson } from "../context/serialize.ts";
 import type { KnowledgeConfig } from "../core/config/schema.ts";
 import type { ArtifactVersion } from "../core/domain/artifact.ts";
 import { ANSWERS, givenFor, SUGGESTIONS } from "../interaction/answers.ts";
+import { notesOf, notesText } from "../interaction/notes.ts";
 import { renderPackage } from "../knowledge/package.ts";
 import type { EngineeringContextPackage } from "../knowledge/resolver.ts";
 import type { Message } from "../models/types.ts";
@@ -142,6 +143,9 @@ export function buildBaseMessages(input: BuildInput): Message[] {
     review ? review.instructions : "",
     clarifications ? `# Clarifications decided with a human (binding)\n${clarifications}` : "",
     decided ? `# Decided by a human when accepting documents (binding)\n${decided}` : "",
+    ((n) => (n.length > 0 ? `# Notes from a person during the run (binding)\n${notesText(n)}` : ""))(
+      notesOf(ctx.runtime, ctx.run.id),
+    ),
   ]
     .filter(Boolean)
     .join("\n\n");

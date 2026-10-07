@@ -712,4 +712,47 @@ describe("New task on the page", () => {
     expect(after).toContain("✓ eval case");
     expect(after).toContain("jarvis evals run --suite pilot --mode record");
   });
+
+  it("a step on its second round says what it fixes; a note goes to the running step", async () => {
+    const token = await serve();
+    const run = createRun("ABC-42: Delivery slots on the order form");
+    rt.runs.update(run.id, { currentStep: "implementation", currentIteration: 2 });
+    rt.runs.transition(run.id, "RUNNING");
+    rt.runs.acquireLease(run.id, "cli:elsewhere", 90_000);
+    const ev = (kind: string, stepId: string, payload: Record<string, unknown>) =>
+      rt.events.emit({ kind, runId: run.id, stepId, payload });
+    ev("step.start", "implementation", { stepId: "implementation", iteration: 1 });
+    ev("step.finish", "implementation", { stepId: "implementation", iteration: 1, status: "success" });
+    ev("step.finish", "tests", {
+      stepId: "tests",
+      status: "success",
+      outcome: "defects_found",
+      reason: "missing route for the courier app",
+    });
+    ev("step.finish", "checks", {
+      stepId: "checks",
+      status: "success",
+      outcome: "defects_found",
+      reason: "test-courier failed",
+    });
+    ev("workflow.loop", "verify", { edge: "verify->implementation#defects_found", iteration: 1, max: 2 });
+    ev("step.start", "implementation", { stepId: "implementation", iteration: 2 });
+    ev("agent.start", "implementation", { agent: "implementation" });
+    const short = run.id.replace(/^run_/, "").slice(0, 8);
+    const body = await page(`/runs/${short}`);
+    expect(body).toContain(
+      '<span class="of">Round 2 of 3</span><span class="d">Fixing 2 defects verify found</span>',
+    );
+    expect(body).toContain("missing route for the courier app");
+    expect(body).toContain("✎ Add a note for implementation");
+    expect((await post(`/runs/${short}/note`, { t: token, text: " " })).location).toContain("notice=no-note");
+    expect(
+      (await post(`/runs/${short}/note`, { t: token, text: "The method serves the courier app too" }))
+        .location,
+    ).toContain("notice=noted");
+    const after = await page(`/runs/${short}`);
+    expect(after).toContain("◌ goes with its next model call");
+    expect(after).toContain("The method serves the courier app too");
+    expect(rt.events.list({ runId: run.id, kind: "human.note" })[0]?.stepId).toBe("implementation");
+  });
 });

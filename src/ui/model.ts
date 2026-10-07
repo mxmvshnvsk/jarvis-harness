@@ -30,6 +30,7 @@ import {
   earlierRulesFor,
   latestProposal,
 } from "../interaction/clarify.ts";
+import { notesOf, type RunNote } from "../interaction/notes.ts";
 import type { Interaction, InteractionMessage } from "../interaction/store.ts";
 import type { LocalWorkflowEngine } from "../orchestration/runtime.ts";
 import { shortRunId } from "../storage/runStore.ts";
@@ -532,6 +533,10 @@ export interface RunPage {
   readonly leaseLive: boolean;
   /** An implementation's place in its plan, while it runs. */
   readonly planProgress?: PlanProgress;
+  /** A person's notes to the run while it works (src/interaction/notes.ts). */
+  readonly notes?: readonly RunNote[];
+  /** The step runs again on a back edge: what it fixes (the reasons of the steps that sent it back). */
+  readonly fixing?: FixView;
   /** A finished run whose implementation was accepted: «Make an eval case» (src/evals/runToCase.ts). */
   readonly evalReady?: boolean;
   /** The eval case it became. */
@@ -579,6 +584,12 @@ export function feedItem(e: StoredEvent): FeedItem | undefined {
         "ok",
       );
     }
+    case "human.note":
+      return at(
+        `note${str(p.by) ? ` from ${str(p.by)}` : ""} for ${step ?? "the run"}: ${str(p.text)?.slice(0, 160) ?? ""}`,
+      );
+    case "human.note.delivered":
+      return at(`${str(p.agent) ?? "the agent"} got the note`, "ok");
     case "agent.idle":
       return p.stopped === true
         ? at(
@@ -831,6 +842,10 @@ export async function runPage(
     ...((r) => (r ? { resumable: r } : {}))(resumableOf(runtime, run, now.getTime())),
     ...continuationLinks(runtime, engine, run),
     ...evalOf(runtime, run),
+    ...((n) => (n.length > 0 ? { notes: n } : {}))(notesOf(runtime, run.id)),
+    ...((f) => (f ? { fixing: f } : {}))(
+      run.state === "RUNNING" ? fixOf(events, activity?.step?.id) : undefined,
+    ),
     ...((p) => (p ? { planProgress: p } : {}))(
       run.state === "RUNNING" && implementing(activity) ? planProgressOf(runtime, run, events) : undefined,
     ),
@@ -942,6 +957,61 @@ function questionsOf(
   const suggestions = suggestionsFor(runtime, artifact);
   const given = givenFor(runtime, artifact);
   return { questions: { list, ...(suggestions ? { suggestions } : {}), ...(given ? { given } : {}) } };
+}
+
+export interface FixView {
+  readonly round: number;
+  readonly max?: number;
+  /** The step that sent the work back (a composite: its children's reasons). */
+  readonly from: string;
+  readonly reasons: ReadonlyArray<{ readonly step: string; readonly text: string }>;
+}
+
+/**
+ * A step running again on a back edge (`verify → implementation#defects_found`): the round and why —
+ * the reasons the steps in between finished with. Pilot: the second round showed «Plan 1 of 15» as if
+ * the work started over.
+ */
+export function fixOf(events: readonly StoredEvent[], stepId: string | undefined): FixView | undefined {
+  if (!stepId) return undefined;
+  let start = -1;
+  let iteration = 1;
+  events.forEach((e, i) => {
+    const p = (e.payload ?? {}) as { stepId?: string; iteration?: number };
+    if (e.kind === "step.start" && (p.stepId ?? e.stepId) === stepId) {
+      start = i;
+      iteration = typeof p.iteration === "number" ? p.iteration : (e.iteration ?? 1);
+    }
+  });
+  if (start < 0 || iteration <= 1) return undefined;
+  let loop: { edge?: string; iteration?: number; max?: number } | undefined;
+  let prevEnd = -1;
+  for (let i = start - 1; i >= 0; i--) {
+    const e = events[i] as StoredEvent;
+    const p = (e.payload ?? {}) as { stepId?: string; edge?: string };
+    if (!loop && e.kind === "workflow.loop" && typeof p.edge === "string" && p.edge.includes(`->${stepId}#`))
+      loop = e.payload as typeof loop;
+    if (e.kind === "step.finish" && (p.stepId ?? e.stepId) === stepId) {
+      prevEnd = i;
+      break;
+    }
+  }
+  const reasons: Array<{ step: string; text: string }> = [];
+  for (const e of events.slice(prevEnd + 1, start)) {
+    if (e.kind !== "step.finish") continue;
+    const p = (e.payload ?? {}) as { stepId?: string; outcome?: string; status?: string; reason?: string };
+    const bad =
+      (p.outcome && p.outcome !== "success") ||
+      (p.status && p.status !== "success" && p.status !== "skipped");
+    if (bad && typeof p.reason === "string" && p.reason.trim())
+      reasons.push({ step: p.stepId ?? e.stepId ?? "?", text: p.reason.trim() });
+  }
+  return {
+    round: iteration,
+    ...(typeof loop?.max === "number" ? { max: loop.max + 1 } : {}),
+    from: loop?.edge?.split("->")[0] ?? "a later step",
+    reasons,
+  };
 }
 
 /** A run that ended with an accepted implementation can become an eval case; or it did already. */

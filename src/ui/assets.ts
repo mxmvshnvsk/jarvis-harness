@@ -410,6 +410,14 @@ form.clarify>.actions{margin:4px 0}
 .plist li.todo .d{color:var(--muted)}
 .plist .f{font-family:var(--mono);font-size:11px;color:var(--muted)}
 .planat{color:var(--accent);font-weight:600}
+.fixw .of{color:var(--bad)}
+.fixw .plist li.on{background:var(--bad-bg)}
+.notes{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.notes li{font-size:13px;padding:8px 12px;border-radius:8px;background:var(--accent-soft)}
+.notes .said{white-space:pre-wrap;font-size:14px;line-height:20px;color:var(--ink);margin-top:2px}
+.addnote summary{cursor:pointer;font-size:13px;color:var(--accent)}
+.addnote[open]>form{display:flex;flex-direction:column;gap:8px;margin-top:8px}
+.addnote textarea{padding:8px 10px;border-radius:6px;resize:vertical;min-height:64px}
 .startfrom:empty{display:none}
 .from{border:1px solid var(--line);border-radius:8px;padding:12px 14px;display:flex;flex-direction:column;gap:6px;background:var(--ground)}
 .from .check{margin:0}

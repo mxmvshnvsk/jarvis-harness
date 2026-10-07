@@ -904,11 +904,46 @@ function nowHtml(page: RunPage, now: number, actions?: Actions): Html {
     : "";
   return html`<section class="panel now" aria-label="Now" data-live="card">
 <div class="row"><span class="spin" aria-hidden="true"></span><b>${a.step.id}${a.step.iteration > 1 ? `#${a.step.iteration}` : ""}${a.step.agent && a.step.agent !== a.step.id ? ` · ${a.step.agent}` : ""}</b><span class="meta">${ticking(now - Date.parse(a.step.startedAt))} · ${callText(a)}</span></div>
-${page.planProgress ? planWidget(page.planProgress, page.planProgress.lastFile) : ""}
+${page.fixing ? fixWidget(page.fixing) : page.planProgress ? planWidget(page.planProgress, page.planProgress.lastFile) : ""}
 ${a.batch ? batchHtml(a.batch) : ""}
 ${toolBudget(a, now)}
 ${last ? html`<span class="meta">${last}</span>` : ""}
+${notesBox(page, a.step.id, actions)}
 </section>`;
+}
+
+/** A step on its second round: what it fixes, folded into one line like the plan. */
+function fixWidget(f: NonNullable<RunPage["fixing"]>): Html {
+  const n = f.reasons.length;
+  return html`<details class="planw fixw" data-keep="fixing">
+<summary><span class="of">Round ${String(f.round)}${f.max ? ` of ${f.max}` : ""}</span><span class="d">Fixing ${n > 0 ? `${n} defect${n === 1 ? "" : "s"}` : "what"} ${f.from} found</span></summary>
+<div class="planbox"><ol class="plist">${f.reasons.map(
+    (r, i) =>
+      html`<li class="on"><span class="bad">✗</span><span class="n">${String(i + 1)}</span><span class="d">${cut(r.text, 600)}</span><span class="f">${r.step}</span></li>`,
+  )}</ol></div>
+</details>`;
+}
+
+/**
+ * A note to the running step: the agent gets it before its next model call, binding, and so does every
+ * agent after it (src/interaction/notes.ts).
+ */
+function notesBox(page: RunPage, step: string, actions?: Actions): Html {
+  const notes = page.notes ?? [];
+  const list =
+    notes.length > 0
+      ? html`<ul class="notes">${notes.map(
+          (n) =>
+            html`<li><span class="${n.delivered ? "ok" : "warn"}">${n.delivered ? "✓ the agent got it" : "◌ goes with its next model call"}</span> <span class="meta">${n.by}${n.stepId ? ` · ${n.stepId}` : ""}</span><div class="said">${n.text}</div></li>`,
+        )}</ul>`
+      : "";
+  if (!actions) return html`${list}`;
+  return html`${list}<details class="addnote" data-keep="addnote"><summary>✎ Add a note for ${step}</summary>
+${form(
+  actions,
+  `${runHref(page.run)}/note`,
+  html`<label class="field grow">The agent gets it before its next model call, as binding — and every step after it<textarea name="text" rows="3" maxlength="4000" required placeholder="A correction, a decision, a hint: «the slots method serves the courier app too»"></textarea></label><div class="actions"><button type="submit" class="btn primary">Send to the agent</button></div>`,
+)}</details>`;
 }
 
 const planAt = (p: PlanProgress): string =>
