@@ -17,6 +17,7 @@ import type {
   ApprovalCard,
   ArtifactPage,
   BudgetCard,
+  ClarifyCard,
   FeedItem,
   LoopCard,
   RunPage,
@@ -268,6 +269,16 @@ function waitingCardHtml(w: WaitingRun, now: number, actions?: Actions): Html {
 ${gist ? html`<p>${gist}</p>` : ""}
 ${card.decision ? html`<p class="ok">${decisionText(card)}${w.terminal ? " — the terminal goes on" : resume ? " — nothing goes on with it yet" : html` — the run waits for <code>jarvis continue</code>`}</p>` : ""}
 <div class="actions">${resume}<a class="${primary}" href="${artifactHref(run, card.artifact)}">Review the ${card.type}</a><a class="btn" href="${runHref(run)}">Open the run</a></div>
+</article>`;
+  }
+  if (card.kind === "clarify") {
+    const question = card.messages.find((m) => m.role === "jarvis")?.text ?? "";
+    return html`<article class="panel card">
+<div class="row"><span class="pill wait">⏸ clarification · ${card.thread.stepId}</span>${meta}</div>
+<h3>${firstLine(run.task)}</h3>
+${question ? html`<p>${cut(question, 220)}</p>` : ""}
+${card.proposal ? html`<p class="ok">Jarvis proposes a rule — accept it or answer on</p>` : ""}
+<div class="actions"><a class="btn primary" href="${runHref(run)}#decision">Answer</a></div>
 </article>`;
   }
   return html`<article class="panel card">
@@ -952,7 +963,7 @@ ${notice ?? ""}
 <ol style="margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:2px">${page.steps.map((s) => stepRow(s, now))}</ol>
 </section>
 <div class="mainc">
-${card ? (card.kind === "loop" ? loopCardHtml(card, page, actions) : card.kind === "approval" ? approvalCardHtml(card, page, actions) : card.kind === "budget" ? budgetCardHtml(card, page, actions) : otherCardHtml(card.what, page)) : page.wait ? waitHtml(page, page.wait, now, actions) : page.next || page.continuedBy ? continuationHtml(page, actions) : nowHtml(page, now, actions)}
+${card ? (card.kind === "loop" ? loopCardHtml(card, page, actions) : card.kind === "approval" ? approvalCardHtml(card, page, actions) : card.kind === "budget" ? budgetCardHtml(card, page, actions) : card.kind === "clarify" ? clarifyCardHtml(card, page, actions) : otherCardHtml(card.what, page)) : page.wait ? waitHtml(page, page.wait, now, actions) : page.next || page.continuedBy ? continuationHtml(page, actions) : nowHtml(page, now, actions)}
 ${feedHtml(page.feed)}
 <section class="panel arts" aria-labelledby="artifacts" data-live="arts">
 <h2 id="artifacts">Artifacts</h2>
@@ -1017,6 +1028,57 @@ function continuationHtml(page: RunPage, actions?: Actions): Html {
       ? html`${form(actions, `/runs/${shortRunId(r.id)}/continue`, html`<button type="submit" class="btn primary big">Continue to ${next.workflow}</button>`)}<span class="hint">same as <code>${cmd}</code></span>`
       : html`<span class="hint">Go on with <code>${cmd}</code></span><button type="button" class="btn" data-copy="${cmd}">Copy command</button>`
   }</div>
+</section>`;
+}
+
+/**
+ * A clarification thread answered on the page (ADR-0019 §4): the same moves as `jarvis attach` — an
+ * answer (Jarvis asks on or proposes the rule), accepting the proposed rule, or a rule of one's own.
+ */
+function clarifyCardHtml(card: ClarifyCard, page: RunPage, actions?: Actions): Html {
+  const r = page.run;
+  const step = card.thread.stepId;
+  const p = card.proposal;
+  const turns = card.messages.map(
+    (m) =>
+      html`<li class="msg ${m.role}"><span class="who">${m.role === "jarvis" ? "Jarvis" : m.actor}</span><div class="said">${m.proposal ? m.text.replace(/\n+Proposed rule: [\s\S]*$/, "") : m.text}</div></li>`,
+  );
+  const list = (title: string, items: readonly string[]) =>
+    items.length > 0
+      ? html`<p class="meta">${title}</p><ul>${items.map((x) => html`<li>${x}</li>`)}</ul>`
+      : "";
+  const rule = p
+    ? html`<div class="rule"><span class="meta">Proposed rule</span><p><b>${p.rule}</b></p>${list("Requirement corrections", p.requirementCorrections)}${list("Assumptions", p.assumptions)}</div>`
+    : "";
+  const thinking = card.thinking
+    ? html`<div class="row"><span class="spin" aria-hidden="true"></span><span class="meta">Jarvis thinks over your answer: asks on or proposes the rule</span></div>`
+    : "";
+  const cmd = `jarvis continue ${shortRunId(r.id)}`;
+  const moves = actions
+    ? form(
+        actions,
+        `${runHref(r)}/clarify`,
+        html`${
+          card.exhausted
+            ? html`<p class="hint">The thread's turns are used up (<code>human.clarification.maxTurns</code>): accept the proposed rule or write the rule yourself.</p>`
+            : html`<label class="field grow">Your answer<textarea name="text" rows="3" maxlength="4000" placeholder="Answer the question: Jarvis asks on or proposes the rule"${card.thinking ? " disabled" : ""}></textarea></label>`
+        }
+<div class="actions">${card.exhausted ? "" : html`<button type="submit" name="move" value="say" class="${p ? "btn" : "btn primary"}"${card.thinking ? " disabled" : ""}>Send the answer</button>`}${p ? html`<button type="submit" name="move" value="accept" class="btn primary"${card.thinking ? " disabled" : ""}>Accept the rule and go on</button>` : ""}</div>
+<details class="ownrule"${card.exhausted && !p ? " open" : ""}><summary>Write the rule yourself</summary>
+<label class="field grow">The rule<textarea name="rule" rows="2" maxlength="2000" placeholder="State it so it can be tested: states, conditions, edge cases">${p?.rule ?? ""}</textarea></label>
+<div class="actions"><button type="submit" name="move" value="rule" class="btn">Accept this rule and go on</button></div>
+</details>`,
+        ' class="clarify"',
+      )
+    : html`<div class="actions"><span class="hint">Answer in the terminal: <code>${cmd}</code></span><button type="button" class="btn" data-copy="${cmd}">Copy command</button></div>`;
+  return html`<section class="panel decision" aria-labelledby="decision" data-live="card">
+<span class="warn" style="font-size:13px;font-weight:500">Waits for you · ${step}</span>
+<h2 id="decision">${step} asks before going on</h2>
+<ol class="convo">${turns}</ol>
+${thinking}
+${rule}
+${moves}
+${page.terminal ? html`<p class="hint">A terminal waits at this run too: an answer here or there counts once.</p>` : ""}
 </section>`;
 }
 

@@ -448,4 +448,77 @@ describe("New task on the page", () => {
         .location,
     ).toContain("notice=cannot-continue");
   });
+
+  it("a clarification is answered on the page: an answer, then a rule, and the run goes on", async () => {
+    const token = await serve();
+    const run = createRun("ABC-42: Delivery slots on the order form");
+    rt.runs.update(run.id, { currentStep: "requirements", currentIteration: 1 });
+    rt.runs.transition(run.id, "RUNNING");
+    const thread = rt.interactions.open({
+      runId: run.id,
+      kind: "clarification",
+      stepId: "requirements",
+      iteration: 1,
+      origin: "requirements",
+      openedBy: "agent:requirements",
+      message: {
+        role: "jarvis",
+        actor: "requirements",
+        text: "Can a customer pick a slot for today after 18:00?",
+      },
+    });
+    rt.runs.transition(run.id, "WAITING_HUMAN", {
+      reason: `clarification needed by requirements: ${thread.id}`,
+      waitingFor: { kind: "clarification", interactionId: thread.id },
+    });
+    rt.events.emit({ kind: "run.driver", runId: run.id, payload: { by: "ui" } });
+    const short = run.id.replace(/^run_/, "").slice(0, 8);
+    const card = await page(`/runs/${short}`);
+    expect(card).toContain("requirements asks before going on");
+    expect(card).toContain("Can a customer pick a slot for today after 18:00?");
+    expect(card).toContain(`action="/runs/${short}/clarify"`);
+    expect(card).not.toContain("Answer in the terminal");
+    // on the list of runs: what it asks, and where to answer
+    expect(await page("/")).toContain("⏸ clarification · requirements");
+    // an empty answer, accepting before any proposal: nothing recorded
+    expect((await post(`/runs/${short}/clarify`, { t: token, move: "say", text: " " })).location).toContain(
+      "notice=no-answer",
+    );
+    expect((await post(`/runs/${short}/clarify`, { t: token, move: "accept" })).location).toContain(
+      "notice=no-rule",
+    );
+    // an answer: on the thread at once; Jarvis's turn comes in the background (no model here: said so)
+    await post(`/runs/${short}/clarify`, { t: token, move: "say", text: "Only until 20:00, same day." });
+    expect(
+      rt.interactions
+        .messages(thread.id)
+        .slice(0, 2)
+        .map((m) => m.role),
+    ).toEqual(["jarvis", "human"]);
+    for (let i = 0; i < 100 && rt.interactions.messages(thread.id).length < 3; i++)
+      await new Promise((r) => setTimeout(r, 20));
+    expect(rt.interactions.messages(thread.id).at(-1)?.text).toMatch(/^⚠ No answer from the model/);
+    // Jarvis proposes a rule: shown, with the button to accept it
+    rt.interactions.say(thread.id, {
+      role: "jarvis",
+      actor: "clarifier",
+      text: "So a same-day slot closes at 20:00.",
+      proposal: { rule: "Same-day slots until 20:00", requirementCorrections: ["R3"], assumptions: [] },
+    });
+    const proposed = await page(`/runs/${short}`);
+    expect(proposed).toContain("<b>Same-day slots until 20:00</b>");
+    expect(proposed).toContain('value="accept" class="btn primary"');
+    // a rule of one's own instead: recorded, the run goes on in the background
+    const done = await post(`/runs/${short}/clarify`, {
+      t: token,
+      move: "rule",
+      rule: "A same-day slot can be picked until 20:00",
+    });
+    expect(done.location).toBe(`/runs/${short}?notice=clarified`);
+    const doc = JSON.parse(rt.artifacts.text(rt.artifacts.listLatest(run.id, "clarification")[0] as never));
+    expect(doc.rule).toBe("A same-day slot can be picked until 20:00");
+    expect(doc.answers).toEqual(["Only until 20:00, same day."]);
+    expect(rt.runs.get(run.id)?.waitingFor).toBeUndefined();
+    expect((await calls(1))[0]).toBe(`${sb.project}|off|resume ${run.id}`);
+  });
 });

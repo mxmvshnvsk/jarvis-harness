@@ -42,6 +42,7 @@ import { modelsHealthOf } from "../app/modelHealth.ts";
 import { resumableOf } from "../app/resumable.ts";
 import type { Runtime } from "../app/runtime.ts";
 import { type OpenIn, reviewFiles } from "../cli/checkout.ts";
+import { humanMove } from "../cli/commands/human.ts";
 import type { Actor } from "../core/domain/actor.ts";
 import { isTerminal, type Run } from "../core/domain/run.ts";
 import { answerFromKnowledge, plan } from "../knowledge/ask.ts";
@@ -427,6 +428,9 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
       "no-launcher": html`<div class="banner bad">This page cannot start runs: resume it with <code>jarvis resume</code></div>`,
       started: html`<div class="banner ok">Started — it prepares its checkout and shows up under Running; where it needs you, it waits here</div>`,
       "no-task": html`<div class="banner bad">Say what to do and pick a workflow</div>`,
+      "no-answer": html`<div class="banner bad">Write the answer first</div>`,
+      clarified: html`<div class="banner ok">The rule is recorded — the step goes on with it in the background</div>`,
+      "no-rule": html`<div class="banner bad">Nothing to accept yet: Jarvis has not proposed a rule — answer, or write the rule yourself</div>`,
       "cannot-continue": html`<div class="banner bad">This run cannot go on: it has not finished, has nowhere to go or went on already</div>`,
       "no-repo": html`<div class="banner bad">Not a repository this page knows: start <code>jarvis ui</code> in it</div>`,
     };
@@ -1039,7 +1043,7 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
 
   /** One launch per run gone on: a second click while the first prepares its checkout joins it. */
   const continueFrom = (launcher: Launcher, from: Run, workflow: Workflow): Launch =>
-    launcher.list().find((l) => l.from === from.id && (l.exitCode === null || l.runId)) ??
+    launcher.list().find((l) => l.from === from.id && (l.exitCode === null || l.exitCode === 0 || l.runId)) ??
     launcher.continueRun(from, workflow);
 
   /** Workflows a finished run goes on as (`next:`): "New task" offers a research to start them from. */
@@ -1115,7 +1119,9 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
         "Cache-Control": "no-store",
       });
     }
-    const m = /^\/runs\/([^/]+)\/(decide|rerun|open|budget|resume|cancel|continue)$/.exec(r.url.pathname);
+    const m = /^\/runs\/([^/]+)\/(decide|rerun|open|budget|resume|cancel|continue|clarify)$/.exec(
+      r.url.pathname,
+    );
     const run = m ? resolveRun(m[1] as string) : undefined;
     if (!m || !run || !actions) return notFound(r, `Nothing to do at ${r.url.pathname}.`);
     const form = await formOf(r.req);
@@ -1128,6 +1134,47 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
     const goOn = (r: Run): void => {
       if (options.launcher && !waitingCard(runtime, r.id)) options.launcher.adopt(r);
     };
+    if (m[2] === "clarify") {
+      // the clarification thread answered here (ADR-0019 §4), the moves of `jarvis attach`
+      const thread = runtime.interactions.openFor(run.id, "clarification");
+      if (run.waitingFor?.kind !== "clarification" || !thread)
+        return redirect(r, `/runs/${short}?notice=not-waiting`);
+      const who = await actor();
+      if (!who) return redirect(r, `/runs/${short}?notice=actor`);
+      const move = form.get("move");
+      const text = (form.get("text") ?? "").trim();
+      const rule = (form.get("rule") ?? "").trim();
+      if (move === "say") {
+        if (!text) return redirect(r, `/runs/${short}?notice=no-answer#decision`);
+        // the answer is on the thread at once; Jarvis's turn (a model call) comes in the background
+        humanMove(runtime, run, thread, who, { text }).catch((error: unknown) => {
+          const message = error instanceof Error ? error.message : String(error);
+          runtime.log.error("ui.clarify", { runId: run.id, message });
+          runtime.interactions.say(thread.id, {
+            role: "jarvis",
+            actor: "clarifier",
+            text: `⚠ No answer from the model: ${message}. Send the answer again, or write the rule yourself.`,
+          });
+        });
+        return redirect(r, `/runs/${short}#decision`);
+      }
+      if (move === "accept" || move === "rule") {
+        if (move === "rule" && !rule) return redirect(r, `/runs/${short}?notice=no-rule#decision`);
+        try {
+          await humanMove(runtime, run, thread, who, {
+            accept: true,
+            ...(move === "rule" ? { rule } : {}),
+            ...(text ? { text } : {}),
+          });
+        } catch {
+          return redirect(r, `/runs/${short}?notice=no-rule#decision`);
+        }
+        const now = runtime.runs.get(run.id) ?? run;
+        goOn(now);
+        return redirect(r, `/runs/${short}?notice=clarified`);
+      }
+      return redirect(r, `/runs/${short}`);
+    }
     if (m[2] === "continue") {
       // "Continue to sdd" on a finished research/spec: as `jarvis continue <run>`, in the background
       if (!options.launcher) return redirect(r, `/runs/${short}?notice=no-launcher`);
@@ -1338,7 +1385,10 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
         ...withResume(await runPage(runtime, engine, run, { homeDir: options.homeDir })),
         driven: options.launcher?.drives(run.id) === true,
       };
-      const ticking = run.state === "RUNNING" || model.card?.kind === "loop";
+      const ticking =
+        run.state === "RUNNING" ||
+        model.card?.kind === "loop" ||
+        (model.card?.kind === "clarify" && model.card.thinking);
       return page(
         r,
         200,

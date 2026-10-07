@@ -15,6 +15,8 @@ import { changedFilesOf, type DocFacts, docFacts, reasonsOf } from "../cli/gate.
 import type { ArtifactVersion } from "../core/domain/artifact.ts";
 import type { Run } from "../core/domain/run.ts";
 import type { WorkflowDefinition } from "../core/domain/workflow.ts";
+import { type ClarificationResolution, latestProposal } from "../interaction/clarify.ts";
+import type { Interaction, InteractionMessage } from "../interaction/store.ts";
 import type { LocalWorkflowEngine } from "../orchestration/runtime.ts";
 import { shortRunId } from "../storage/runStore.ts";
 import type { StoredEvent } from "../telemetry/events.ts";
@@ -73,7 +75,42 @@ export interface OtherCard {
   readonly what: string;
 }
 
-export type WaitCard = LoopCard | ApprovalCard | BudgetCard | OtherCard;
+/**
+ * A clarification thread (ADR-0019 §4) answered on the page: the agent's question, the turns so far,
+ * Jarvis's proposed rule. Pilot: the run stood at «Answer in the terminal» and the page's flow broke.
+ */
+export interface ClarifyCard {
+  readonly kind: "clarify";
+  readonly thread: Interaction;
+  readonly messages: readonly InteractionMessage[];
+  readonly proposal?: ClarificationResolution;
+  /** The person answered last: Jarvis is writing its turn. */
+  readonly thinking: boolean;
+  /** The thread's turns are used up (human.clarification.maxTurns): accept or write the rule. */
+  readonly exhausted: boolean;
+}
+
+export type WaitCard = LoopCard | ApprovalCard | BudgetCard | ClarifyCard | OtherCard;
+
+/** The open clarification thread of a run, as the page shows it. */
+export function clarifyCardOf(runtime: Runtime, run: Run): ClarifyCard | undefined {
+  const thread = runtime.interactions.openFor(run.id, "clarification");
+  if (!thread || thread.state === "resolved" || thread.state === "rejected") return undefined;
+  const messages = runtime.interactions.messages(thread.id);
+  const proposal = latestProposal(runtime, thread);
+  const last = messages.at(-1);
+  const config = runtime.loaded.config.human.clarification;
+  const turns = runtime.interactions.humanTurns(thread.id);
+  const exhausted = turns > config.maxTurns || (!config.multiTurn && turns > 1);
+  return {
+    kind: "clarify",
+    thread,
+    messages,
+    ...(proposal ? { proposal } : {}),
+    thinking: last?.role === "human" && !exhausted,
+    exhausted,
+  };
+}
 
 export interface WaitingRun {
   readonly run: Run;
@@ -228,6 +265,10 @@ export async function waitCardOf(runtime: Runtime, run: Run, homeDir: string): P
       const granted = budgetGranted(runtime, run.id);
       return { kind: "budget", stop, ...(changes ? { changes } : {}), ...(granted ? { granted } : {}) };
     }
+  }
+  if (kind === "clarification") {
+    const card = clarifyCardOf(runtime, run);
+    if (card) return card;
   }
   const awaited = kind === "approval" || !kind ? awaitedArtifact(runtime, run) : undefined;
   if (awaited) {

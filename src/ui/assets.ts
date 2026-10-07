@@ -341,6 +341,18 @@ h2.ask-sec{font-size:15px;margin:4px 0 -4px}
 .field select{height:44px;width:100%;text-overflow:ellipsis}
 .newtask .row{align-items:flex-end}
 .newtask .row .field{flex:1 1 240px;max-width:520px}
+.convo{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px}
+.convo .msg{display:flex;flex-direction:column;gap:4px;padding:10px 14px;border-radius:8px;border:1px solid var(--line);max-width:860px}
+.convo .msg.jarvis{background:var(--ground)}
+.convo .msg.human{background:var(--accent-soft);border-color:transparent;align-self:flex-end}
+.convo .who{font-size:12px;font-family:var(--mono);color:var(--muted)}
+.convo .said{white-space:pre-wrap;font-size:14px;line-height:21px;color:var(--ink)}
+.rule{border-left:3px solid var(--ok);padding:4px 0 4px 14px;display:flex;flex-direction:column;gap:4px}
+.rule p,.rule li{font-size:14px;line-height:21px;margin:0}
+.rule ul{margin:0;padding-left:20px}
+form.clarify{display:flex;flex-direction:column;gap:12px}
+.ownrule summary{cursor:pointer;font-size:13px;color:var(--accent)}
+.ownrule[open]{display:flex;flex-direction:column;gap:10px}
 .startfrom:empty{display:none}
 .from{border:1px solid var(--line);border-radius:8px;padding:12px 14px;display:flex;flex-direction:column;gap:6px;background:var(--ground)}
 .from .check{margin:0}
