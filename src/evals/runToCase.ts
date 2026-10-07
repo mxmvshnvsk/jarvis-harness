@@ -1,8 +1,9 @@
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { stringify } from "yaml";
 import type { Runtime } from "../app/runtime.ts";
 import type { ArtifactVersion } from "../core/domain/artifact.ts";
+import { givenFor } from "../interaction/answers.ts";
 import { git, runShell } from "../tools/local/exec.ts";
 
 /**
@@ -24,7 +25,28 @@ export interface RunToCaseResult {
   readonly acceptance: string[];
   readonly requiredSources: string[];
   readonly humanVersions: string[];
+  /** The open questions a person answered at the gates (src/interaction/answers.ts). */
+  readonly answers: number;
   readonly fixture: boolean;
+}
+
+/** The case a run already became, if any: `evals/<suite>/<id>/case.yaml` naming it as its source. */
+export function caseOfRun(
+  repoRoot: string,
+  runId: string,
+): { readonly dir: string; readonly suite: string } | undefined {
+  const evals = join(repoRoot, "evals");
+  if (!existsSync(evals)) return undefined;
+  for (const suite of readdirSync(evals, { withFileTypes: true })) {
+    if (!suite.isDirectory()) continue;
+    for (const c of readdirSync(join(evals, suite.name), { withFileTypes: true })) {
+      const file = join(evals, suite.name, c.name, "case.yaml");
+      if (!c.isDirectory() || !existsSync(file)) continue;
+      if (readFileSync(file, "utf8").includes(runId))
+        return { dir: join("evals", suite.name, c.name), suite: suite.name };
+    }
+  }
+  return undefined;
 }
 
 /** The newest human-edited version of an artifact type, else the latest agent version. */
@@ -92,6 +114,16 @@ export async function runToCase(
     runtime.loaded.config.tools.local.test ??
     runtime.loaded.config.tools.local.tests ??
     runtime.loaded.config.tools.local.check;
+  // what a person answered to the documents' open questions: the decisions the next run must reach too
+  const answers = [spec, impact, research]
+    .filter((a): a is ArtifactVersion => a !== undefined)
+    .flatMap((a) =>
+      runtime.artifacts
+        .versions(a.artifactId)
+        .flatMap((v) => givenFor(runtime, v) ?? [])
+        .filter((g) => g.mode === "answer" && g.text)
+        .map((g) => ({ question: g.question, answer: g.text as string })),
+    );
   const caseDoc = {
     id,
     task: run.task,
@@ -102,6 +134,7 @@ export async function runToCase(
       ...(tests ? { tests } : {}),
       acceptance,
       requiredSources,
+      ...(answers.length > 0 ? { answers } : {}),
     },
     cassette: "cassette",
     source: { run: run.id, baseCommit: base, exportedAt: new Date().toISOString(), humanVersions },
@@ -122,7 +155,13 @@ export async function runToCase(
       timeoutMs: 300_000,
     });
     if (archive.code !== 0) throw new Error(`git archive ${base} failed: ${archive.stderr.trim()}`);
+    // the project's configuration and knowledge as the run had them, also when they are not committed
+    for (const part of ["project.yaml", "knowledge"]) {
+      const from = join(ws.repoRoot, ".jarvis", part);
+      const to = join(fixtureDir, ".jarvis", part);
+      if (existsSync(from) && !existsSync(to)) cpSync(from, to, { recursive: true });
+    }
     fixture = true;
   }
-  return { caseDir, files, acceptance, requiredSources, humanVersions, fixture };
+  return { caseDir, files, acceptance, requiredSources, humanVersions, answers: answers.length, fixture };
 }

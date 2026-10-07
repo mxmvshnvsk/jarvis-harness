@@ -16,6 +16,7 @@ import { changedFilesOf, type DocFacts, docFacts, reasonsOf } from "../cli/gate.
 import type { ArtifactVersion } from "../core/domain/artifact.ts";
 import type { Run } from "../core/domain/run.ts";
 import type { WorkflowDefinition } from "../core/domain/workflow.ts";
+import { caseOfRun } from "../evals/runToCase.ts";
 import {
   type GivenAnswer,
   givenFor,
@@ -531,6 +532,10 @@ export interface RunPage {
   readonly leaseLive: boolean;
   /** An implementation's place in its plan, while it runs. */
   readonly planProgress?: PlanProgress;
+  /** A finished run whose implementation was accepted: «Make an eval case» (src/evals/runToCase.ts). */
+  readonly evalReady?: boolean;
+  /** The eval case it became. */
+  readonly evalCase?: { readonly dir: string; readonly suite: string };
   /** A finished research/spec that can go on (src/app/continuation.ts): "Continue to sdd". */
   readonly next?: Continuation & { readonly contradictions: number };
   /** The run that went on from this one. */
@@ -825,6 +830,7 @@ export async function runPage(
     })(),
     ...((r) => (r ? { resumable: r } : {}))(resumableOf(runtime, run, now.getTime())),
     ...continuationLinks(runtime, engine, run),
+    ...evalOf(runtime, run),
     ...((p) => (p ? { planProgress: p } : {}))(
       run.state === "RUNNING" && implementing(activity) ? planProgressOf(runtime, run, events) : undefined,
     ),
@@ -936,6 +942,15 @@ function questionsOf(
   const suggestions = suggestionsFor(runtime, artifact);
   const given = givenFor(runtime, artifact);
   return { questions: { list, ...(suggestions ? { suggestions } : {}), ...(given ? { given } : {}) } };
+}
+
+/** A run that ended with an accepted implementation can become an eval case; or it did already. */
+function evalOf(runtime: Runtime, run: Run): Pick<RunPage, "evalReady" | "evalCase"> {
+  if (run.state !== "COMPLETED") return {};
+  const made = caseOfRun(run.workspace.repoRoot, run.id);
+  if (made) return { evalCase: made };
+  const impl = runtime.artifacts.listLatest(run.id, "implementation")[0];
+  return impl && runtime.artifacts.isApproved(impl.artifactId).approved ? { evalReady: true } : {};
 }
 
 /** The step running now is an implementation (it works through a plan). */

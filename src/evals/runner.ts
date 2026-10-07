@@ -42,6 +42,8 @@ export const CaseSchema = z.strictObject({
         .default([])
         .describe("phrases the spec's acceptance criteria must contain"),
       requiredSources: z.array(z.string()).default([]).describe("sources the research/impact must cite"),
+      /** What a person answered at the gates (`run-to-case`): kept for review, not scored yet. */
+      answers: z.array(z.strictObject({ question: z.string(), answer: z.string() })).default([]),
     })
     .prefault({}),
   /** Cassette directory relative to the case directory. */

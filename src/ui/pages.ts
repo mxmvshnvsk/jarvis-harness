@@ -1009,7 +1009,7 @@ ${cancelling(r) ? html`<div class="banner bad" data-live="cancelling" role="stat
 <ol style="margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:2px">${page.steps.map((s) => stepRow(s, now, s.status === "running" ? page.planProgress : undefined))}</ol>
 </section>
 <div class="mainc">
-${card ? (card.kind === "loop" ? loopCardHtml(card, page, actions) : card.kind === "approval" ? approvalCardHtml(card, page, actions) : card.kind === "budget" ? budgetCardHtml(card, page, actions) : card.kind === "clarify" ? clarifyCardHtml(card, page, actions) : otherCardHtml(card.what, page)) : page.wait ? waitHtml(page, page.wait, now, actions) : page.next || page.continuedBy ? continuationHtml(page, actions) : nowHtml(page, now, actions)}
+${card ? (card.kind === "loop" ? loopCardHtml(card, page, actions) : card.kind === "approval" ? approvalCardHtml(card, page, actions) : card.kind === "budget" ? budgetCardHtml(card, page, actions) : card.kind === "clarify" ? clarifyCardHtml(card, page, actions) : otherCardHtml(card.what, page)) : page.wait ? waitHtml(page, page.wait, now, actions) : page.next || page.continuedBy ? continuationHtml(page, actions) : page.evalReady || page.evalCase ? evalHtml(page, actions) : nowHtml(page, now, actions)}
 ${feedHtml(page.feed)}
 <section class="panel arts" aria-labelledby="artifacts" data-live="arts">
 <h2 id="artifacts">Artifacts</h2>
@@ -1132,6 +1132,38 @@ ${thinking}
 ${rule}
 ${moves}
 ${page.terminal ? html`<p class="hint">A terminal waits at this run too: an answer here or there counts once.</p>` : ""}
+</section>`;
+}
+
+/**
+ * A run done with its implementation accepted: it becomes an eval case — the task, the repository at its
+ * base as the fixture, the gold from what the person accepted and answered (src/evals/runToCase.ts).
+ */
+function evalHtml(page: RunPage, actions?: Actions): Html {
+  const short = shortRunId(page.run.id);
+  const made = page.evalCase;
+  if (made) {
+    const cmd = `jarvis evals run --suite ${made.suite} --mode record`;
+    return html`<section class="panel card" aria-label="Eval case" data-live="card">
+<div class="row"><span class="pill ok">✓ eval case</span><span class="meta"><code>${made.dir}</code></span></div>
+<p>Review its <code>case.yaml</code>, then record the model's answers once; after that the case replays without a model, and <code>jarvis evals baseline</code> / <code>diff</code> catch a regression.</p>
+<div class="actions"><span class="hint"><code>${cmd}</code></span><button type="button" class="btn" data-copy="${cmd}">Copy command</button></div>
+</section>`;
+  }
+  const cmd = `jarvis evals run-to-case ${short} --suite pilot`;
+  return html`<section class="panel decision" aria-labelledby="decision" data-live="card">
+<span class="ok" style="font-size:13px;font-weight:500">Done and accepted</span>
+<h2 id="decision">Keep it as an eval case</h2>
+<p>The task, the repository at the run's base as the fixture, and the gold from what you accepted: the files the implementation changed, the spec's acceptance criteria, your answers to its open questions, the project's test command. Jarvis is then checked against this run whenever its prompts, models or tools change.</p>
+${
+  actions
+    ? form(
+        actions,
+        `/runs/${encodeURIComponent(short)}/eval`,
+        html`<div class="actions"><label class="field" style="max-width:220px">Suite<input type="text" name="suite" value="pilot" pattern="[a-z0-9][a-z0-9-]{0,40}" required></label><button type="submit" class="btn primary big">Make an eval case</button><span class="hint">same as <code>${cmd}</code>; it lands in <code>evals/&lt;suite&gt;/</code> of the repository</span></div>`,
+      )
+    : html`<div class="actions"><span class="hint"><code>${cmd}</code></span><button type="button" class="btn" data-copy="${cmd}">Copy command</button></div>`
+}
 </section>`;
 }
 

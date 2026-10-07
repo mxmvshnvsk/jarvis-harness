@@ -103,3 +103,11 @@ jarvis evals run-to-case <run> --suite pilot --id onboarding-restart
 которые правил человек; id по умолчанию — slug задачи; тестовую
 команду из `tools.local.test|tests|check`; записывает `source` для трассируемости. `--no-fixture` —
 только `case.yaml`. Кассету для replay нужно записать отдельным `--mode record`.
+
+Ещё `run-to-case` кладёт в `gold.answers` ответы человека на открытые вопросы документов (со страницы одобрения;
+пока для ревью кейса, в метрики не входят) и копирует в фикстуру `.jarvis/project.yaml` и `.jarvis/knowledge` из
+рабочей копии, если их нет в коммите: прогон шёл с ними.
+
+**Из `jarvis ui`.** На странице завершённого прогона с принятой реализацией — карточка «Keep it as an eval case»:
+набор (по умолчанию `pilot`) и **Make an eval case** — то же, что `jarvis evals run-to-case <run> --suite <набор>`,
+кейс ложится в `evals/<набор>/` репозитория. После — «✓ eval case» с путём и командой записи кассеты.

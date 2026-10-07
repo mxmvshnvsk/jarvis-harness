@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { request } from "node:http";
 import { hostname } from "node:os";
@@ -7,6 +8,7 @@ import { createEngine } from "../../src/app/engine.ts";
 import { resumableOf } from "../../src/app/resumable.ts";
 import { createRuntime, type Runtime } from "../../src/app/runtime.ts";
 import { loadConfig } from "../../src/core/config/load.ts";
+import { recordGiven } from "../../src/interaction/answers.ts";
 import { createLauncher, type Launcher } from "../../src/ui/launcher.ts";
 import { startUiServer, type UiServer } from "../../src/ui/server.ts";
 import { type Sandbox, sandbox } from "../helpers/tmp.ts";
@@ -634,5 +636,80 @@ describe("New task on the page", () => {
     expect(body).toContain("<code>src/saga.ts</code>");
     expect(body).toContain("running now · plan 2 of 3");
     expect(await page("/")).toContain('<b class="planat">plan 2 of 3</b> Fetch the slots in the saga');
+  });
+
+  it("a run done with its implementation accepted becomes an eval case from its page", async () => {
+    const token = await serve();
+    const git = (...args: string[]) =>
+      execFileSync("git", args, {
+        cwd: sb.project,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          GIT_AUTHOR_NAME: "t",
+          GIT_AUTHOR_EMAIL: "t@t",
+          GIT_COMMITTER_NAME: "t",
+          GIT_COMMITTER_EMAIL: "t@t",
+        },
+      }).trim();
+    git("init", "-q");
+    sb.write("project/src/slots.ts", "export const slots = [];\n");
+    git("add", "src");
+    git("commit", "-qm", "base");
+    const base = git("rev-parse", "HEAD");
+    const run = rt.runs.create({
+      task: "ABC-42: Delivery slots on the order form",
+      workflow: "sdd",
+      owner: DEV,
+      workspace: { mode: "cwd", repoRoot: sb.project, path: sb.project, baseRef: "HEAD", baseCommit: base },
+      dataClass: "internal",
+    });
+    const spec = rt.artifacts.put({
+      runId: run.id,
+      type: "spec",
+      name: "spec.json",
+      content: JSON.stringify({
+        title: "Slots",
+        requirements: [{ id: "R1", text: "Slots", acceptance: ["3 days shown"] }],
+      }),
+      provenance: { kind: "agent", agentId: "specification" },
+    });
+    recordGiven(rt, spec, [{ question: "Keep the checkbox?", mode: "answer", text: "Remove it" }], DEV.id);
+    const impl = rt.artifacts.put({
+      runId: run.id,
+      type: "implementation",
+      name: "implementation.json",
+      content: JSON.stringify({ summary: "done", changedFiles: ["src/slots.ts"] }),
+      provenance: { kind: "agent", agentId: "implementation" },
+    });
+    rt.artifacts.approve({
+      runId: run.id,
+      stepId: "approve-impl",
+      artifactId: impl.artifactId,
+      version: 1,
+      actor: DEV,
+      decision: "approve",
+    });
+    sb.write("project/src/slots.ts", "export const slots = ['9-12'];\n");
+    rt.runs.transition(run.id, "RUNNING");
+    rt.runs.transition(run.id, "COMPLETED");
+    const short = run.id.replace(/^run_/, "").slice(0, 8);
+    expect(await page(`/runs/${short}`)).toContain("Make an eval case");
+    expect((await post(`/runs/${short}/eval`, { t: token, suite: "Bad Suite" })).location).toContain(
+      "notice=eval-suite",
+    );
+    expect((await post(`/runs/${short}/eval`, { t: token, suite: "pilot" })).location).toBe(
+      `/runs/${short}?notice=eval-made`,
+    );
+    const dir = join(sb.project, "evals", "pilot", "abc-42-delivery-slots-on-the-order-form");
+    const yaml = readFileSync(join(dir, "case.yaml"), "utf8");
+    expect(yaml).toContain("src/slots.ts");
+    expect(yaml).toContain("3 days shown");
+    expect(yaml).toContain("Remove it");
+    // the project's configuration, not committed, goes into the fixture too
+    expect(existsSync(join(dir, "fixture", ".jarvis", "project.yaml"))).toBe(true);
+    const after = await page(`/runs/${short}`);
+    expect(after).toContain("✓ eval case");
+    expect(after).toContain("jarvis evals run --suite pilot --mode record");
   });
 });

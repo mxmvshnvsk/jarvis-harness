@@ -46,6 +46,7 @@ import { humanMove } from "../cli/commands/human.ts";
 import type { Actor } from "../core/domain/actor.ts";
 import type { ArtifactVersion } from "../core/domain/artifact.ts";
 import { isTerminal, type Run } from "../core/domain/run.ts";
+import { caseOfRun, runToCase } from "../evals/runToCase.ts";
 import {
   answersText,
   givenFromForm,
@@ -438,6 +439,9 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
       "no-launcher": html`<div class="banner bad">This page cannot start runs: resume it with <code>jarvis resume</code></div>`,
       started: html`<div class="banner ok">Started — it prepares its checkout and shows up under Running; where it needs you, it waits here</div>`,
       "no-task": html`<div class="banner bad">Say what to do and pick a workflow</div>`,
+      "eval-made": html`<div class="banner ok">The eval case is written: review its case.yaml, then record it once</div>`,
+      "eval-failed": html`<div class="banner bad">No eval case written — see the log of <code>jarvis ui</code> (a run that ended, a repository git can archive)</div>`,
+      "eval-suite": html`<div class="banner bad">A suite is a short name: lowercase letters, digits and dashes</div>`,
       "no-answer": html`<div class="banner bad">Write the answer first</div>`,
       clarified: html`<div class="banner ok">The rule is recorded — the step goes on with it in the background</div>`,
       "no-rule": html`<div class="banner bad">Nothing to accept yet: Jarvis has not proposed a rule — answer, or write the rule yourself</div>`,
@@ -1142,7 +1146,7 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
         "Cache-Control": "no-store",
       });
     }
-    const m = /^\/runs\/([^/]+)\/(decide|rerun|open|budget|resume|cancel|continue|clarify)$/.exec(
+    const m = /^\/runs\/([^/]+)\/(decide|rerun|open|budget|resume|cancel|continue|clarify|eval)$/.exec(
       r.url.pathname,
     );
     const run = m ? resolveRun(m[1] as string) : undefined;
@@ -1157,6 +1161,23 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
     const goOn = (r: Run): void => {
       if (options.launcher && !waitingCard(runtime, r.id)) options.launcher.adopt(r);
     };
+    if (m[2] === "eval") {
+      // «Make an eval case»: as `jarvis evals run-to-case <run> --suite <suite>`
+      const suite = (form.get("suite") ?? "pilot").trim();
+      if (!/^[a-z0-9][a-z0-9-]{0,40}$/.test(suite)) return redirect(r, `/runs/${short}?notice=eval-suite`);
+      if (run.state !== "COMPLETED") return redirect(r, `/runs/${short}?notice=eval-failed`);
+      if (caseOfRun(run.workspace.repoRoot, run.id)) return redirect(r, `/runs/${short}?notice=eval-made`);
+      try {
+        await runToCase(runtime, run.id, { suiteDir: joinPath(run.workspace.repoRoot, "evals", suite) });
+      } catch (error) {
+        runtime.log.error("ui.eval", {
+          runId: run.id,
+          message: error instanceof Error ? error.message : String(error),
+        });
+        return redirect(r, `/runs/${short}?notice=eval-failed`);
+      }
+      return redirect(r, `/runs/${short}?notice=eval-made`);
+    }
     if (m[2] === "clarify") {
       // the clarification thread answered here (ADR-0019 §4), the moves of `jarvis attach`
       const thread = runtime.interactions.openFor(run.id, "clarification");
