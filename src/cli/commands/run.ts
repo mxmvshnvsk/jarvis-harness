@@ -330,7 +330,8 @@ export async function runContinue(ctx: CliContext, ref: string | undefined): Pro
       run = next;
     }
     if (run.state === "WAITING_HUMAN") {
-      for (const line of formatRunHeader(run, planOf(engine, run), st)) ctx.out.line(line);
+      for (const line of formatRunHeader(run, planOf(engine, run), st, runtime.loaded.config))
+        ctx.out.line(line);
       if (!prompt) {
         const detail = runDetail(runtime, run);
         ctx.out.result(detail, () => renderSummary(ctx, detail));
@@ -347,7 +348,8 @@ export async function runContinue(ctx: CliContext, ref: string | undefined): Pro
     }
     if (run.state === "WAITING_BUDGET" && prompt) {
       // check the model before spending a full request (and its retries) on it
-      for (const line of formatRunHeader(run, planOf(engine, run), st)) ctx.out.line(line);
+      for (const line of formatRunHeader(run, planOf(engine, run), st, runtime.loaded.config))
+        ctx.out.line(line);
       if ((await waitParked(ctx, runtime, run)) !== "ready") throw new CliExit(EXIT.waitingBudget);
       await executeAndReport(ctx, runtime, engine, run, false, {}, prompt, false);
     }

@@ -11,6 +11,8 @@ import { loadForCli } from "./config.ts";
 
 interface Row extends ServerReport {
   readonly egressAllowed: boolean;
+  /** Out of the data class's network by the project's exception (ADR-0016 §6): its reason. */
+  readonly egressException?: string;
   readonly live?: { ok: boolean; error?: string };
 }
 
@@ -31,11 +33,16 @@ export async function runMcpList(ctx: CliContext, options: { refresh?: boolean }
       }
       runtime.registry.replace(runtime.mcp.provider);
     }
-    const rows: Row[] = runtime.mcp.provider.reports().map((r) => ({
-      ...r,
-      egressAllowed: networkAllowed(loaded.config.dataClass, r.network),
-      ...(live.has(r.id) ? { live: live.get(r.id) as { ok: boolean; error?: string } } : {}),
-    }));
+    const rows: Row[] = runtime.mcp.provider.reports().map((r) => {
+      const byNetwork = networkAllowed(loaded.config.dataClass, r.network);
+      const exception = byNetwork ? undefined : loaded.config.egressExceptions.find((e) => e.server === r.id);
+      return {
+        ...r,
+        egressAllowed: byNetwork || exception !== undefined,
+        ...(exception ? { egressException: exception.reason } : {}),
+        ...(live.has(r.id) ? { live: live.get(r.id) as { ok: boolean; error?: string } } : {}),
+      };
+    });
     ctx.out.result({ servers: rows }, () => {
       if (rows.length === 0) {
         ctx.out.line(
@@ -48,7 +55,7 @@ export async function runMcpList(ctx: CliContext, options: { refresh?: boolean }
         `${padEnd("server", w)}  ${padEnd("transport", 9)}  ${padEnd("network", 9)}  ${padEnd("profile", 10)}  discovered        exposed  denied  unmapped  not-allowed`,
       );
       for (const r of rows) {
-        const network = r.egressAllowed ? r.network : `${r.network}✗`;
+        const network = r.egressException ? `${r.network}!` : r.egressAllowed ? r.network : `${r.network}✗`;
         const discovered = r.discovered ? `${r.discovered.at.slice(0, 10)} (${r.discovered.count})` : "never";
         ctx.out.line(
           `${padEnd(r.id, w)}  ${padEnd(r.transport, 9)}  ${padEnd(network, 9)}  ${padEnd(r.profile ?? (r.readOnly ? "readOnly" : "-"), 10)}  ${padEnd(discovered, 16)}  ${padEnd(String(r.exposed.length), 7)}  ${padEnd(String(r.denied.length), 6)}  ${padEnd(String(r.unmapped.length), 8)}  ${r.notAllowed.length}`,
@@ -56,6 +63,10 @@ export async function runMcpList(ctx: CliContext, options: { refresh?: boolean }
         const pad = " ".repeat(w);
         ctx.out.line(`${pad}  ${r.target}${r.auth ? `  auth: ${r.auth}` : ""}`);
         if (r.error) ctx.out.line(`${pad}  ERROR ${r.error}`);
+        if (r.egressException)
+          ctx.out.line(
+            `${pad}  ${ctx.out.style.warn("⚠")} dataClass ${loaded.config.dataClass}, yet goes to the ${r.network} by an exception (reads only): ${r.egressException}`,
+          );
         if (r.live && !r.live.ok) ctx.out.line(`${pad}  UNAVAILABLE ${r.live.error}`);
         if (r.exposed.length > 0) ctx.out.line(`${pad}  exposed: ${r.exposed.join(", ")}`);
         if (r.unmapped.length > 0)

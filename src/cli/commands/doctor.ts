@@ -326,6 +326,15 @@ export async function runDoctor(ctx: CliContext): Promise<DoctorReport> {
     for (const s of egress.servers) {
       if (!s.allowed)
         checks.push(check(`egress:mcp:${s.id}`, "warn", "egress", `mcp server ${s.id}: ${s.reason}`));
+      else if (s.exception)
+        checks.push(
+          check(
+            `egress:exception:${s.id}`,
+            "warn",
+            "egress",
+            `mcp server ${s.id}: out of dataClass ${egress.dataClass} by an exception (reads only): ${s.exception}`,
+          ),
+        );
     }
     if (!egress.telemetryExport.allowed) {
       checks.push(

@@ -44,6 +44,8 @@ export interface Capability {
   readonly effect: boolean;
   /** JSON Schema of `args`. */
   readonly parameters: Record<string, unknown>;
+  /** The MCP server behind it, if any (an egress exception names a server, ADR-0016 §6). */
+  readonly server?: string;
   handler(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolOutput>;
   /** For effects: look for the marker on the provider side (ADR-0002 §3). */
   verify?(

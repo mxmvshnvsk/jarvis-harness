@@ -1,9 +1,11 @@
 import { activityOf, formatActivity, formatRecent, kilo, noticeOf } from "../app/activity.ts";
 import { duration, Journey, type LoopReport, type StepReport } from "../app/journey.ts";
 import type { Runtime } from "../app/runtime.ts";
+import type { ResolvedConfig } from "../core/config/schema.ts";
 import type { ArtifactVersion } from "../core/domain/artifact.ts";
 import type { Run } from "../core/domain/run.ts";
 import { interruption } from "../orchestration/interrupt.ts";
+import { egressNotices, formatEgressNotice } from "../security/policy/egress.ts";
 import type { StoredEvent } from "../telemetry/events.ts";
 import type { CliContext } from "./context.ts";
 import { diagnose } from "./diagnostics.ts";
@@ -58,11 +60,14 @@ export function formatRunHeader(
   run: Pick<Run, "id" | "task" | "workflow">,
   plan: readonly string[],
   st: Style,
+  config?: ResolvedConfig,
 ): string[] {
   const lines = [
     `${st.heading("▶")} ${st.heading(run.workflow)} ${st.muted("·")} ${oneLine(run.task, 90)} ${st.muted(`· run ${shortId(run.id)}`)}`,
   ];
   if (plan.length > 1) lines.push(`  ${st.muted(plan.join(" → "))}`);
+  // ADR-0016 §6: a server out of the data class's network by an exception is said at every start
+  for (const n of config ? egressNotices(config) : []) lines.push(`${st.warn("⚠")} ${formatEgressNotice(n)}`);
   return lines;
 }
 
@@ -204,7 +209,7 @@ export function followRun(ctx: CliContext, runtime: Runtime, options: FollowOpti
     const run = runtime.runs.get(runId);
     if (!run) return;
     headed = true;
-    for (const line of formatRunHeader(run, plan, st)) ctx.out.note(line);
+    for (const line of formatRunHeader(run, plan, st, runtime.loaded.config)) ctx.out.note(line);
   };
   const producedBy = (r: StepReport) =>
     runId

@@ -77,6 +77,10 @@ input.amount{height:44px;width:11em;padding:0 10px;font-family:inherit;font-size
 @keyframes pulse{50%{opacity:.35}}
 @media (prefers-reduced-motion:reduce){.dot[data-state=pending]{animation:none}}
 .pop-head .spin{width:12px;height:12px}
+.egress{background:var(--wait-bg);border-bottom:1px solid var(--line);color:var(--wait)}
+.egress .wrap{padding-top:8px;padding-bottom:8px}
+.egress p{margin:0;font-size:13px;line-height:19px}
+.egress code{font-family:var(--mono);font-size:12px}
 .launch-link{display:block;color:inherit;text-decoration:none}
 .launch-link:hover .panel{border-color:var(--ink-2)}
 .models-wrap{position:relative}

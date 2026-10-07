@@ -154,8 +154,17 @@ mcp:
 ```
 
 Figma — интернет: при `dataClass: confidential` политика (ADR-0016) агентам этот сервер не выдаёт; при
-`internal` выдаёт как недоверенный источник. Решение о том, что макеты и их тексты проходят через API Figma к
-модели, — за командой. Проверка без прогона: `jarvis mcp call figma.get --arg url="<ссылка на фрейм>"`.
+`internal` выдаёт как недоверенный источник. Не поднимая `dataClass` всему проекту, команда может выпустить
+только его — на чтение, исключением в `.jarvis/project.yaml` (ADR-0016 §6):
+
+```yaml
+egressExceptions:
+  - server: figma
+    reason: "макеты задач; согласовано с …"
+```
+
+Тогда каждый запуск печатает `⚠ dataClass confidential — MCP server "figma" goes to the internet by an
+exception (reads only): …`, а `jarvis ui` показывает то же полосой под шапкой. Проверка без прогона: `jarvis mcp call figma.get --arg url="<ссылка на фрейм>"`.
 
 `profile: { base: atlassian, map: { "jira.worklog": "jira_add_worklog" } }` добавляет только чистые
 чтения; эффекты из конфигурации объявить нельзя (их проверку должен знать код).

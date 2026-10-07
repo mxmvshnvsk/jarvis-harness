@@ -5,11 +5,14 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { preflightMcp, workflowCapabilities } from "../../src/app/preflight.ts";
 import type { Runtime } from "../../src/app/runtime.ts";
 import { run } from "../../src/cli/main.ts";
+import { formatRunHeader } from "../../src/cli/progress.ts";
+import { createStyle } from "../../src/cli/style.ts";
 import { embeddedLinks } from "../../src/mcp/profiles/atlassian.ts";
 import { figmaRef } from "../../src/mcp/profiles/figma.ts";
 import { resolveProfile, UnknownProfileError } from "../../src/mcp/profiles/index.ts";
 import { filterBySchema, serversNeeded } from "../../src/mcp/provider.ts";
 import { HeldLease } from "../../src/orchestration/lease.ts";
+import { egressNotices } from "../../src/security/policy/egress.ts";
 import { effectKey, effectMarker } from "../../src/storage/effects.ts";
 import { loadWorkflows } from "../../src/workflows/load.ts";
 import { createRun, testRuntime } from "../helpers/engine.ts";
@@ -371,6 +374,92 @@ describe("Figma (figma-developer-mcp)", () => {
   it("an internal project's agents may read it, as an untrusted source", async () => {
     await setup(`${serverYaml("design", "      profile: figma")}`, "internal");
     expect((rt as Runtime).tools.allowed(["figma.get"]).map((c) => c.name)).toEqual(["figma.get"]);
+  });
+});
+
+describe("an egress exception (ADR-0016 §6)", () => {
+  const EXCEPTION = `egressExceptions:
+  - server: jira
+    reason: "the team's issue tracker answers from outside; agreed for reads"
+`;
+  async function confidentialWith(exception: string) {
+    sb.write("home/.jarvis/config.yaml", "version: 1\nactor: { id: me@corp }\n");
+    sb.write(
+      "project/.jarvis/project.yaml",
+      `version: 1\ndataClass: confidential\nworkspace: { mode: cwd }\nmcp:\n  servers:\n${serverYaml("jira", "      profile: atlassian\n      network: internet")}\n${exception}`,
+    );
+    rt = await testRuntime(sb, ENV);
+    return rt;
+  }
+
+  it("lets the named server's reads out of the data class, never its effects, and records it on each call", async () => {
+    const runtime = await confidentialWith(EXCEPTION);
+    const get = runtime.registry.get("jira.get");
+    const comment = runtime.registry.get("jira.comment");
+    expect(runtime.tools.policy(get as never, ["*"])).toEqual({
+      allowed: true,
+      exception: "the team's issue tracker answers from outside; agreed for reads",
+    });
+    expect(runtime.tools.policy(comment as never, ["*"]).allowed).toBe(false);
+    expect(egressNotices(runtime.loaded.config)).toEqual([
+      {
+        server: "jira",
+        network: "internet",
+        dataClass: "confidential",
+        reason: "the team's issue tracker answers from outside; agreed for reads",
+      },
+    ]);
+    // every run says so at its start
+    const header = formatRunHeader(
+      { id: "run_abc12345", task: "ABC-1", workflow: "sdd" },
+      [],
+      createStyle(false),
+      runtime.loaded.config,
+    );
+    expect(header[1]).toBe(
+      '⚠ dataClass confidential — MCP server "jira" goes to the internet by an exception (reads only): the team\'s issue tracker answers from outside; agreed for reads',
+    );
+    const run = createRun(runtime, "smoke");
+    runtime.runs.transition(run.id, "RUNNING");
+    const held = HeldLease.acquire(runtime.runs, run.id, "cli:test", { heartbeatMs: 0 });
+    if (!held) throw new Error("lease");
+    lease = held;
+    const bound = runtime.tools.bind({
+      run: runtime.runs.require(run.id),
+      stepId: "research",
+      iteration: 1,
+      lease: held,
+      workspacePath: sb.project,
+      agentCapabilities: ["jira.get"],
+      env: ENV,
+    });
+    expect((await bound.invoke("jira.get", { key: "ABC-1" })).ok).toBe(true);
+    expect(runtime.events.list({ runId: run.id, kind: "tool.call" })[0]?.payload).toMatchObject({
+      capability: "jira.get",
+      network: "internet",
+      egressException: "the team's issue tracker answers from outside; agreed for reads",
+    });
+  });
+
+  it("without it the refusal says where an exception would go", async () => {
+    const runtime = await confidentialWith("");
+    expect(runtime.tools.policy(runtime.registry.get("jira.get") as never, ["*"]).reason).toContain(
+      'a team may allow server "jira" in .jarvis/project.yaml: egressExceptions',
+    );
+  });
+
+  it("only the project file declares one, for a server it has", async () => {
+    sb.write("home/.jarvis/config.yaml", `version: 1\nactor: { id: me@corp }\n${EXCEPTION}`);
+    sb.write("project/.jarvis/project.yaml", "version: 1\n");
+    await expect(testRuntime(sb, ENV)).rejects.toThrow("invalid configuration");
+    sb.write("home/.jarvis/config.yaml", "version: 1\nactor: { id: me@corp }\n");
+    sb.write(
+      "project/.jarvis/project.yaml",
+      `version: 1\n${EXCEPTION.replace("server: jira", "server: nope")}`,
+    );
+    await expect(testRuntime(sb, ENV)).rejects.toMatchObject({
+      issues: [expect.objectContaining({ message: 'no MCP server "nope" in mcp.servers' })],
+    });
   });
 });
 

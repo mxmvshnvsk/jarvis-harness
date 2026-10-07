@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createEngine } from "../../src/app/engine.ts";
 import { createRuntime, type Runtime } from "../../src/app/runtime.ts";
 import { loadConfig } from "../../src/core/config/load.ts";
+import { html } from "../../src/ui/html.ts";
+import { layout } from "../../src/ui/pages.ts";
 import { startUiServer, type UiServer } from "../../src/ui/server.ts";
 import { type Sandbox, sandbox } from "../helpers/tmp.ts";
 
@@ -148,5 +150,33 @@ describe("the mcp indicator", () => {
     const res = await call("/mcp/check", { method: "POST", body: `t=${encodeURIComponent(ui.token)}` });
     expect(res.status).toBe(202);
     expect((await settled()).state).toBe("down");
+  });
+});
+
+describe("an egress exception on the page (ADR-0016 §6)", () => {
+  it("every page says it under the header", () => {
+    const page = layout(
+      {
+        title: "Runs",
+        page: "runs",
+        address: "127.0.0.1:1",
+        egress: [
+          {
+            server: "design",
+            network: "internet",
+            dataClass: "confidential",
+            reason: "frames of the team's designs",
+          },
+        ],
+      },
+      html`<p>runs</p>`,
+    );
+    expect(page).toContain('<div class="egress" role="note">');
+    expect(page).toContain(
+      "<b>dataClass confidential</b> — MCP server <code>design</code> goes to the internet by an exception, reads only: frames of the team&#39;s designs",
+    );
+    expect(layout({ title: "Runs", page: "runs", address: "127.0.0.1:1" }, html`<p>runs</p>`)).not.toContain(
+      'class="egress"',
+    );
   });
 });

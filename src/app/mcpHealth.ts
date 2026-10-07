@@ -40,8 +40,10 @@ export interface McpServerHealth extends ServerReport {
   readonly state: HealthState;
   /** Why it is not simply fine, most important first; empty when it is. */
   readonly reasons: readonly string[];
-  /** The project's dataClass lets the agents reach the server's network. */
+  /** The project's dataClass lets the agents reach the server's network (or an exception does). */
   readonly egressAllowed: boolean;
+  /** Out of the data class's network by the project's exception (ADR-0016 §6): its reason. */
+  readonly egressException?: string;
   readonly probe?: McpProbe;
   /** A check is under way now. */
   readonly checking: boolean;
@@ -64,6 +66,8 @@ export interface McpHealthInput {
   readonly dataClass: Parameters<typeof networkAllowed>[0];
   readonly probes: ReadonlyMap<string, McpProbe>;
   readonly checking: ReadonlySet<string>;
+  /** The project's egress exceptions (ADR-0016 §6). */
+  readonly exceptions?: ReadonlyArray<{ readonly server: string; readonly reason: string }>;
   /** `tool.call` and `tool.denied` events of the window, any capability. */
   readonly events: readonly StoredEvent[];
   readonly now: Date;
@@ -118,7 +122,9 @@ export function mcpHealth(input: McpHealthInput): McpHealth {
         .map(([name, c]) => ({ name, ...c }))
         .sort((a, b) => b.calls - a.calls || a.name.localeCompare(b.name)),
     };
-    const egressAllowed = networkAllowed(input.dataClass, r.network);
+    const byNetwork = networkAllowed(input.dataClass, r.network);
+    const exception = byNetwork ? undefined : input.exceptions?.find((e) => e.server === r.id);
+    const egressAllowed = byNetwork || exception !== undefined;
     const probe = input.probes.get(r.id);
     const down: string[] = [];
     const busy: string[] = [];
@@ -137,6 +143,7 @@ export function mcpHealth(input: McpHealthInput): McpHealth {
       state,
       reasons: [...down, ...busy],
       egressAllowed,
+      ...(exception ? { egressException: exception.reason } : {}),
       ...(probe ? { probe } : {}),
       checking: input.checking.has(r.id),
       recent,
@@ -160,6 +167,7 @@ export function mcpHealthOf(
   return mcpHealth({
     reports: runtime.mcp.provider.reports(),
     dataClass: runtime.loaded.config.dataClass,
+    exceptions: runtime.loaded.config.egressExceptions,
     probes,
     checking,
     events,

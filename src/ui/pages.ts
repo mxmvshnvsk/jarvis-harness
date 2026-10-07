@@ -8,6 +8,7 @@ import { toolMix } from "../cli/progress.ts";
 import { documentToMarkdown } from "../cli/render.ts";
 import { incompleteOf } from "../cli/style.ts";
 import type { Run } from "../core/domain/run.ts";
+import type { EgressNotice } from "../security/policy/egress.ts";
 import { shortRunId } from "../storage/runStore.ts";
 import { type DiffFile, escapeHtml, type Html, html, join, markdownToHtml, type Part } from "./html.ts";
 import type {
@@ -67,6 +68,8 @@ export interface Chrome {
   readonly canStart?: boolean;
   /** Without scripts, reload the page this often (seconds); with them the live regions refresh (`tick`). */
   readonly refresh?: number;
+  /** MCP servers out of the project's data class by an exception (ADR-0016 §6): said on every page. */
+  readonly egress?: readonly EgressNotice[];
 }
 
 export function layout(chrome: Chrome, content: Html): string {
@@ -101,6 +104,14 @@ ${chrome.canStart ? html`<a class="btn primary small" href="/#new">New task</a>`
 <button type="button" class="theme" data-theme-switch aria-label="Switch the theme" title="Switch the theme"><svg class="moon" viewBox="0 0 16 16" aria-hidden="true"><path d="M13.5 9.6A5.75 5.75 0 0 1 6.4 2.5a5.75 5.75 0 1 0 7.1 7.1z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"></path></svg><svg class="sun" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="3" fill="none" stroke="currentColor" stroke-width="1.5"></circle><path d="M8 1v1.75M8 13.25V15M1 8h1.75M13.25 8H15M3.05 3.05l1.24 1.24M11.71 11.71l1.24 1.24M3.05 12.95l1.24-1.24M11.71 4.29l1.24-1.24" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path></svg></button>
 </div>
 </div></header>
+${
+  chrome.egress && chrome.egress.length > 0
+    ? html`<div class="egress" role="note"><div class="wrap">${chrome.egress.map(
+        (n) =>
+          html`<p><span aria-hidden="true">⚠</span> <b>dataClass ${n.dataClass}</b> — MCP server <code>${n.server}</code> goes to the ${n.network} by an exception, reads only: ${n.reason}</p>`,
+      )}</div></div>`
+    : ""
+}
 <main id="main" class="wrap">
 ${content}
 </main>
@@ -1025,6 +1036,11 @@ function serverHtml(s: McpServerHealth): Html {
           ...(r.lastCallAt ? [`last ${wall(r.lastCallAt)}`] : []),
         ].join(" · ");
   const rows: Array<[string, string]> = [
+    ...(s.egressException
+      ? ([
+          ["egress", `out of the project's data class by an exception, reads only: ${s.egressException}`],
+        ] as Array<[string, string]>)
+      : []),
     ["check", check],
     ["discovered", s.discovered ? `${day(s.discovered.at)} · ${s.discovered.count} tools` : "never"],
     ["exposed", names(s.exposed)],
@@ -1071,7 +1087,7 @@ function serverHtml(s: McpServerHealth): Html {
       : []),
   ];
   return html`<li class="mh">
-<div class="row"><span class="dot" data-state="${s.checking && !p ? "pending" : s.state}" aria-hidden="true"></span><b class="mono">${s.id}</b><span class="pill ${HEALTH[s.state].pill}">${HEALTH[s.state].label}</span><span class="meta">${s.profile ? `profile ${s.profile}` : s.readOnly ? "readOnly" : "no profile"} · ${s.network}${s.egressAllowed ? "" : " ✗"} · ${s.transport}</span></div>
+<div class="row"><span class="dot" data-state="${s.checking && !p ? "pending" : s.state}" aria-hidden="true"></span><b class="mono">${s.id}</b><span class="pill ${HEALTH[s.state].pill}">${HEALTH[s.state].label}</span><span class="meta">${s.profile ? `profile ${s.profile}` : s.readOnly ? "readOnly" : "no profile"} · ${s.network}${s.egressException ? " ⚠" : s.egressAllowed ? "" : " ✗"} · ${s.transport}</span></div>
 ${s.reasons.length > 0 ? html`<ul class="why">${s.reasons.map((x) => html`<li>${x}</li>`)}</ul>` : ""}
 <span class="meta mono">${s.target}${s.auth ? ` · auth ${s.auth}` : ""}</span>
 <dl class="perf">${rows.map(([k, v]) => html`<dt>${k}</dt><dd>${v}</dd>`)}</dl>

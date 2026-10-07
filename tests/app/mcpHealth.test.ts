@@ -101,6 +101,16 @@ describe("mcpHealth", () => {
     );
     expect(restricted.state).toBe("down");
     expect(restricted.servers[0]?.egressAllowed).toBe(false);
+    // the project's exception: out of the data class's network on purpose, said, not a fault
+    const excepted = mcpHealth(
+      input({
+        dataClass: "confidential",
+        reports: [report({ network: "internet" })],
+        exceptions: [{ server: "atlassian", reason: "agreed for reads" }],
+      }),
+    );
+    expect(excepted.state).toBe("ok");
+    expect(excepted.servers[0]).toMatchObject({ egressAllowed: true, egressException: "agreed for reads" });
     expect(mcpHealth(input({ reports: [report({ error: 'unknown profile "x"' })] })).state).toBe("down");
   });
 

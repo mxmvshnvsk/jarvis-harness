@@ -90,6 +90,20 @@ function crossChecks(config: ResolvedConfig, sources: Record<string, string>): C
     return source ? { path, message, source } : { path, message };
   };
 
+  // an egress exception is the project's decision: no personal config, variable or flag adds one
+  for (const [path, source] of Object.entries(sources)) {
+    if (path.startsWith("egressExceptions") && !source.startsWith("project:"))
+      issues.push({
+        path,
+        message: "egress exceptions belong to .jarvis/project.yaml only (ADR-0016 §6)",
+        source,
+      });
+  }
+  config.egressExceptions.forEach((e, i) => {
+    if (!config.mcp.servers[e.server])
+      issues.push(withSource(`egressExceptions[${i}].server`, `no MCP server "${e.server}" in mcp.servers`));
+  });
+
   for (const [role, def] of Object.entries(config.roles)) {
     def.models.forEach((id, i) => {
       if (!config.models[id]) {

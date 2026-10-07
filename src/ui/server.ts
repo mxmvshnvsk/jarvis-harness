@@ -17,6 +17,7 @@ import { type OpenIn, reviewFiles } from "../cli/checkout.ts";
 import type { Actor } from "../core/domain/actor.ts";
 import type { Run } from "../core/domain/run.ts";
 import type { LocalWorkflowEngine } from "../orchestration/runtime.ts";
+import { egressNotices } from "../security/policy/egress.ts";
 import { shortRunId } from "../storage/runStore.ts";
 import { git } from "../tools/local/exec.ts";
 import { SCRIPT, STYLE } from "./assets.ts";
@@ -258,6 +259,8 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
     r.res.writeHead(status, { ...SECURITY_HEADERS, "Content-Type": type, ...extra });
     r.res.end(body);
   };
+  // ADR-0016 §6: servers out of the data class's network by an exception, said on every page
+  const egress = egressNotices(runtime.loaded.config);
   const page = (
     r: Request,
     status: number,
@@ -274,6 +277,7 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
           address: address(),
           ...(theme === "light" || theme === "dark" ? { theme } : {}),
           ...(options.launcher && actions ? { canStart: true } : {}),
+          ...(egress.length > 0 ? { egress } : {}),
         },
         content,
       ),

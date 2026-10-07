@@ -4,7 +4,7 @@ import type { ResolvedConfig } from "../core/config/schema.ts";
 import type { Run } from "../core/domain/run.ts";
 import { runEffect } from "../orchestration/effects.ts";
 import type { HeldLease } from "../orchestration/lease.ts";
-import { networkAllowed } from "../security/policy/egress.ts";
+import { egressExceptionFor, networkAllowed } from "../security/policy/egress.ts";
 import type { PathPolicy, Redactor } from "../security/redactor.ts";
 import { effectMarker } from "../storage/effects.ts";
 import { matchesAny, type ToolRegistry } from "./registry.ts";
@@ -24,6 +24,8 @@ import {
 export interface PolicyDecision {
   readonly allowed: boolean;
   readonly reason?: string;
+  /** Allowed out of its data class's network by the project's exception (ADR-0016 §6): its reason. */
+  readonly exception?: string;
 }
 
 export interface BindOptions {
@@ -68,11 +70,19 @@ export class ToolRouter {
       return { allowed: false, reason: "not in the agent's capability set" };
     if (matchesAny(capability.name, config.deniedCapabilities))
       return { allowed: false, reason: `denied by profile${config.profile ? ` "${config.profile}"` : ""}` };
+    let exception: string | undefined;
     if (!networkAllowed(config.dataClass, capability.network)) {
-      return {
-        allowed: false,
-        reason: `network "${capability.network}" is not allowed for dataClass "${config.dataClass}" (ADR-0016)`,
-      };
+      const granted = egressExceptionFor(config, capability);
+      if (!granted)
+        return {
+          allowed: false,
+          reason: `network "${capability.network}" is not allowed for dataClass "${config.dataClass}" (ADR-0016)${
+            capability.server && capability.access === "read" && !capability.effect
+              ? `; a team may allow server "${capability.server}" in .jarvis/project.yaml: egressExceptions`
+              : ""
+          }`,
+        };
+      exception = granted.reason;
     }
     // allowWrites guards the workspace (ADR-0003 §5); external effects are governed by allow/deny
     // and profile `mcp.deny` (ADR-0009 §6, ADR-0017 §3).
@@ -88,7 +98,7 @@ export class ToolRouter {
         reason: "destructive capabilities are never allowed in non-interactive profiles (ADR-0009 §6)",
       };
     }
-    return { allowed: true };
+    return exception ? { allowed: true, exception } : { allowed: true };
   }
 
   allowed(agentCapabilities: readonly string[]): Capability[] {
@@ -233,6 +243,8 @@ export class BoundTools {
         source,
         error: result.error,
         access: capability.access,
+        // out of the data class's network by the project's exception: on the record of every call
+        ...(decision.exception ? { network: capability.network, egressException: decision.exception } : {}),
         // what the agent asked for, redacted and cut (`jarvis explain` and `jarvis logs` name the call)
         args: this.ctx.redactor.redact(safeJson(args)).text.slice(0, 600),
       },

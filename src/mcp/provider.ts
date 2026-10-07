@@ -268,6 +268,7 @@ export class McpToolProvider implements ToolProvider {
       name: planned.name,
       description: cap.description,
       network: planned.network,
+      server: serverId,
       access: cap.access,
       effect: cap.effect,
       parameters: planned.parameters,

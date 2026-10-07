@@ -331,6 +331,19 @@ export const HumanConfigSchema = z.strictObject({
 });
 export type HumanConfig = z.infer<typeof HumanConfigSchema>;
 
+/**
+ * ADR-0016 §6: one MCP server allowed out of the network its project's data class keeps it in — for
+ * reads only, with the reason. Only in `.jarvis/project.yaml` (a team's decision, seen in review); every
+ * run says so at its start and the page shows it.
+ */
+export const EgressExceptionSchema = z.strictObject({
+  server: z.string().min(1),
+  /** Which of its capabilities (patterns); all its reads when absent. */
+  capabilities: z.array(z.string().min(1)).default(["*"]),
+  reason: z.string().min(10),
+});
+export type EgressException = z.infer<typeof EgressExceptionSchema>;
+
 export const SecurityConfigSchema = z.strictObject({
   secretPatterns: z.array(z.strictObject({ name: z.string().min(1), regex: z.string().min(1) })).default([]),
   secretEnv: z.array(z.string().min(1)).default([]),
@@ -421,6 +434,7 @@ export const ProjectConfigSchema = z.strictObject({
   profiles: z.record(z.string(), ProfileOverlaySchema).optional(),
   context: ContextConfigSchema.optional(),
   security: SecurityConfigSchema.optional(),
+  egressExceptions: z.array(EgressExceptionSchema).optional(),
   humanGate: HumanGateModeSchema.optional(),
   knowledge: KnowledgeConfigSchema.optional(),
   human: HumanConfigSchema.optional(),
@@ -451,6 +465,7 @@ export const ResolvedConfigSchema = z.strictObject({
   profiles: z.record(z.string(), ProfileOverlaySchema).prefault({}),
   context: ContextConfigSchema.prefault({}),
   security: SecurityConfigSchema.prefault({}),
+  egressExceptions: z.array(EgressExceptionSchema).default([]),
   telemetry: TelemetryConfigSchema.prefault({}),
   knowledge: KnowledgeConfigSchema.prefault({}),
   human: HumanConfigSchema.prefault({}),

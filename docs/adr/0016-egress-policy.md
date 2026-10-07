@@ -110,6 +110,31 @@ Router дополнительно отвергает любую capability, не
 tools=none|intranet (12 allowed, 4 denied); telemetry export=intranet`. `jarvis status` показывает
 `dataClass` Run. Событие `security.egressDenied` в telemetry — с именем capability/модели, без данных.
 
+### 6. Исключение для одного сервера
+
+Пилот: макеты задачи лежат в Figma (интернет), проект — `confidential`. Поднимать `dataClass` всему проекту
+ради одного источника — значит выпустить в интернет и всё остальное. Поэтому — точечное исключение:
+
+```yaml
+# .jarvis/project.yaml
+egressExceptions:
+  - server: figma                      # id из mcp.servers
+    capabilities: [figma.get]          # необязательно; по умолчанию — все его чтения
+    reason: "макеты задач; согласовано с …"
+```
+
+- Только в `.jarvis/project.yaml`: решение команды, видно в ревью. Из `~/.jarvis/config.yaml`, переменной
+  окружения или профиля его не задать (ошибка конфигурации); сервер должен быть в `mcp.servers`.
+- Только чтения: эффекты (`access` не `read` или `effect`) через исключение не проходят никогда.
+- Модели не затрагиваются: для `confidential` по-прежнему только `egress: private`. Наружу уходит запрос
+  инструмента (ссылка, id), внутрь приходит недоверенный контент (§4).
+- Видно всегда: каждый запуск (`work`, `fix`, `continue`, `resume`) печатает под заголовком
+  `⚠ dataClass confidential — MCP server "figma" goes to the internet by an exception (reads only): …`;
+  `jarvis ui` — полосой под шапкой на каждой странице и в поповере `mcp`; `jarvis mcp list` — `internet!` и
+  строкой с причиной; `jarvis doctor` — предупреждением. Каждый такой вызов в журнале несёт
+  `network` и `egressException`.
+- Без исключения отказ подсказывает, где его объявить.
+
 ## Последствия
 
 - Граница контура — правило в коде, а не привычка; проверяется до старта Run и при каждом вызове.
