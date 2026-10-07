@@ -195,3 +195,49 @@ export function rejectThread(rt: Runtime, run: Run, thread: Interaction, actorId
   });
   return closed;
 }
+
+/** A rule a person settled in another run of the same task: offered again instead of asked again. */
+export interface EarlierRule {
+  readonly runId: string;
+  readonly question: string;
+  readonly rule: string;
+  readonly at: string;
+}
+
+const keyOf = (task: string): string | undefined => /\b[A-Z][A-Z0-9]+-\d+\b/.exec(task)?.[0];
+
+/**
+ * Clarifications resolved in other runs of the same issue (by its key, else the same words) in the
+ * same repository, newest first. Pilot: a run started again after a cancel asked the very question its
+ * predecessor had settled ten minutes before.
+ */
+export function earlierRulesFor(rt: Runtime, run: Run, max = 3): EarlierRule[] {
+  const key = keyOf(run.task);
+  const same = (task: string) => (key ? keyOf(task) === key : task.trim() === run.task.trim());
+  const out: EarlierRule[] = [];
+  const seen = new Set<string>();
+  const runs = rt.runs
+    .list({ includeTerminal: true, limit: 300 })
+    .filter((r) => r.id !== run.id && r.workspace.repoRoot === run.workspace.repoRoot && same(r.task))
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  for (const r of runs) {
+    for (const a of rt.artifacts.listLatest(r.id, "clarification")) {
+      try {
+        const doc = JSON.parse(rt.artifacts.text(a)) as { question?: unknown; rule?: unknown };
+        const rule = typeof doc.rule === "string" ? doc.rule.trim() : "";
+        if (!rule || seen.has(rule)) continue;
+        seen.add(rule);
+        out.push({
+          runId: r.id,
+          question: typeof doc.question === "string" ? doc.question : "",
+          rule,
+          at: a.createdAt,
+        });
+      } catch {
+        // not JSON
+      }
+      if (out.length >= max) return out;
+    }
+  }
+  return out;
+}

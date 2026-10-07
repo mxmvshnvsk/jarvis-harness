@@ -282,7 +282,7 @@ describe("open questions answered on the page", () => {
               { text: "An error with «Try again»", note: "the order waits", suggested: false },
               { text: "The local schedule", note: "today's behaviour", suggested: true },
             ],
-            sources: [],
+            sources: ["ABC-42 · plan, item 3"],
           },
           {
             question: "The exact wording of the delivery terms?",
@@ -302,6 +302,8 @@ describe("open questions answered on the page", () => {
     expect(page).toContain('name="qa-2" value="opt-1" form="decide-form" checked');
     expect(page).toContain('name="qa-3" value="own" form="decide-form" checked');
     expect(page).toContain("Confluence 4400123 · Responses");
+    // a decision says what it stands on too
+    expect(page).toContain("<span>ABC-42 · plan, item 3</span>");
     expect(page).toContain('id="decide-form"');
     const res = await post(`/runs/${short}/decide`, {
       t: ui.token,

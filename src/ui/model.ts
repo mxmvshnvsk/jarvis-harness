@@ -22,7 +22,12 @@ import {
   type SuggestionsDoc,
   suggestionsFor,
 } from "../interaction/answers.ts";
-import { type ClarificationResolution, latestProposal } from "../interaction/clarify.ts";
+import {
+  type ClarificationResolution,
+  type EarlierRule,
+  earlierRulesFor,
+  latestProposal,
+} from "../interaction/clarify.ts";
 import type { Interaction, InteractionMessage } from "../interaction/store.ts";
 import type { LocalWorkflowEngine } from "../orchestration/runtime.ts";
 import { shortRunId } from "../storage/runStore.ts";
@@ -95,6 +100,8 @@ export interface ClarifyCard {
   readonly thinking: boolean;
   /** The thread's turns are used up (human.clarification.maxTurns): accept or write the rule. */
   readonly exhausted: boolean;
+  /** Rules settled in other runs of the same task: one click instead of the conversation again. */
+  readonly earlier: readonly EarlierRule[];
 }
 
 export type WaitCard = LoopCard | ApprovalCard | BudgetCard | ClarifyCard | OtherCard;
@@ -116,6 +123,7 @@ export function clarifyCardOf(runtime: Runtime, run: Run): ClarifyCard | undefin
     ...(proposal ? { proposal } : {}),
     thinking: last?.role === "human" && !exhausted,
     exhausted,
+    earlier: earlierRulesFor(runtime, run),
   };
 }
 

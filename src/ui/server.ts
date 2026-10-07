@@ -54,6 +54,7 @@ import {
   recordGiven,
   suggestionsFor,
 } from "../interaction/answers.ts";
+import { earlierRulesFor } from "../interaction/clarify.ts";
 import { answerFromKnowledge, plan } from "../knowledge/ask.ts";
 import { loadKnowledgeDocs } from "../knowledge/resolver.ts";
 import { loadGlossary } from "../knowledge/retrieval/glossary.ts";
@@ -1179,6 +1180,14 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
           });
         });
         return redirect(r, `/runs/${short}#decision`);
+      }
+      if (move?.startsWith("earlier-")) {
+        // a rule settled in another run of the same task, looked up again here: nothing taken from the form
+        const earlier = earlierRulesFor(runtime, run)[Number(move.slice(8))];
+        if (!earlier) return redirect(r, `/runs/${short}?notice=no-rule#decision`);
+        await humanMove(runtime, run, thread, who, { accept: true, rule: earlier.rule });
+        goOn(runtime.runs.get(run.id) ?? run);
+        return redirect(r, `/runs/${short}?notice=clarified`);
       }
       if (move === "accept" || move === "rule") {
         if (move === "rule" && !rule) return redirect(r, `/runs/${short}?notice=no-rule#decision`);

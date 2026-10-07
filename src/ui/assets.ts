@@ -351,6 +351,7 @@ h2.ask-sec{font-size:15px;margin:4px 0 -4px}
 .rule p,.rule li{font-size:14px;line-height:21px;margin:0}
 .rule ul{margin:0;padding-left:20px}
 form.clarify{display:flex;flex-direction:column;gap:12px}
+.earlier{display:flex;flex-direction:column;gap:10px}
 form.clarify>.actions{margin:4px 0}
 .ownrule summary{cursor:pointer;font-size:13px;color:var(--accent)}
 .ownrule[open]{display:flex;flex-direction:column;gap:10px}

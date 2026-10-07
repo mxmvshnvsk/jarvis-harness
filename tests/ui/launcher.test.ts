@@ -538,4 +538,52 @@ describe("New task on the page", () => {
     expect(cancelling).toContain('aria-disabled="true">Cancelling…</span>');
     expect(cancelling).not.toContain("Cancel run…");
   });
+
+  it("a clarification settled in an earlier run of the same task is offered again: one click", async () => {
+    const token = await serve();
+    const before = createRun("ABC-42: Delivery slots on the order form");
+    rt.artifacts.put({
+      runId: before.id,
+      type: "clarification",
+      name: "int_before.json",
+      content: JSON.stringify({
+        question: "Which value means a courier zone?",
+        rule: "Only zone ids from logistics-api",
+      }),
+      provenance: { kind: "human", actor: DEV },
+    });
+    // another task's rule is not offered
+    rt.artifacts.put({
+      runId: createRun("ABC-77: Billing").id,
+      type: "clarification",
+      name: "int_other.json",
+      content: JSON.stringify({ question: "Rounding?", rule: "Round half up" }),
+      provenance: { kind: "human", actor: DEV },
+    });
+    const run = createRun("ABC-42");
+    rt.runs.update(run.id, { currentStep: "requirements", currentIteration: 1 });
+    rt.runs.transition(run.id, "RUNNING");
+    const thread = rt.interactions.open({
+      runId: run.id,
+      kind: "clarification",
+      stepId: "requirements",
+      iteration: 1,
+      openedBy: "agent:requirements",
+      message: { role: "jarvis", actor: "requirements", text: "Which value means a courier zone?" },
+    });
+    rt.runs.transition(run.id, "WAITING_HUMAN", {
+      reason: "clarification",
+      waitingFor: { kind: "clarification", interactionId: thread.id },
+    });
+    const short = run.id.replace(/^run_/, "").slice(0, 8);
+    const card = await page(`/runs/${short}`);
+    expect(card).toContain("Decided before for this task");
+    expect(card).toContain("<b>Only zone ids from logistics-api</b>");
+    expect(card).not.toContain("Round half up");
+    const done = await post(`/runs/${short}/clarify`, { t: token, move: "earlier-0" });
+    expect(done.location).toBe(`/runs/${short}?notice=clarified`);
+    const doc = JSON.parse(rt.artifacts.text(rt.artifacts.listLatest(run.id, "clarification")[0] as never));
+    expect(doc.rule).toBe("Only zone ids from logistics-api");
+    expect(rt.runs.get(run.id)?.waitingFor).toBeUndefined();
+  });
 });

@@ -1060,11 +1060,18 @@ function clarifyCardHtml(card: ClarifyCard, page: RunPage, actions?: Actions): H
     ? html`<div class="row"><span class="spin" aria-hidden="true"></span><span class="meta">Jarvis thinks over your answer: asks on or proposes the rule</span></div>`
     : "";
   const cmd = `jarvis continue ${shortRunId(r.id)}`;
+  const earlier =
+    card.earlier.length > 0 && actions
+      ? html`<div class="earlier">${card.earlier.map(
+          (e, i) =>
+            html`<div class="rule"><span class="meta">Decided before for this task · run ${shortRunId(e.runId)} · ${whenShort(e.at, Date.now())}</span>${e.question ? html`<p class="muted">${cut(e.question, 240)}</p>` : ""}<p><b>${e.rule}</b></p><div class="actions"><button type="submit" name="move" value="earlier-${String(i)}" class="btn${i === 0 && !p ? " primary" : ""}">Accept this rule and go on</button></div></div>`,
+        )}</div>`
+      : "";
   const moves = actions
     ? form(
         actions,
         `${runHref(r)}/clarify`,
-        html`${
+        html`${earlier}${
           card.exhausted
             ? html`<p class="hint">The thread's turns are used up (<code>human.clarification.maxTurns</code>): accept the proposed rule or write the rule yourself.</p>`
             : html`<label class="field grow">Your answer<textarea name="text" rows="3" maxlength="4000" placeholder="Answer the question: Jarvis asks on or proposes the rule"${card.thinking ? " disabled" : ""}></textarea></label>`
@@ -1202,7 +1209,7 @@ function questionsHtml(page: ArtifactPage, extras: ArtifactExtras): Html {
       s?.kind === "answer" && s.answer
         ? html`<label class="opt">${radio(n, "jarvis", true)}<span><span class="lbl">✦ From the sources</span><span class="said">${s.answer}</span>${sourceChips(s.sources)}</span></label>`
         : s?.kind === "decision"
-          ? html`<p class="lbl">✦ The sources don't say — your call</p>${s.options.map(
+          ? html`<p class="lbl">✦ The sources don't settle it — your call</p>${sourceChips(s.sources)}${s.options.map(
               (o, k) =>
                 html`<label class="opt">${radio(n, `opt-${String(k)}`, o.suggested)}<span><span class="said">${o.text}</span>${o.note || o.suggested ? html`<small>${o.suggested ? "suggested" : ""}${o.suggested && o.note ? ": " : ""}${o.note}</small>` : ""}</span></label>`,
             )}`
