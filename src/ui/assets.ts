@@ -354,6 +354,35 @@ form.clarify{display:flex;flex-direction:column;gap:12px}
 form.clarify>.actions{margin:4px 0}
 .ownrule summary{cursor:pointer;font-size:13px;color:var(--accent)}
 .ownrule[open]{display:flex;flex-direction:column;gap:10px}
+.qs{padding:0;overflow:hidden}
+.qs-head{display:flex;align-items:center;gap:8px 12px;flex-wrap:wrap;padding:16px 20px;border-bottom:1px solid var(--line)}
+.qs-head h2{font-size:17px;margin:0}
+.qs-prep{padding:12px 20px;border-bottom:1px solid var(--line)}
+.q{display:grid;grid-template-columns:28px minmax(0,1fr);gap:4px 10px;padding:16px 20px;margin:0;border:0;border-bottom:1px solid var(--line);min-width:0}
+.q .n{font-family:var(--mono);font-size:13px;color:var(--muted);padding-top:2px}
+.q .n.ok{color:var(--ok)}
+.q .body{display:flex;flex-direction:column;gap:8px;min-width:0}
+.q .qtext{font-size:15px;line-height:22px;color:var(--ink);margin:0}
+.q .about{display:flex;gap:6px;flex-wrap:wrap}
+.q .tag{font-family:var(--mono);font-size:11px;padding:2px 8px;border-radius:999px;background:var(--chip);color:var(--ink-2)}
+.q .lbl{display:block;font-size:12px;font-weight:500;color:var(--accent);margin:0 0 2px}
+.q .guess .lbl,.q p.lbl{color:var(--muted)}
+.q .opt{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid var(--line);border-radius:8px;cursor:pointer;background:var(--panel)}
+.q .opt:has(input:checked){border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
+.q .opt input{margin-top:3px;accent-color:var(--accent);flex:none}
+.q .opt>span{display:flex;flex-direction:column;gap:4px;min-width:0;flex:1}
+.q .said{font-size:14px;line-height:21px;color:var(--ink);white-space:pre-wrap}
+.q .opt small{color:var(--muted);font-size:12px}
+.q .src{display:flex;gap:6px;flex-wrap:wrap}
+.q .src span{font-family:var(--mono);font-size:11px;padding:1px 7px;border-radius:6px;border:1px solid var(--line);color:var(--ink-2)}
+.q .own textarea{width:100%;min-height:40px;padding:8px 10px;border-radius:6px;resize:vertical;font-size:14px;line-height:20px}
+.q .qrow{display:flex;gap:8px;flex-wrap:wrap}
+.q .pick{display:inline-flex;gap:6px;align-items:center;font-size:13px;color:var(--ink-2);padding:5px 10px;border:1px solid var(--line);border-radius:999px;cursor:pointer}
+.q .pick:has(input:checked){border-color:var(--wait);color:var(--wait)}
+.q .pick input{margin:0;accent-color:var(--wait)}
+.q .done{font-size:14px;line-height:21px;padding:8px 12px;border-radius:8px;background:var(--ok-bg);color:var(--ink);white-space:pre-wrap}
+.qs .dock{position:sticky;bottom:0;display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:14px 20px;background:var(--panel)}
+.qs .dock .sum{flex:1 1 100%;font-size:13px;line-height:19px;color:var(--muted)}
 .startfrom:empty{display:none}
 .from{border:1px solid var(--line);border-radius:8px;padding:12px 14px;display:flex;flex-direction:column;gap:6px;background:var(--ground)}
 .from .check{margin:0}
@@ -575,6 +604,14 @@ export const SCRIPT = `
     });
     look();
   }
+
+  // an open question answered in one's own words: that answer is the one picked
+  document.addEventListener('input', (e) => {
+    const n = e.target && e.target.dataset && e.target.dataset.own;
+    if (!n) return;
+    const own = document.querySelector('input[name="qa-' + n + '"][value="own"]');
+    if (own && e.target.value.trim()) own.checked = true;
+  });
 
   // the rows of Recent a person picked stay for the next visit, like the theme
   document.addEventListener('click', (e) => {

@@ -364,6 +364,8 @@ export const HumanConfigSchema = z.strictObject({
       maxTurns: z.int().positive().default(8),
     })
     .prefault({}),
+  /** Before a gate: answers to the document's open questions from what the run collected (one model call). */
+  suggestAnswers: z.boolean().default(true),
 });
 export type HumanConfig = z.infer<typeof HumanConfigSchema>;
 

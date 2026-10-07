@@ -15,6 +15,13 @@ import { changedFilesOf, type DocFacts, docFacts, reasonsOf } from "../cli/gate.
 import type { ArtifactVersion } from "../core/domain/artifact.ts";
 import type { Run } from "../core/domain/run.ts";
 import type { WorkflowDefinition } from "../core/domain/workflow.ts";
+import {
+  type GivenAnswer,
+  givenFor,
+  openQuestionsOf,
+  type SuggestionsDoc,
+  suggestionsFor,
+} from "../interaction/answers.ts";
 import { type ClarificationResolution, latestProposal } from "../interaction/clarify.ts";
 import type { Interaction, InteractionMessage } from "../interaction/store.ts";
 import type { LocalWorkflowEngine } from "../orchestration/runtime.ts";
@@ -545,6 +552,15 @@ export function feedItem(e: StoredEvent): FeedItem | undefined {
   switch (e.kind) {
     case "run.created":
       return at(`run created${who ? ` by ${who}` : ""}`);
+    case "answers.suggested": {
+      const n = (k: string) => (typeof p[k] === "number" ? (p[k] as number) : 0);
+      return at(
+        `answers prepared for ${n("questions")} open question${n("questions") === 1 ? "" : "s"}: ${n("answers")} from the sources, ${n("decisions")} your call`,
+        "ok",
+      );
+    }
+    case "answers.failed":
+      return at(`no answers prepared for the open questions: ${str(p.error) ?? "the model failed"}`, "warn");
     case "step.finish": {
       const status = str(p.status) ?? "success";
       const label = `${step ?? "?"}${typeof p.iteration === "number" && p.iteration > 1 ? `#${p.iteration}` : ""}`;
@@ -809,7 +825,16 @@ function continuationLinks(
 
 /* ---- one artifact ---- */
 
+/** The document's open questions with what Jarvis prepared for them (src/interaction/answers.ts). */
+export interface QuestionsView {
+  readonly list: readonly string[];
+  readonly suggestions?: SuggestionsDoc;
+  /** What a person answered on this version, if they decided here. */
+  readonly given?: readonly GivenAnswer[];
+}
+
 export interface ArtifactPage {
+  readonly questions?: QuestionsView;
   readonly run: Run;
   readonly artifact: ArtifactVersion;
   readonly versions: readonly number[];
@@ -867,9 +892,22 @@ export function artifactPage(
     ...(decision ? { decision } : {}),
     awaited: isAwaited && !decision,
     atGate: isAwaited,
+    ...questionsOf(runtime, artifact, text),
     terminal: waitingCard(runtime, run.id) !== undefined,
     ...((r) => (r ? { resumable: r } : {}))(resumableOf(runtime, run)),
   };
+}
+
+function questionsOf(
+  runtime: Runtime,
+  artifact: ArtifactVersion,
+  text: string,
+): Pick<ArtifactPage, "questions"> {
+  const list = openQuestionsOf(text);
+  if (list.length === 0) return {};
+  const suggestions = suggestionsFor(runtime, artifact);
+  const given = givenFor(runtime, artifact);
+  return { questions: { list, ...(suggestions ? { suggestions } : {}), ...(given ? { given } : {}) } };
 }
 
 export { shortRunId };

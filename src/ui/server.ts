@@ -44,7 +44,16 @@ import type { Runtime } from "../app/runtime.ts";
 import { type OpenIn, reviewFiles } from "../cli/checkout.ts";
 import { humanMove } from "../cli/commands/human.ts";
 import type { Actor } from "../core/domain/actor.ts";
+import type { ArtifactVersion } from "../core/domain/artifact.ts";
 import { isTerminal, type Run } from "../core/domain/run.ts";
+import {
+  answersText,
+  givenFromForm,
+  openQuestionsOf,
+  prepareSuggestions,
+  recordGiven,
+  suggestionsFor,
+} from "../interaction/answers.ts";
 import { answerFromKnowledge, plan } from "../knowledge/ask.ts";
 import { loadKnowledgeDocs } from "../knowledge/resolver.ts";
 import { loadGlossary } from "../knowledge/retrieval/glossary.ts";
@@ -1041,6 +1050,19 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
     return redirect(r, `/knowledge/ask?run=${encodeURIComponent(first.replace(/^run_/, "").slice(0, 8))}`);
   };
 
+  /** Answers being prepared for a document version here; each version is tried once per server. */
+  const tried = new Map<string, boolean>();
+  const prepareOnce = (run: Run, doc: ArtifactVersion): boolean => {
+    const key = `${doc.artifactId}@${doc.version}`;
+    const state = tried.get(key);
+    if (state !== undefined) return state;
+    tried.set(key, true);
+    prepareSuggestions(runtime, run, doc, run.currentStep ?? "approve")
+      .catch(() => undefined)
+      .finally(() => tried.set(key, false));
+    return true;
+  };
+
   /** One launch per run gone on: a second click while the first prepares its checkout joins it. */
   const continueFrom = (launcher: Launcher, from: Run, workflow: Workflow): Launch =>
     launcher.list().find((l) => l.from === from.id && (l.exitCode === null || l.exitCode === 0 || l.runId)) ??
@@ -1280,7 +1302,14 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
     const decision = form.get("decision");
     if (decision !== "approve" && decision !== "request_changes") return redirect(r, back());
     const lines = linesOf(form.get("lines"));
+    // the open questions answered on the page: read against the document, not taken from the form
+    const questions = openQuestionsOf(runtime.artifacts.text(awaited.artifact));
+    const given =
+      questions.length > 0
+        ? givenFromForm(questions, suggestionsFor(runtime, awaited.artifact), (k) => form.get(k))
+        : [];
     const comment = [
+      decision === "request_changes" && given.length > 0 ? answersText(given) : "",
       (form.get("comment") ?? "").trim().slice(0, 20_000),
       lines.length > 0 ? `Comments on lines:\n${lines.join("\n")}` : "",
     ]
@@ -1302,6 +1331,7 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
       if (!(error instanceof DecisionTakenError)) throw error;
       return redirect(r, back("taken"));
     }
+    recordGiven(runtime, awaited.artifact, given, who.id, run.currentStep);
     goOn(run);
     return redirect(r, back());
   };
@@ -1415,9 +1445,18 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
         : found;
       if (!model) return notFound(r, `Run ${shortRunId(run.id)} has no ${type}/${name}.`);
       const notice = noticeOf(r);
+      // a gate reached before answers were prepared (or without them): prepared now, once
+      const preparing =
+        actions !== undefined &&
+        model.awaited &&
+        model.questions !== undefined &&
+        !model.questions.suggestions
+          ? prepareOnce(run, model.artifact)
+          : false;
       const extras: ArtifactExtras = {
         ...(actions ? { actions, comments: true } : {}),
         ...(notice ? { banner: notice } : {}),
+        ...(preparing ? { preparing } : {}),
       };
       if (type === "implementation") {
         const d = await diffOf(run);
@@ -1429,6 +1468,7 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
         {
           title: `${type}/${name}@${model.artifact.version}`,
           page: "artifact",
+          ...(preparing ? { tick: 3000 } : {}),
           runId: run.id,
           back: { href: `/runs/${shortRunId(run.id)}`, label: `run ${shortRunId(run.id)}` },
         },

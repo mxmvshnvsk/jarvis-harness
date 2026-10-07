@@ -34,8 +34,25 @@ steps:
         request_changes: { to: write, maxIterations: 2 }
 `;
 
+/** The same gate over a JSON spec with open questions. */
+const QUESTIONS = JSON.stringify({
+  title: "Delivery slots",
+  summary: "Slots on the order form.",
+  requirements: [{ id: "R1", text: "Slots come from logistics-api" }],
+  openQuestions: [
+    "What does GET /delivery-slots return for a closed zone?",
+    "What does the form do when the slots service is down?",
+    "The exact wording of the delivery terms?",
+  ],
+});
+const GATED_QUESTIONS = GATED.replace("name: gated", "name: gatedq").replace(
+  'args: { type: spec, name: spec.md, content: "# Order form: phone number mask" }',
+  `args: { type: spec, name: spec.json, content: '${QUESTIONS}' }`,
+);
+
 beforeEach(async () => {
   sb = sandbox();
+  sb.write("project/.jarvis/workflows/gatedq.yaml", GATED_QUESTIONS);
   sb.write("home/.jarvis/config.yaml", "version: 1\nactor: { id: dev@example.com }\n");
   sb.write("project/.jarvis/project.yaml", "version: 1\nworkspace: { mode: cwd }\n");
   sb.write("project/.jarvis/workflows/gated.yaml", GATED);
@@ -230,6 +247,93 @@ describe("deciding on the page", () => {
     expect(card.out()).toContain("✓ accepted in the browser by dev@example.com");
     expect(card.out()).toContain("COMPLETED");
     stdin.end();
+  });
+});
+
+describe("open questions answered on the page", () => {
+  it("Jarvis's answers, the options and one's own answers go back with «Send back», and stay on record", async () => {
+    expect(await jarvis(["work", "ABC-42 delivery slots", "--workflow", "gatedq"]).done).toBe(10);
+    const run = rt.runs.list({ includeTerminal: true })[0];
+    const spec = run ? rt.artifacts.listLatest(run.id, "spec")[0] : undefined;
+    if (!run || !spec) throw new Error("no run");
+    const short = run.id.slice(4, 12);
+    // no model here: the gate is reached all the same, the failure said
+    expect(rt.events.list({ runId: run.id, kind: "answers.failed" })).toHaveLength(1);
+    rt.artifacts.put({
+      runId: run.id,
+      type: "answer-suggestions",
+      name: "spec.json",
+      content: JSON.stringify({
+        for: `${spec.artifactId}@1`,
+        items: [
+          {
+            question: "What does GET /delivery-slots return for a closed zone?",
+            about: ["R1"],
+            kind: "answer",
+            answer: "An empty list with 200",
+            options: [],
+            sources: ["Confluence 4400123 · Responses"],
+          },
+          {
+            question: "What does the form do when the slots service is down?",
+            about: [],
+            kind: "decision",
+            options: [
+              { text: "An error with «Try again»", note: "the order waits", suggested: false },
+              { text: "The local schedule", note: "today's behaviour", suggested: true },
+            ],
+            sources: [],
+          },
+          {
+            question: "The exact wording of the delivery terms?",
+            about: [],
+            kind: "unknown",
+            options: [],
+            sources: [],
+          },
+        ],
+      }),
+      provenance: { kind: "agent", agentId: "answers" },
+      sourceRefs: [`${spec.artifactId}@1`],
+    });
+    const page = await getPage(`/runs/${short}/artifacts/spec/spec.json`);
+    expect(page).toContain('<a href="#questions">Questions <span class="muted">3</span></a>');
+    expect(page).toContain('name="qa-1" value="jarvis" form="decide-form" checked');
+    expect(page).toContain('name="qa-2" value="opt-1" form="decide-form" checked');
+    expect(page).toContain('name="qa-3" value="own" form="decide-form" checked');
+    expect(page).toContain("Confluence 4400123 · Responses");
+    expect(page).toContain('id="decide-form"');
+    const res = await post(`/runs/${short}/decide`, {
+      t: ui.token,
+      artifact: spec.artifactId,
+      version: "1",
+      decision: "request_changes",
+      "qa-1": "jarvis",
+      "qa-2": "opt-0",
+      "qa-3": "analyst",
+      comment: "Keep the slots for 3 days.",
+    });
+    expect(res.status).toBe(303);
+    const [approval] = rt.artifacts.approvalsFor(spec.artifactId);
+    expect(approval?.comment).toBe(
+      [
+        "Answers to the open questions (binding for the next version):",
+        "1. What does GET /delivery-slots return for a closed zone?",
+        "   → An empty list with 200",
+        "2. What does the form do when the slots service is down?",
+        "   → An error with «Try again»",
+        "3. The exact wording of the delivery terms?",
+        "   → open, for the analyst: keep it as a risk, do not decide it.",
+        "",
+        "Keep the slots for 3 days.",
+      ].join("\n"),
+    );
+    // on record next to the version, and shown there
+    const answers = rt.artifacts.listLatest(run.id, "answers")[0];
+    expect(answers?.provenance.kind).toBe("human");
+    expect(await getPage(`/runs/${short}/artifacts/spec/spec.json?v=1`)).toContain(
+      'An empty list with 200 <span class="meta">— answered</span>',
+    );
   });
 });
 

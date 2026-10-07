@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { prepareSuggestions } from "../interaction/answers.ts";
 import { afterApproval, afterGateReached } from "../interaction/review/lifecycle.ts";
 import type { StepContext, StepExecutor, StepOutcome } from "./types.ts";
 import { SuspendRun } from "./types.ts";
@@ -264,6 +265,8 @@ export class ApprovalExecutor implements StepExecutor {
         meta: { artifactType: type },
       });
     if (type === "implementation") afterGateReached(ctx.runtime, ctx.run);
+    // the document's open questions with answers from what the run collected, ready on the page
+    await prepareSuggestions(ctx.runtime, ctx.run, latest, ctx.step.id);
     throw new SuspendRun("WAITING_HUMAN", `approve ${type} (${latest.name}@${latest.version})`, {
       checkpointState: { awaitingApproval: { artifactId: latest.artifactId, version: latest.version, type } },
       waitingFor: { kind: "approval", interactionId: thread.id, detail: type },

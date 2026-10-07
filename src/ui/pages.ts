@@ -1151,6 +1151,89 @@ export interface ArtifactExtras {
   readonly actions?: Actions;
   readonly banner?: Html;
   readonly comments?: boolean;
+  /** Jarvis prepares answers to the open questions right now (they were not ready at the gate). */
+  readonly preparing?: boolean;
+}
+
+const sourceChips = (sources: readonly string[]) =>
+  sources.length > 0
+    ? html`<span class="src">${sources.map((x) => html`<span>${cut(x, 80)}</span>`)}</span>`
+    : "";
+
+/**
+ * The document's open questions as a form (pilot: eight questions of a spec sat in a side column, the
+ * answers went into one textarea by hand): per question Jarvis's answer from the sources with where it
+ * stands, the options when the sources do not say, one's own answer, «ask the analyst», «not in scope».
+ * The inputs belong to the decision form: «Send back» carries the answers.
+ */
+function questionsHtml(page: ArtifactPage, extras: ArtifactExtras): Html {
+  const q = page.questions;
+  if (!q) return html``;
+  const live = page.awaited && extras.actions !== undefined;
+  const items = q.suggestions?.items ?? [];
+  const fromSources = items.filter((x) => x.kind === "answer").length;
+  const calls = items.filter((x) => x.kind === "decision").length;
+  const tally = q.suggestions
+    ? [
+        fromSources > 0 ? `${fromSources} answered from the sources` : "",
+        calls > 0 ? `${calls} your call` : "",
+        items.length - fromSources - calls > 0 ? `${items.length - fromSources - calls} need you` : "",
+      ]
+        .filter(Boolean)
+        .join(" · ")
+    : "";
+  const radio = (n: number, value: string, checked: boolean) =>
+    live
+      ? html`<input type="radio" name="qa-${String(n)}" value="${value}" form="decide-form"${checked ? " checked" : ""}>`
+      : "";
+  const card = (question: string, i: number): Html => {
+    const n = i + 1;
+    const s = items[i];
+    const given = q.given?.find((g) => g.question === question);
+    const picked =
+      s?.kind === "answer" ? "jarvis" : s?.kind === "decision" ? s.options.findIndex((o) => o.suggested) : -1;
+    const hint =
+      s?.kind === "answer" && s.answer
+        ? html`<label class="opt">${radio(n, "jarvis", true)}<span><span class="lbl">✦ From the sources</span><span class="said">${s.answer}</span>${sourceChips(s.sources)}</span></label>`
+        : s?.kind === "decision"
+          ? html`<p class="lbl">✦ The sources don't say — your call</p>${s.options.map(
+              (o, k) =>
+                html`<label class="opt">${radio(n, `opt-${String(k)}`, o.suggested)}<span><span class="said">${o.text}</span>${o.note || o.suggested ? html`<small>${o.suggested ? "suggested" : ""}${o.suggested && o.note ? ": " : ""}${o.note}</small>` : ""}</span></label>`,
+            )}`
+          : s?.unbacked && s.answer
+            ? html`<label class="opt guess">${radio(n, "jarvis", false)}<span><span class="lbl">✦ Jarvis's guess — no source confirms it</span><span class="said">${s.answer}</span></span></label>`
+            : s
+              ? html`<p class="lbl">✦ Only someone else can say: the analyst, legal, another team</p>`
+              : "";
+    const own = live
+      ? html`<label class="opt own">${radio(n, "own", picked === -1)}<span><span class="lbl">My answer</span><textarea name="qa-text-${String(n)}" form="decide-form" rows="2" maxlength="4000" placeholder="${s?.kind === "answer" ? "Instead of Jarvis's answer…" : "Your answer…"}" data-own="${String(n)}"></textarea></span></label>
+<div class="qrow"><label class="pick">${radio(n, "analyst", false)} Ask the analyst</label><label class="pick">${radio(n, "scope", false)} Not in scope</label></div>`
+      : "";
+    const answered = given
+      ? html`<div class="done">${given.mode === "analyst" ? "↗ for the analyst" : given.mode === "scope" ? "out of scope" : given.text} <span class="meta">— answered</span></div>`
+      : "";
+    return html`<fieldset class="q">
+<legend class="sr">Question ${String(n)}</legend><span class="n${answered ? " ok" : ""}" aria-hidden="true">${answered ? "✓" : String(n)}</span>
+<div class="body"><p class="qtext">${question}</p>${s && s.about.length > 0 ? html`<div class="about">${s.about.map((x) => html`<span class="tag">${x}</span>`)}</div>` : ""}
+${answered || html`${hint}${own}`}</div>
+</fieldset>`;
+  };
+  const preparing =
+    extras.preparing && !q.suggestions
+      ? html`<div class="qs-prep row"><span class="spin" aria-hidden="true"></span><span class="meta">Jarvis prepares answers from the issue, its pages, the design and the research — about a minute</span></div>`
+      : "";
+  return html`<section class="panel qs" id="questions" aria-labelledby="qs-h" data-live="questions">
+<div class="qs-head"><span class="pill wait">${q.list.length} open question${q.list.length === 1 ? "" : "s"}</span><h2 id="qs-h">${live ? "Answer before accepting" : "Open questions"}</h2>${tally ? html`<span class="meta">${tally}</span>` : ""}</div>
+${preparing}
+${q.list.map(card)}
+${
+  live
+    ? html`<div class="dock"><span class="sum">Answered questions go back with «Send back» — the next version must follow them; the rest stays open. Anything else: the note on the right.</span>
+<button type="submit" form="decide-form" name="decision" value="request_changes" class="btn strong big">Send back with the answers</button>
+<button type="submit" form="decide-form" name="decision" value="approve" class="btn accept big">Accept as is</button></div>`
+    : ""
+}
+</section>`;
 }
 
 export function artifactContent(page: ArtifactPage, extras: ArtifactExtras): Html {
@@ -1194,7 +1277,7 @@ ${
     : ""
 }
 ${f && f.risks.length > 0 ? html`<div class="facts"><span class="lbl">Risks</span>${f.risks.slice(0, 4).map((x) => html`<span>${cut(x, 200)}</span>`)}</div>` : ""}
-${f && f.openQuestions.length > 0 ? html`<div class="facts"><span class="lbl warn">Open questions</span>${f.openQuestions.map((x, i) => html`<span>${i + 1}) ${cut(x, 200)}</span>`)}</div>` : ""}
+${f && f.openQuestions.length > 0 && !page.questions ? html`<div class="facts"><span class="lbl warn">Open questions</span>${f.openQuestions.map((x, i) => html`<span>${i + 1}) ${cut(x, 200)}</span>`)}</div>` : ""}
 ${
   page.decision
     ? html`<div class="banner ${tone === "info" ? "info" : tone === "wait" ? "info" : tone}">${glyph} ${page.state} by ${page.decision.approval.actor.id}${page.decision.channel === "ui" ? " in the browser" : page.decision.channel === "cli" ? " in the terminal" : ""}${page.decision.approval.comment ? html`<br><span style="white-space:pre-wrap">${page.decision.approval.comment.length > 1200 ? `${page.decision.approval.comment.slice(0, 1199)}…` : page.decision.approval.comment}</span>` : ""}</div>`
@@ -1208,13 +1291,17 @@ ${
         `${runHref(page.run)}/decide`,
         html`<input type="hidden" name="artifact" value="${a.artifactId}"><input type="hidden" name="version" value="${a.version}"><input type="hidden" name="lines" value="">
 <div class="decide">
-<label for="comment">What to change <span class="muted">(for Send back; line comments on the diff go with it)</span></label>
+<label for="comment">${page.questions ? "Anything else to change" : "What to change"} <span class="muted">(for Send back; ${page.questions ? "the answers on the left and " : ""}line comments on the diff go with it)</span></label>
 <textarea id="comment" name="comment" rows="3"></textarea>
-<button type="submit" name="decision" value="approve" class="btn accept big">Accept</button>
-<button type="submit" name="decision" value="request_changes" class="btn strong big" data-send-back>Send back</button>
+${
+  page.questions
+    ? html`<a class="btn big" href="#questions">Answer the questions, then decide</a>`
+    : html`<button type="submit" name="decision" value="approve" class="btn accept big">Accept</button>
+<button type="submit" name="decision" value="request_changes" class="btn strong big" data-send-back>Send back</button>`
+}
 <span class="hint">Same as <code>a</code> / <code>c</code> on the terminal's card. ${page.terminal ? "The terminal waiting there picks the decision up and goes on." : html`No terminal waits: the run goes on with <code>jarvis continue ${shortRunId(page.run.id)}</code>.`}</span>
 </div>`,
-        html` data-decision`,
+        html` data-decision id="decide-form"`,
       )
     : page.awaited
       ? html`<div class="decide"><span class="hint">Decide in the terminal: <code>jarvis continue ${shortRunId(page.run.id)}</code> — <code>a</code> accepts, <code>c</code> sends back.</span><button type="button" class="btn" data-copy="jarvis continue ${shortRunId(page.run.id)}">Copy command</button></div>`
@@ -1239,12 +1326,13 @@ ${
 ${extras.banner ?? ""}
 ${partial ? html`<div class="banner bad">⚠ incomplete: agent ${partial.agentId} hit its ${partial.limit} limit — what it did not cover is unknown</div>` : ""}
 ${
-  diff
-    ? html`<nav class="tabs" aria-label="Sections"><a href="#document">Summary</a><a href="#files">Files changed <span class="muted">${diff.length}</span></a></nav>`
+  diff || page.questions
+    ? html`<nav class="tabs" aria-label="Sections">${page.questions ? html`<a href="#questions">Questions <span class="muted">${page.questions.list.length}</span></a>` : ""}<a href="#document">${diff ? "Summary" : "Document"}</a>${diff ? html`<a href="#files">Files changed <span class="muted">${diff.length}</span></a>` : ""}</nav>`
     : ""
 }
 <div class="cols">
 <div class="mainc">
+${questionsHtml(page, extras)}
 <section id="document" class="panel doc" aria-label="Document">${documentHtml(a.name, page.text, f?.doc)}</section>
 ${
   diff

@@ -192,6 +192,7 @@ human:                         # ADR-0019 §9
     sourceMarkers: true                  # // REVIEW: в коде
     removeMarkersAfterApproval: true
   clarification: { multiTurn: true, maxTurns: 8 }
+  suggestAnswers: true                   # перед гейтом — ответы на открытые вопросы документа (один вызов модели)
 
 knowledge:                     # ADR-0020 §3, §5; ADR-0015
   maxSkills: 2                 # навыков на вызов агента; остальные — «по запросу»
