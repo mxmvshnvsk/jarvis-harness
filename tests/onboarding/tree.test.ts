@@ -43,6 +43,10 @@ beforeEach(() => {
   put("secrets/key.ts", "export const k = 1;\n");
   put(".jarvis/knowledge/orders.md", '---\npaths: ["src/orders/**"]\n---\n# Orders\n');
   put(
+    ".jarvis/knowledge/design.md",
+    '---\npaths: ["src/orders/**", "src/shared/**"]\n---\n# Design system\n',
+  );
+  put(
     ".jarvis/knowledge/module-api.md",
     `---\npaths: ["src/shared/api/**"]\n---\n${MODULE_MARKER}\n# Module\n`,
   );
@@ -83,11 +87,16 @@ describe("the module tree", () => {
       kind: "document",
       doc: ".jarvis/knowledge/orders.md",
     });
-    expect(findNode(tree, "src/orders/form")?.coverage).toMatchObject({
-      kind: "via",
-      doc: ".jarvis/knowledge/orders.md",
-    });
+    // a document about a folder is not the document of the folders inside it, unless it maps a module
+    expect(findNode(tree, "src/orders/form")?.coverage).toBeUndefined();
+    expect(findNode(tree, "src/orders/form")?.also).toContain(".jarvis/knowledge/orders.md");
+    // a wide document (two modules) covers nothing, it is listed as applying
+    expect(findNode(tree, "src/shared")?.coverage).toBeUndefined();
+    expect(findNode(tree, "src/shared/metrics")?.also).toContain(".jarvis/knowledge/design.md");
     expect(findNode(tree, "src/shared/api")?.coverage).toMatchObject({ kind: "generated" });
+    put("src/shared/api/v2/client.ts", "export const v2 = {};\n");
+    git("add", "-A");
+    git("commit", "-q", "-m", "api v2");
     expect(findNode(tree, "src/shared/upload")?.coverage).toMatchObject({ kind: "document", source: true });
     expect(findNode(tree, "src/shared/metrics")?.coverage).toBeUndefined();
     expect(findNode(tree, "src/orders")?.coverage?.staleCommits).toBeUndefined();
@@ -96,5 +105,10 @@ describe("the module tree", () => {
     git("commit", "-q", "-am", "orders: totals");
     tree = await moduleTree(roots());
     expect(findNode(tree, "src/orders")?.coverage?.staleCommits).toBe(1);
+    // a module map covers the folders inside its module
+    expect(findNode(tree, "src/shared/api/v2")?.coverage).toMatchObject({
+      kind: "via",
+      doc: ".jarvis/knowledge/module-api.md",
+    });
   });
 });

@@ -177,6 +177,7 @@ function factsHtml(n: TreeNode): Html {
   return html`<dl class="mfacts">
 <dt>from the scan</dt><dd>${n.files} files, about ${n.lines} lines${n.languages.length > 0 ? ` (${n.languages.join(", ")})` : ""}</dd>
 <dt>knowledge now</dt><dd>${knowledge}</dd>
+${n.also.length > 0 ? html`<dt>also applies</dt><dd>${n.also.map((d, i) => html`${i > 0 ? ", " : ""}<a href="/knowledge/docs?doc=${encodeURIComponent(d)}"><code>${d}</code></a>`)} <span class="hint">— wider documents, not about this folder</span></dd>` : ""}
 </dl>`;
 }
 

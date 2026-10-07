@@ -19,7 +19,9 @@ export const TOO_BIG = { files: 150, lines: 15_000 } as const;
 export interface Coverage {
   /**
    * `document` — a document is about exactly this folder; `generated` — the same, but jarvis
-   * wrote it and nobody took it over; `via` — a document about a wider folder (or a glob) covers it.
+   * wrote it and nobody took it over; `via` — the module document of a folder above covers it.
+   * A wide document (a design system, the observability of a whole app) is not coverage: pilot —
+   * `design-system.md` with `paths` on the `src` of every app made all their folders look documented.
    */
   readonly kind: "document" | "generated" | "via";
   /** Repository path of the document. */
@@ -40,6 +42,8 @@ export interface TreeNode {
   readonly module: boolean;
   readonly tooBig: boolean;
   readonly coverage?: Coverage;
+  /** Wider documents that apply here too (shown, not counted as coverage). */
+  readonly also: readonly string[];
   readonly children: readonly TreeNode[];
 }
 
@@ -56,6 +60,20 @@ export interface DocScope {
   readonly paths: readonly string[];
   readonly generated: boolean;
   readonly source: boolean;
+  /** About one module (`tags: [module]`, an onboard map): covers the folders inside it too. */
+  readonly module: boolean;
+  /** Its paths are folders of one module, no wildcards: it can be the document of a folder. */
+  readonly focused: boolean;
+}
+
+const baseOf = (glob: string) => glob.replace(/\/\*\*(\/\*)?$/, "").replace(/\/$/, "");
+/** Folders of one module, named without wildcards (`src/orders/**`, not `apps/*\/src/**` or `**\/*.tsx`). */
+function focusedOn(paths: readonly string[]): boolean {
+  const bases = paths.map(baseOf);
+  return (
+    bases.every((b) => b.length > 0 && !/[*?{[]/.test(b)) &&
+    new Set(bases.map((b) => moduleOf(`${b}/x`))).size === 1
+  );
 }
 
 /** `.jarvis/knowledge/*.md` and the `knowledge.sources` documents with `paths` (or scopes). */
@@ -82,36 +100,54 @@ export function docScopes(roots: KnowledgeRoots): DocScope[] {
       ? data.paths.filter((p): p is string => typeof p === "string")
       : [];
     if (paths.length === 0) continue;
+    const tags = Array.isArray(data.tags) ? data.tags : [];
     out.push({
       path: `.jarvis/knowledge/${name}`,
       paths,
       generated: text.includes(MODULE_MARKER) || text.includes(ONBOARD_MARKER),
       source: false,
+      module: tags.includes("module") || text.includes(MODULE_MARKER),
+      focused: focusedOn(paths),
     });
   }
   for (const d of loadSourceDocuments(roots)) {
     if (d.skill || d.paths.length === 0) continue;
-    out.push({ path: d.path, paths: d.paths, generated: false, source: true });
+    out.push({
+      path: d.path,
+      paths: d.paths,
+      generated: false,
+      source: true,
+      module: false,
+      focused: focusedOn(d.paths),
+    });
   }
   return out;
 }
 
-const exactly = (glob: string, path: string) => {
-  const base = glob.replace(/\/\*\*(\/\*)?$/, "").replace(/\/$/, "");
-  return base === path || (/[*?{[]/.test(base) && globMatches(path, [base]));
-};
+const exactly = (glob: string, path: string) => baseOf(glob) === path;
 
-/** The best document for a folder: own over the team's, exact over wider, written by a person over generated. */
-function coverageOf(path: string, docs: readonly DocScope[]): Omit<Coverage, "staleCommits"> | undefined {
+/**
+ * The document of a folder: one about exactly it (own over the team's, written by a person over
+ * generated), else the module document of a folder above; wider documents are listed apart.
+ */
+function coverageOf(
+  path: string,
+  docs: readonly DocScope[],
+): { coverage?: Omit<Coverage, "staleCommits">; also: string[] } {
   let best: { c: Omit<Coverage, "staleCommits">; rank: number } | undefined;
+  const also: string[] = [];
   for (const d of docs) {
     if (!globMatches(`${path}/x`, d.paths)) continue;
-    const exact = d.paths.some((g) => exactly(g, path));
+    const exact = d.focused && d.paths.some((g) => exactly(g, path));
+    if (!exact && !d.module) {
+      also.push(d.path);
+      continue;
+    }
     const kind: Coverage["kind"] = exact ? (d.generated ? "generated" : "document") : "via";
     const rank = (exact ? 4 : 0) + (d.source ? 0 : 2) + (d.generated ? 0 : 1);
     if (!best || rank > best.rank) best = { c: { kind, doc: d.path, source: d.source }, rank };
   }
-  return best?.c;
+  return { ...(best ? { coverage: best.c } : {}), also };
 }
 
 interface Building {
@@ -174,7 +210,7 @@ export async function moduleTree(roots: KnowledgeRoots): Promise<ModuleTree> {
   const stale: Array<Promise<void>> = [];
   const finish = (b: Building): TreeNode => {
     dirs.push(b.path);
-    const c = coverageOf(b.path, docs);
+    const { coverage: c, also } = coverageOf(b.path, docs);
     const node: { -readonly [K in keyof TreeNode]: TreeNode[K] } = {
       path: b.path,
       name: b.name,
@@ -184,6 +220,7 @@ export async function moduleTree(roots: KnowledgeRoots): Promise<ModuleTree> {
       module: b.module,
       tooBig: b.s.files > TOO_BIG.files || b.s.lines > TOO_BIG.lines,
       ...(c ? { coverage: c } : {}),
+      also,
       children: [...b.kids.values()]
         .sort((x, y) => y.s.files - x.s.files || x.path.localeCompare(y.path))
         .map(finish),
