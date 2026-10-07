@@ -32,6 +32,7 @@ server.registerTool(
         text: JSON.stringify({
           key: issueKey,
           summary: "Allow onboarding restart",
+          description: "Requirements: https://confluence.example.corp/spaces/WEB/pages/77770077/Order-form",
           status: "To Do",
           comments: allComments(),
         }),
@@ -61,7 +62,73 @@ server.registerTool(
 // a Confluence page whose design is an embedded frame: the URL lives in a macro attribute, which the
 // markdown conversion of the community server drops (pilot)
 const PAGE_STORAGE =
-  '<h1>Order form</h1><p>The phone field gets a mask.</p><ac:structured-macro ac:name="widget"><ac:parameter ac:name="url"><ri:url ri:value="https://www.figma.com/design/AbC123xyz/Order-form?node-id=12-345&amp;t=x" /></ac:parameter></ac:structured-macro>';
+  '<h1>Order form</h1><p>The phone field gets a mask.</p><ac:structured-macro ac:name="widget"><ac:parameter ac:name="url"><ri:url ri:value="https://www.figma.com/design/AbC123xyz/Order-form?node-id=12-345&amp;t=x" /></ac:parameter></ac:structured-macro><ac:structured-macro ac:name="widget"><ac:parameter ac:name="url"><ri:url ri:value="https://www.figma.com/design/AbC123xyz/Order-form?node-id=66-77" /></ac:parameter></ac:structured-macro>';
+
+// a frame as figma-developer-mcp answers it with OUTPUT_FORMAT=json (a SimplifiedDesign), trimmed
+const FRAME = {
+  name: "Order form '26",
+  nodes: [
+    {
+      id: "12:345",
+      name: "[D] UniversalModalHeader",
+      type: "INSTANCE",
+      layout: "layout_AAA111",
+      fills: ["#FFFFFF"],
+      componentId: "1:10",
+      componentProperties: { "✎ Title": "Phone number", BackWord: true },
+      children: [
+        {
+          id: "12:346",
+          type: "TEXT",
+          text: "Phone number",
+          textStyle: "Headline–System/22–26 Small",
+          fills: "fill_BBB222",
+          layout: "layout_CCC333",
+        },
+        { id: "12:347", template: "tpl_hint", text: "We send a code to it" },
+        {
+          id: "12:348",
+          name: "Cross",
+          type: "IMAGE-SVG",
+          layout: { mode: "none", dimensions: { width: 48, height: 48 } },
+        },
+      ],
+    },
+  ],
+  components: { "1:10": { id: "1:10", key: "k", name: "Content=True", componentSetId: "1:9" } },
+  componentSets: { "1:9": { id: "1:9", key: "k", name: "[D] UniversalModalHeader" } },
+  globalVars: {
+    styles: {
+      layout_AAA111: {
+        mode: "column",
+        padding: "20px 20px 0px",
+        gap: "12px",
+        sizing: { horizontal: "fill", vertical: "hug" },
+      },
+      layout_CCC333: { mode: "none", sizing: { horizontal: "fill", vertical: "hug" } },
+      fill_BBB222: ["rgba(3, 3, 6, 0.88)"],
+      "Headline–System/22–26 Small": {
+        fontFamily: "Sans",
+        fontWeight: 700,
+        fontSize: 22,
+        lineHeight: "26px",
+      },
+      "Text/16–24": { fontSize: 16, lineHeight: "24px", fontWeight: 400 },
+    },
+  },
+  elements: { tpl_hint: { type: "TEXT", textStyle: "Text/16–24", fills: ["#7A7A7F"] } },
+};
+server.registerTool(
+  "get_figma_data",
+  {
+    description: "a frame",
+    inputSchema: { fileKey: z.string(), nodeId: z.string().optional(), depth: z.number().optional() },
+  },
+  async ({ nodeId }) =>
+    nodeId === "66-77"
+      ? { isError: true, content: [{ type: "text", text: "Request too large" }] }
+      : { content: [{ type: "text", text: JSON.stringify(FRAME) }] },
+);
 server.registerTool(
   "confluence_get_page",
   {

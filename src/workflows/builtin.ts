@@ -12,18 +12,25 @@ steps:
     kind: deterministic
     tool: project.discover
     outputs: [project-capabilities]
+    transitions: { onSuccess: design }
+  # the design frames of the task (issue → its pages → Figma), read and described by code, no model
+  - id: design
+    kind: deterministic
+    tool: design.collect
+    outputs: [design]
     transitions: { onSuccess: research }
   - id: research
     kind: agentic
     agent: research
     phase: research
+    inputs: [design]
     outputs: [research]
     transitions: { onSuccess: requirements }
   - id: requirements
     kind: agentic
     agent: requirements
     phase: requirements
-    inputs: [research]
+    inputs: [research, design]
     outputs: [requirements]
     transitions: { onSuccess: spec }
   - id: spec
@@ -31,7 +38,7 @@ steps:
     agent: specification
     onLimit: ask  # a half-done result costs more than a question: at its limit the run asks
     phase: spec
-    inputs: [research, requirements]
+    inputs: [research, requirements, design]
     outputs: [spec]
     transitions: { onSuccess: approve-spec }
   - id: approve-spec
@@ -68,7 +75,7 @@ steps:
     agent: implementation
     onLimit: ask
     phase: implementation
-    inputs: [spec, plan]
+    inputs: [spec, plan, design]
     outputs: [implementation]
     transitions: { onSuccess: verify }
   # ADR-0019 §8 DAG: implementation → {tests, docs, telemetry} → review; children run in parallel.
@@ -179,11 +186,18 @@ steps:
     kind: deterministic
     tool: project.discover
     outputs: [project-capabilities]
+    transitions: { onSuccess: design }
+  # the design frames of the task (issue → its pages → Figma), read and described by code, no model
+  - id: design
+    kind: deterministic
+    tool: design.collect
+    outputs: [design]
     transitions: { onSuccess: research }
   - id: research
     kind: agentic
     agent: research
     phase: research
+    inputs: [design]
     outputs: [research]
     transitions: { onSuccess: DONE }
 `;
@@ -199,18 +213,25 @@ steps:
     kind: deterministic
     tool: project.discover
     outputs: [project-capabilities]
+    transitions: { onSuccess: design }
+  # the design frames of the task (issue → its pages → Figma), read and described by code, no model
+  - id: design
+    kind: deterministic
+    tool: design.collect
+    outputs: [design]
     transitions: { onSuccess: research }
   - id: research
     kind: agentic
     agent: research
     phase: research
+    inputs: [design]
     outputs: [research]
     transitions: { onSuccess: requirements }
   - id: requirements
     kind: agentic
     agent: requirements
     phase: requirements
-    inputs: [research]
+    inputs: [research, design]
     outputs: [requirements]
     transitions: { onSuccess: spec }
   - id: spec
@@ -218,7 +239,7 @@ steps:
     agent: specification
     onLimit: ask
     phase: spec
-    inputs: [research, requirements]
+    inputs: [research, requirements, design]
     outputs: [spec]
     transitions: { onSuccess: approve-spec }
   - id: approve-spec
@@ -295,11 +316,18 @@ steps:
     kind: deterministic
     tool: project.discover
     outputs: [project-capabilities]
+    transitions: { onSuccess: design }
+  # the design frames of the task (issue → its pages → Figma), read and described by code, no model
+  - id: design
+    kind: deterministic
+    tool: design.collect
+    outputs: [design]
     transitions: { onSuccess: research }
   - id: research
     kind: agentic
     agent: research
     phase: research
+    inputs: [design]
     outputs: [research]
     transitions: { onSuccess: spec }
   - id: spec
@@ -307,7 +335,7 @@ steps:
     agent: specification
     onLimit: ask
     phase: spec
-    inputs: [research]
+    inputs: [research, design]
     outputs: [spec]
     transitions: { onSuccess: approve-spec }
   - id: approve-spec
@@ -322,7 +350,7 @@ steps:
     agent: implementation
     onLimit: ask
     phase: implementation
-    inputs: [research, spec]
+    inputs: [research, spec, design]
     outputs: [implementation]
     transitions: { onSuccess: verify }
   - id: verify

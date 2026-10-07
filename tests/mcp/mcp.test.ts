@@ -267,7 +267,7 @@ describe("profiled server", () => {
     expect(entry.tools.map((t) => t.name)).toContain("getJiraIssue");
     expect(existsSync(join(sb.home, ".jarvis", "cache", "mcp", "jira.json"))).toBe(true);
     const after = (rt as Runtime).mcp.provider.report("jira");
-    expect(after.discovered?.count).toBe(6);
+    expect(after.discovered?.count).toBe(7);
     expect(after.exposed).toEqual(["confluence.get", "jira.comment", "jira.get", "jira.search"]);
     expect(after.unmapped).toEqual(["confluence.create", "confluence.search"]);
   });
@@ -654,7 +654,7 @@ describe("preflight", () => {
     expect(caps).toContain("jira.get");
     expect(serversNeeded(runtime.loaded.config, caps)).toEqual(["jira"]);
     const result = await preflightMcp(runtime, sdd);
-    expect(result).toEqual({ ok: true, servers: [{ id: "jira", ok: true, tools: 6 }] });
+    expect(result).toEqual({ ok: true, servers: [{ id: "jira", ok: true, tools: 7 }] });
     expect(runtime.mcp.provider.report("jira").discovered).toBeDefined();
     expect(runtime.mcp.provider.report("bb").discovered).toBeUndefined();
   });

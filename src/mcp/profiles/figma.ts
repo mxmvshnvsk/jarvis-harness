@@ -1,3 +1,4 @@
+import { describeFrame, parseFigmaDesign } from "../../design/figma.ts";
 import { type McpProfile, type ProfileCapability, params } from "../types.ts";
 
 /**
@@ -25,11 +26,15 @@ export function figmaRef(link: string): { fileKey: string; nodeId?: string } | u
 const figmaGet: ProfileCapability = {
   tools: ["get_figma_data"],
   description:
-    "Read a Figma design frame by its link (figma.com/design/<key>/…?node-id=…): its layers, texts, sizes, colours and spacing as structured text. Pass the link as it is. A whole screen or page may take long or time out: then read it again with depth 3–4 (levels of children), or read its smaller frames.",
+    "Read a Figma design frame by its link (figma.com/design/<key>/…?node-id=…): its texts in order with their styles, the layout tree with gaps and paddings, the design-system components with their properties, the spacing and colours used. Pass the link as it is. A whole screen or page may take long or time out: then read it again with depth 3–4, or read its smaller frames. raw: true — the server's JSON as it is.",
   access: "read",
   effect: false,
   parameters: params(
-    { url: "the frame's figma.com link, with node-id", depth: "levels of children to include (optional)" },
+    {
+      url: "the frame's figma.com link, with node-id",
+      depth: "levels of children to include (optional)",
+      raw: "true — the server's JSON instead of the description",
+    },
     ["url"],
   ),
   args: (a) => {
@@ -43,6 +48,14 @@ const figmaGet: ProfileCapability = {
         `figma.get needs a frame link with node-id (figma.com/design/<key>/…?node-id=…); got ${typeof a.url === "string" ? a.url : "no url"}`,
       );
     return { fileKey, nodeId, depth: a.depth };
+  },
+  // the JSON (OUTPUT_FORMAT=json) described by code; the tree or YAML formats pass as they are
+  enrich: async (result, args) => {
+    if (!result.ok || args.raw === true || args.raw === "true") return result;
+    const design = parseFigmaDesign(result.text);
+    if (!design) return result;
+    const link = typeof args.url === "string" ? args.url.replace(/\\(?=[?=&#])/g, "") : undefined;
+    return { ...result, text: describeFrame(design, link ? { link } : {}).text };
   },
 };
 

@@ -26,7 +26,7 @@ Workflow — YAML-граф шагов. `LocalWorkflowEngine` исполняет 
 
 ```mermaid
 flowchart LR
-  discover --> research --> requirements --> spec --> approve_spec[approve-spec]
+  discover --> design --> research --> requirements --> spec --> approve_spec[approve-spec]
   approve_spec -->|ok| impact --> plan --> implementation --> verify
   verify -->|ok| review --> approve_impl[approve-impl] -->|ok| release[release-notes] --> DONE
   approve_spec -.->|request_changes ×3| spec
@@ -53,13 +53,14 @@ flowchart LR
 | Шаг | Вид | Входы | Выход |
 |---|---|---|---|
 | discover | deterministic `project.discover` | — | `project-capabilities` |
-| research | agent `research` | — | `research` |
-| requirements | agent `requirements` | research | `requirements` |
-| spec | agent `specification` | research, requirements | `spec` |
+| design | deterministic `design.collect` | — | `design` (если есть фреймы) |
+| research | agent `research` | design | `research` |
+| requirements | agent `requirements` | research, design | `requirements` |
+| spec | agent `specification` | research, requirements, design | `spec` |
 | approve-spec | approval `spec` | | |
 | impact | `impact.quick`, иначе agent `impact` | research, spec | `impact` |
 | plan | agent `plan` | spec, impact | `plan` |
-| implementation | agent `implementation` | spec, plan | `implementation` |
+| implementation | agent `implementation` | spec, plan, design | `implementation` |
 | verify | composite | | |
 | tests | agent `test` | spec, implementation | `tests` |
 | standards | deterministic `standards.check` | | `standards-check` |

@@ -259,6 +259,7 @@ describe("sdd end to end", () => {
     expect(done.run.iterations).toEqual({ "review->implementation#fix_required": 1 });
     expect(done.steps.map((s) => s.stepId)).toEqual([
       "discover",
+      "design",
       "research",
       "requirements",
       "spec",

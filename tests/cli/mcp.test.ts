@@ -129,7 +129,7 @@ describe("jarvis mcp list", () => {
       exposed: string[];
       unmapped: string[];
     };
-    expect(jira2.discovered.count).toBe(6);
+    expect(jira2.discovered.count).toBe(7);
     expect(jira2.exposed).toEqual(["confluence.get", "jira.comment", "jira.get", "jira.search"]);
     expect(jira2.unmapped).toEqual(["confluence.create", "confluence.search"]);
     const raw = a.servers.find((s) => s.id === "raw") as { notAllowed: string[]; exposed: string[] };
@@ -139,6 +139,7 @@ describe("jarvis mcp list", () => {
       "mcp.raw.confluence_get_page",
       "mcp.raw.echo",
       "mcp.raw.getJiraIssue",
+      "mcp.raw.get_figma_data",
       "mcp.raw.searchJiraIssuesUsingJql",
       "mcp.raw.whoami",
     ]);

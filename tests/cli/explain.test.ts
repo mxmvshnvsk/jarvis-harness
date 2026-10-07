@@ -168,7 +168,7 @@ describe("jarvis research / spec", () => {
     };
     expect(doc.run.workflow).toBe("research");
     expect(doc.run.state).toBe("COMPLETED");
-    expect(doc.steps.map((s) => s.stepId)).toEqual(["discover", "research"]);
+    expect(doc.steps.map((s) => s.stepId)).toEqual(["discover", "design", "research"]);
   });
 
   it("spec stops at the approval of the specification and finishes when it is approved", async () => {

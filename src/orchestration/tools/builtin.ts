@@ -1,6 +1,7 @@
 import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { CapabilityRegistry } from "../../capabilities/registry.ts";
+import { collectDesign } from "../../design/collect.ts";
 import { changedFiles, checkStandards } from "../../knowledge/check.ts";
 import { impactOf, repoIdOf, updateGraph } from "../../knowledge/graph/update.ts";
 import { loadStandards } from "../../knowledge/standards.ts";
@@ -34,6 +35,9 @@ export function filesNamedIn(text: string, workspace: string): string[] {
 
 export const BUILTIN_TOOLS: Record<string, DeterministicTool> = {
   noop: async () => ({ status: "success" }),
+
+  /** The design frames of the task, read and described by code (src/design/collect.ts). */
+  "design.collect": collectDesign,
 
   fail: async (_ctx, args) => ({ status: "failure", reason: String(args.reason ?? "failed on purpose") }),
 
