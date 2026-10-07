@@ -118,7 +118,9 @@ export interface RecentList {
   readonly total: number;
 }
 
-export const RECENT_PAGE = 25;
+/** Rows of Recent a page can show; the first is the default. */
+export const RECENT_SIZES = [10, 15, 20, 30] as const;
+export const RECENT_PAGE: number = RECENT_SIZES[0];
 
 /** `foo "two words" bar` → its terms, lower case; a quoted phrase is one term. */
 export function termsOf(query: string): string[] {
@@ -246,7 +248,15 @@ export async function waitCardOf(runtime: Runtime, run: Run, homeDir: string): P
 export async function runsPage(
   runtime: Runtime,
   engine: LocalWorkflowEngine,
-  options: { repo?: string; current?: string; homeDir: string; now?: Date; q?: string; page?: number },
+  options: {
+    repo?: string;
+    current?: string;
+    homeDir: string;
+    now?: Date;
+    q?: string;
+    page?: number;
+    size?: number;
+  },
 ): Promise<RunsPage> {
   const now = (options.now ?? new Date()).getTime();
   // every run: Recent pages through all of them and searches all of them
@@ -289,11 +299,14 @@ export async function runsPage(
           const text = searchTextOf(run, options.homeDir);
           return terms.every((t) => text.includes(t));
         });
-  const pages = Math.max(1, Math.ceil(matching.length / RECENT_PAGE));
+  const size = (RECENT_SIZES as readonly number[]).includes(options.size ?? 0)
+    ? (options.size as number)
+    : RECENT_PAGE;
+  const pages = Math.max(1, Math.ceil(matching.length / size));
   const pageNo = Math.min(Math.max(1, Math.floor(options.page ?? 1)), pages);
   const recent: RecentList = {
     // the model calls of the rows shown only: counting them is a query per run
-    runs: matching.slice((pageNo - 1) * RECENT_PAGE, pageNo * RECENT_PAGE).map((run) => ({
+    runs: matching.slice((pageNo - 1) * size, pageNo * size).map((run) => ({
       run,
       modelCalls: runtime.events.list({ runId: run.id, kind: "model.call", limit: 1_000_000 }).length,
       tookMs: Math.max(0, Date.parse(run.updatedAt) - Date.parse(run.createdAt)),
@@ -301,7 +314,7 @@ export async function runsPage(
     query,
     terms,
     page: pageNo,
-    pageSize: RECENT_PAGE,
+    pageSize: size,
     total: matching.length,
   };
   const midnight = new Date(now);

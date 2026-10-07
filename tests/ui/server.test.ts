@@ -267,12 +267,22 @@ describe("jarvis ui: pages", () => {
     const rows = (body: string) => body.match(/<tr><td class="mono">/g)?.length ?? 0;
 
     const first = await get("/?repo=", authed());
-    expect(rows(first.body)).toBe(25);
-    expect(first.body).toContain("1–25 of 30");
+    expect(rows(first.body)).toBe(10); // 10 by default
+    expect(first.body).toContain("1–10 of 30");
     expect(first.body).toContain('href="/?repo=&amp;page=2#recent" rel="next"');
-    const second = await get("/?repo=&page=2", authed());
-    expect(rows(second.body)).toBe(5);
-    expect(second.body).toContain("26–30 of 30");
+    expect(first.body).toContain('<a href="/?repo=#recent" data-size="10" aria-current="true">10</a>');
+    expect(first.body).toContain('<a href="/?repo=&amp;size=20#recent" data-size="20">20</a>');
+    const third = await get("/?repo=&page=3", authed());
+    expect(rows(third.body)).toBe(10);
+    expect(third.body).toContain("21–30 of 30");
+    const bigger = await get("/?repo=&size=20&page=2", authed());
+    expect(rows(bigger.body)).toBe(10);
+    expect(bigger.body).toContain("21–30 of 30");
+    // what this browser picked last, when the address does not say; a size not offered is the default
+    expect(
+      rows((await get("/?repo=", { ...authed(), cookie: `${authed().cookie}; jarvis_recent_size=30` })).body),
+    ).toBe(30);
+    expect(rows((await get("/?repo=&size=7", authed())).body)).toBe(10);
 
     // every word in some field: the task's words, the workflow, the state and its reason
     const found = await get(`/?repo=&q=${encodeURIComponent("delivery research failed")}`, authed());

@@ -160,7 +160,13 @@ table{width:100%;border-collapse:collapse;font-size:14px}
 .group-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
 .search input{height:36px;width:min(360px,100%);padding:0 12px;border-radius:8px;font-size:14px;line-height:36px}
 .search{flex:0 1 360px;min-width:0}
-.pager{display:flex;gap:16px;align-items:center;justify-content:flex-end;padding:10px 4px 0;font-size:14px}
+.pager{display:flex;gap:16px;align-items:center;justify-content:space-between;flex-wrap:wrap;padding:10px 0 0;font-size:14px}
+.pager .pages{display:flex;gap:16px;align-items:center;margin-left:auto}
+.sizes{display:inline-flex;border:1px solid var(--field-line);border-radius:8px;overflow:hidden}
+.sizes a{min-width:40px;min-height:32px;display:inline-flex;align-items:center;justify-content:center;padding:0 10px;color:var(--ink-2);text-decoration:none;font-variant-numeric:tabular-nums}
+.sizes a+a{border-left:1px solid var(--field-line)}
+.sizes a:hover{background:var(--sunken);color:var(--ink)}
+.sizes a[aria-current]{background:var(--accent-soft);color:var(--accent);font-weight:600}
 mark{background:var(--accent-soft);color:inherit;border-radius:3px;padding:0 1px}
 th{text-align:left;color:var(--muted);font-size:13px;font-weight:500;padding:12px 20px;border-bottom:1px solid var(--line)}
 td{padding:12px 20px;border-bottom:1px solid var(--line-soft);vertical-align:top}
@@ -451,6 +457,12 @@ export const SCRIPT = `
       }, 250);
     });
   }
+
+  // the rows of Recent a person picked stay for the next visit, like the theme
+  document.addEventListener('click', (e) => {
+    const size = e.target.closest && e.target.closest('[data-size]');
+    if (size) document.cookie = 'jarvis_recent_size=' + size.dataset.size + '; Path=/; SameSite=Strict; Max-Age=31536000';
+  });
 
   // running clocks count on between refreshes: the server's value plus the time since it arrived
   // (an element a refresh brought is new, so it starts from its own value; no clock skew involved)

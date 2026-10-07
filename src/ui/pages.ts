@@ -25,6 +25,7 @@ import type {
   WaitingCandidate,
   WaitingRun,
 } from "./model.ts";
+import { RECENT_PAGE, RECENT_SIZES } from "./model.ts";
 
 /**
  * The pages of `jarvis ui` (ADR-0023 §3), server-rendered from the models in model.ts. Look: the
@@ -469,22 +470,36 @@ ${recentHtml(page)}
 /** Recent: one page of the finished runs (all of them, or those matching the search), and the way on. */
 function recentHtml(page: RunsPage): Html {
   const list = page.recent;
-  const href = (n: number) => {
+  const href = (n: number, size = list.pageSize) => {
     const q = new URLSearchParams();
     if (list.query) q.set("q", list.query);
     q.set("repo", page.repo ?? "");
+    if (size !== RECENT_PAGE) q.set("size", String(size));
     if (n > 1) q.set("page", String(n));
     return `/?${q.toString()}#recent`;
   };
   const from = (list.page - 1) * list.pageSize + 1;
   const to = from + list.runs.length - 1;
   const last = Math.max(1, Math.ceil(list.total / list.pageSize));
-  const pager =
+  // how many rows: shown while there is more than the smallest page, the page goes back to the first
+  const sizes =
+    list.total > RECENT_SIZES[0]
+      ? html`<div class="sizes" role="group" aria-label="Rows per page">${RECENT_SIZES.map((n) =>
+          n === list.pageSize
+            ? html`<a href="${href(1, n)}" data-size="${String(n)}" aria-current="true">${String(n)}</a>`
+            : html`<a href="${href(1, n)}" data-size="${String(n)}">${String(n)}</a>`,
+        )}</div>`
+      : html``;
+  const pages =
     list.total > list.pageSize
-      ? html`<nav class="pager" aria-label="Recent runs, pages">${list.page > 1 ? html`<a href="${href(list.page - 1)}" rel="prev">← Newer</a>` : html`<span class="muted">← Newer</span>`}<span class="muted">${from}–${to} of ${list.total}</span>${list.page < last ? html`<a href="${href(list.page + 1)}" rel="next">Older →</a>` : html`<span class="muted">Older →</span>`}</nav>`
+      ? html`<span class="pages">${list.page > 1 ? html`<a href="${href(list.page - 1)}" rel="prev">← Newer</a>` : html`<span class="muted">← Newer</span>`}<span class="muted">${from}–${to} of ${list.total}</span>${list.page < last ? html`<a href="${href(list.page + 1)}" rel="next">Older →</a>` : html`<span class="muted">Older →</span>`}</span>`
       : list.query && list.total > 0
-        ? html`<nav class="pager"><span class="muted">${list.total} found</span></nav>`
+        ? html`<span class="pages muted">${list.total} found</span>`
         : html``;
+  const pager =
+    list.total > RECENT_SIZES[0] || (list.query && list.total > 0)
+      ? html`<nav class="pager" aria-label="Recent runs, pages">${sizes}${pages}</nav>`
+      : html``;
   const body =
     list.runs.length > 0
       ? html`<div class="panel scroll recent"><table>

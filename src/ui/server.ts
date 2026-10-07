@@ -1117,10 +1117,13 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
       const repo = repoParam === null ? (here ? options.projectRoot : undefined) : repoParam || undefined;
       const q = (r.url.searchParams.get("q") ?? "").slice(0, 200);
       const pageNo = Number(r.url.searchParams.get("page") ?? "1");
+      // rows of Recent: the address, else what this browser picked last (a cookie, like the theme)
+      const size = Number(r.url.searchParams.get("size") ?? cookieOf(r.req, "jarvis_recent_size") ?? "0");
       const listed = await runsPage(runtime, engine, {
         ...(repo ? { repo } : {}),
         ...(q ? { q } : {}),
         ...(Number.isFinite(pageNo) && pageNo > 1 ? { page: pageNo } : {}),
+        ...(Number.isFinite(size) && size > 0 ? { size } : {}),
         ...(options.projectRoot ? { current: options.projectRoot } : {}),
         homeDir: options.homeDir,
       });
