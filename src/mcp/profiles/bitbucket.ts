@@ -1,6 +1,9 @@
 import { type McpProfile, type ProfileCapability, params } from "../types.ts";
 
-/** Bitbucket profile (ADR-0017 §4): pull requests. Candidates cover the common community servers. */
+/**
+ * Bitbucket profile (ADR-0017 §4): pull requests. Candidates cover the common community servers; on
+ * Bitbucket Server/Data Center `workspace` is the project key.
+ */
 const prGet: ProfileCapability = {
   tools: ["get_pull_request", "bitbucket_get_pull_request", "getPullRequest"],
   description: "Read a pull request: title, description, state, reviewers, comments.",
@@ -109,6 +112,7 @@ const prComment: ProfileCapability = {
     id: a.id,
     content: a.content ?? a.body,
     text: a.content ?? a.body,
+    comment_text: a.content ?? a.body,
   }),
   verify: async (connection, resolveTool, args, marker) => {
     const tool = resolveTool(prGet.tools);

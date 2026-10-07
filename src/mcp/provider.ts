@@ -243,7 +243,24 @@ export function filterBySchema(
   if (!props || Object.keys(props).length === 0) {
     return Object.fromEntries(Object.entries(args).filter(([, v]) => v !== undefined));
   }
-  return Object.fromEntries(Object.entries(args).filter(([k, v]) => v !== undefined && k in props));
+  return Object.fromEntries(
+    Object.entries(args)
+      .filter(([k, v]) => v !== undefined && k in props)
+      .map(([k, v]) => [k, coerce(v, props[k])]),
+  );
+}
+
+/** A model often sends "42" where the tool declares a number: convert a numeric string, leave the rest. */
+function coerce(value: unknown, prop: unknown): unknown {
+  const type = (prop as { type?: unknown } | undefined)?.type;
+  if (
+    (type === "number" || type === "integer") &&
+    typeof value === "string" &&
+    /^-?\d+(\.\d+)?$/.test(value.trim())
+  ) {
+    return Number(value);
+  }
+  return value;
 }
 
 /** Servers whose capabilities an agent capability set may reach (for the `work` preflight, ADR-0017 §6). */

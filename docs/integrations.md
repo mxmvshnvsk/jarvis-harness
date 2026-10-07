@@ -85,6 +85,41 @@ mcp:
       allow: [confluence.get, confluence.search]
 ```
 
+То же через community-серверы: один `mcp-atlassian` (Python, `uvx`) отдаёт и Jira, и Confluence;
+`@nexus2520/bitbucket-mcp-server` — pull requests Bitbucket Server, где `workspace` — ключ проекта.
+
+```yaml
+mcp:
+  servers:
+    atlassian:
+      transport: stdio
+      command: uvx
+      args: [mcp-atlassian]
+      env:
+        JIRA_URL: https://jira.example.corp
+        JIRA_PERSONAL_TOKEN: keychain:jira
+        CONFLUENCE_URL: https://confluence.example.corp
+        CONFLUENCE_PERSONAL_TOKEN: keychain:confluence
+        # JIRA_SSL_VERIFY / CONFLUENCE_SSL_VERIFY: "false" — только если корпоративный CA не в системе
+      network: intranet
+      profile: atlassian
+      allow: [jira.get, jira.search, confluence.get, confluence.search]
+    bitbucket:
+      transport: stdio
+      command: npx
+      args: ["-y", "@nexus2520/bitbucket-mcp-server"]
+      env:
+        BITBUCKET_BASE_URL: https://git.example.corp
+        BITBUCKET_USERNAME: dev
+        BITBUCKET_TOKEN: keychain:bitbucket
+      network: intranet
+      profile: bitbucket
+      allow: [bitbucket.pr.get, bitbucket.pr.list, bitbucket.pr.diff]
+```
+
+Числовые параметры (`pull_request_id`) модель часто присылает строкой — вызов приводит их к числу, если
+схема инструмента объявляет `number`.
+
 Агенты research и requirements, если задача называет ключ (`ABC-123`), сначала читают задачу и связанные
 страницы Confluence и ссылаются на них как на источники.
 

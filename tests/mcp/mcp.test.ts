@@ -112,6 +112,83 @@ describe("profiles", () => {
     ).toEqual({ issueKey: "A-1" });
     expect(filterBySchema({ a: 1, b: undefined }, undefined)).toEqual({ a: 1 });
   });
+
+  it("filterBySchema turns a numeric string into the number a tool declares", () => {
+    const schema = {
+      properties: { id: { type: "number" }, n: { type: "integer" }, key: { type: "string" } },
+    };
+    expect(filterBySchema({ id: "42", n: " 7 ", key: "12" }, schema)).toEqual({ id: 42, n: 7, key: "12" });
+    expect(filterBySchema({ id: "PR-1" }, schema)).toEqual({ id: "PR-1" });
+  });
+});
+
+describe("Bitbucket Server (@nexus2520/bitbucket-mcp-server)", () => {
+  // their tools and parameters as the server declares them (3.0)
+  const NUM = { type: "number" };
+  const BB: Record<string, Record<string, unknown>> = {
+    "bitbucket.pr.get": {
+      tool: "get_pull_request",
+      schema: { workspace: {}, repository: {}, pull_request_id: NUM, include_comments: {} },
+    },
+    "bitbucket.pr.list": { tool: "list_pull_requests", schema: { workspace: {}, repository: {}, state: {} } },
+    "bitbucket.pr.diff": {
+      tool: "get_pull_request_diff",
+      schema: { workspace: {}, repository: {}, pull_request_id: NUM, context_lines: {} },
+    },
+    "bitbucket.pr.create": {
+      tool: "create_pull_request",
+      schema: {
+        workspace: {},
+        repository: {},
+        title: {},
+        source_branch: {},
+        destination_branch: {},
+        description: {},
+      },
+    },
+    "bitbucket.pr.comment": {
+      tool: "add_comment",
+      schema: { workspace: {}, repository: {}, pull_request_id: NUM, comment_text: {} },
+    },
+  };
+  const call = (cap: string, args: Record<string, unknown>) => {
+    const entry = resolveProfile({ profile: "bitbucket" } as never)?.map[cap];
+    expect(entry?.tools).toContain(BB[cap]?.tool);
+    return filterBySchema(entry?.args?.(args) ?? args, {
+      properties: BB[cap]?.schema as Record<string, unknown>,
+    });
+  };
+
+  it("maps every capability onto their tools and parameter names", () => {
+    const pr = { workspace: "WEB", repo: "web-app", id: "17" };
+    const at = { workspace: "WEB", repository: "web-app", pull_request_id: 17 };
+    expect(call("bitbucket.pr.get", pr)).toEqual(at);
+    expect(call("bitbucket.pr.diff", pr)).toEqual(at);
+    expect(call("bitbucket.pr.list", { workspace: "WEB", repo: "web-app" })).toEqual({
+      workspace: "WEB",
+      repository: "web-app",
+      state: "OPEN",
+    });
+    expect(call("bitbucket.pr.comment", { ...pr, content: "looks good" })).toEqual({
+      ...at,
+      comment_text: "looks good",
+    });
+    expect(
+      call("bitbucket.pr.create", {
+        workspace: "WEB",
+        repo: "web-app",
+        title: "Fix",
+        source: "fix/a",
+        target: "main",
+      }),
+    ).toEqual({
+      workspace: "WEB",
+      repository: "web-app",
+      title: "Fix",
+      source_branch: "fix/a",
+      destination_branch: "main",
+    });
+  });
 });
 
 describe("Data Center servers (@atlassian-dc-mcp/jira, …/confluence)", () => {
