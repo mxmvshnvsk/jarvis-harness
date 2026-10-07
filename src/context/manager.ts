@@ -28,6 +28,11 @@ export interface ContextManagerOptions {
   readonly tighten?: () => Message[];
   readonly emit: (kind: string, payload: Record<string, unknown>) => void;
   readonly maxResets?: number;
+  /**
+   * Tool results not to trim under light pressure (watch, compact): a file the agent had to read again
+   * because its first read was trimmed (src/agents/rereads.ts). Pilot: one file read 62 times in a step.
+   */
+  readonly pinned?: (toolCallId: string) => boolean;
 }
 
 export interface ContextStats {
@@ -88,12 +93,14 @@ export class ContextManager {
     const remeasure = () => {
       ({ tokens, pressure } = this.measure(base, transcript));
     };
-    /** `sources`: the task's own sources (issue, pages, frames) stay — light pressure only. */
-    const trim = (keepRecent: number, minChars?: number, sources = false) => {
+    /** `light`: the task's own sources (issue, pages, frames) and files read again stay. */
+    const keepLight = (content: string, m: Message) =>
+      isSourceResult(content) || (m.toolCallId !== undefined && this.o.pinned?.(m.toolCallId) === true);
+    const trim = (keepRecent: number, minChars?: number, light = false) => {
       const r = trimToolResults(transcript, {
         keepRecent,
         ...(minChars ? { minChars } : {}),
-        ...(sources ? { keep: isSourceResult } : {}),
+        ...(light ? { keep: keepLight } : {}),
         store: this.o.store,
       });
       if (r.trimmed > 0) {
@@ -151,8 +158,7 @@ export class ContextManager {
     if (level === "watch") {
       // in batches: trimming one more result on every call would change the prompt's prefix on
       // every call and a prefix cache would never reuse past it (ADR-0013 §4)
-      if (trimmable(transcript, WATCH_KEEP, 600, isSourceResult) >= WATCH_BATCH)
-        trim(WATCH_KEEP, undefined, true);
+      if (trimmable(transcript, WATCH_KEEP, 600, keepLight) >= WATCH_BATCH) trim(WATCH_KEEP, undefined, true);
     } else if (level === "compact") {
       trim(4, undefined, true);
       if (pressure >= t.compact) await compact("compact", 3, this.o.compactTarget);

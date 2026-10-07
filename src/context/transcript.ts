@@ -42,8 +42,8 @@ export const isSourceResult = (content: string): boolean => SOURCE_RESULT.test(c
 export interface TrimOptions {
   /** Tool results among the newest N are left alone. */
   readonly keepRecent: number;
-  /** Results to leave alone whatever their age (the task's sources under light pressure). */
-  readonly keep?: (content: string) => boolean;
+  /** Results to leave alone whatever their age (the task's sources under light pressure, files read again). */
+  readonly keep?: (content: string, message: Message) => boolean;
   /** Results shorter than this are not worth a pointer. */
   readonly minChars?: number;
   /** Stores the full text, returns a reference the agent can read back. */
@@ -63,13 +63,14 @@ export function trimmable(
   transcript: readonly Message[],
   keepRecent: number,
   minChars = 600,
-  keep?: (content: string) => boolean,
+  keep?: (content: string, message: Message) => boolean,
 ): number {
   const tools = transcript.filter((m) => m.role === "tool");
   return tools
     .slice(0, Math.max(0, tools.length - keepRecent))
-    .filter((m) => m.content.length >= minChars && !m.content.includes(TRIMMED_MARKER) && !keep?.(m.content))
-    .length;
+    .filter(
+      (m) => m.content.length >= minChars && !m.content.includes(TRIMMED_MARKER) && !keep?.(m.content, m),
+    ).length;
 }
 
 export function trimToolResults(transcript: readonly Message[], options: TrimOptions): TrimResult {
@@ -81,7 +82,7 @@ export function trimToolResults(transcript: readonly Message[], options: TrimOpt
   const next = transcript.map((m, i) => {
     if (m.role !== "tool" || protectedIndexes.has(i)) return m;
     if (m.content.length < minChars || m.content.includes(TRIMMED_MARKER)) return m;
-    if (options.keep?.(m.content)) return m;
+    if (options.keep?.(m.content, m)) return m;
     const ref = options.store(m.content);
     const newline = m.content.indexOf("\n");
     const header = newline > 0 && newline < 200 ? m.content.slice(0, newline) : "";

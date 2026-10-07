@@ -517,6 +517,32 @@ context: { maxContext: 8000 }
     );
   });
 
+  it("a file read again unchanged gets a pointer to its text above, not the text (pilot: 62 reads)", async () => {
+    sb.write("project/.jarvis/project.yaml", "version: 1\nworkspace: { mode: cwd }\n");
+    rt = await testRuntime(sb, { PATH: process.env.PATH ?? "" });
+    let turn = 0;
+    server.respond((req) => {
+      if (!req.body.tools) return completion(JSON.stringify(RESEARCH_DOC));
+      turn += 1;
+      return turn <= 2
+        ? toolCallCompletion("repo.read", { path: "src/onboarding.ts" })
+        : completion(JSON.stringify(RESEARCH_DOC));
+    });
+    const run = createRun(rt, "r");
+    await engineWith(rt, researchOnly).execute(run.id, { owner: "cli:t" });
+    const third = server.requests.filter((r) => r.body.tools)[2];
+    const results = ((third?.body.messages ?? []) as Array<{ role: string; content: string }>).filter(
+      (m) => m.role === "tool",
+    );
+    expect(results[0]?.content).toContain("canRestartOnboarding");
+    expect(results[1]?.content).toContain("(unchanged:");
+    expect(results[1]?.content).not.toContain("return false");
+    expect(rt.events.list({ runId: run.id, kind: "tool.reread" })[0]?.payload).toMatchObject({
+      path: "src/onboarding.ts",
+      kind: "unchanged",
+    });
+  });
+
   it("in the pool's unlimited hours the agent's limits grow unlimitedScale times", async () => {
     const home = join(sb.root, "home", ".jarvis", "config.yaml");
     writeFileSync(

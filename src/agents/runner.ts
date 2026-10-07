@@ -23,6 +23,7 @@ import type { ToolResult } from "../tools/types.ts";
 import { buildBaseMessages } from "./context.ts";
 import type { AgentRegistry } from "./definition.ts";
 import { packageForStep } from "./knowledge.ts";
+import { ReadLedger, readKey } from "./rereads.ts";
 
 /**
  * AgentRuntime (ADR-0001 §6): runs one agent for one step — context assembly, the tool-calling
@@ -167,6 +168,8 @@ export class AgentRuntimeRunner implements AgentRunner {
       (config.agents[def.id]?.onLimit ?? ctx.step.onLimit ?? "finish") === "ask" &&
       config.interactive !== false &&
       !grants.finish;
+    // files read in this step, from the conversation itself (src/agents/rereads.ts)
+    const reads = ReadLedger.from(transcript);
     let toolCalls = restored?.toolCalls ?? 0;
     let modelCalls = restored?.modelCalls ?? 0;
     const emit = (kind: string, payload: Record<string, unknown>) =>
@@ -230,6 +233,7 @@ export class AgentRuntimeRunner implements AgentRunner {
         // Aggressive pressure also tightens L3/L4: the same inputs under a smaller budget.
         tighten: () => buildBase(Math.floor(charBudget * 0.6)),
         emit,
+        pinned: (id) => reads.pinned(id),
       },
       {
         peakPressure: restored?.peakPressure ?? 0,
@@ -368,10 +372,17 @@ export class AgentRuntimeRunner implements AgentRunner {
         }
         const result: ToolResult | undefined = parseError ? undefined : await bound.invoke(call.name, args);
         toolCalls += 1;
-        transcript = [
-          ...transcript,
-          { role: "tool", toolCallId: call.id, content: formatToolResult(call.name, result, parseError) },
-        ];
+        // the same file again: a pointer while its text is still above, else the text kept this time
+        const key = parseError ? undefined : readKey(call.name, args);
+        const answered = reads.answer(
+          key,
+          call.id,
+          formatToolResult(call.name, result, parseError),
+          transcript,
+        );
+        if (answered.kind !== "first")
+          emit("tool.reread", { capability: call.name, path: args.path, kind: answered.kind });
+        transcript = [...transcript, { role: "tool", toolCallId: call.id, content: answered.content }];
       }
       // after the whole answer: a checkpoint mid-way would keep tool calls without their results
       if (Math.floor(toolCalls / limits.checkpointEvery) > Math.floor(callsBefore / limits.checkpointEvery))
