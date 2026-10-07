@@ -39,6 +39,7 @@ import {
   runDaemon,
   runDiff,
   runFollow,
+  runForget,
   runGc,
   runOpen,
   runResume,
@@ -314,6 +315,16 @@ export function buildProgram(options: RunOptions = {}): Command {
     .description("back to the run that waits for you (no id needed): decide right here and go on")
     .action(async (run: string | undefined) => {
       await runContinue(ctxFor(), run);
+    });
+  program
+    .command("forget [runs...]")
+    .description(
+      "finished runs leave Jarvis's store: record, events, artifacts, checkouts (cannot be undone)",
+    )
+    .option("--all", "every finished run of this repository")
+    .option("-y, --yes", "do not ask")
+    .action(async (runs: string[], opts: { all?: boolean; yes?: boolean }) => {
+      await runForget(ctxFor(), runs, opts);
     });
   program
     .command("open [run]")

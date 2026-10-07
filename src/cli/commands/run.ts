@@ -3,6 +3,7 @@ import { dirname, join, relative } from "node:path";
 import { clock } from "../../app/activity.ts";
 import { awaitedArtifact, DecisionTakenError, recordDecision } from "../../app/decide.ts";
 import { createEngine } from "../../app/engine.ts";
+import { canForget, forgetRuns } from "../../app/forget.ts";
 import { continuationStep, continuedBy, handOff } from "../../app/handoff.ts";
 import { duration } from "../../app/journey.ts";
 import { preflightMcp } from "../../app/preflight.ts";
@@ -1230,6 +1231,70 @@ export async function runOpen(
       `${st.ok("↗")} run ${st.name(shortRunId(run.id))} opened in ${editor}${files.length > 0 ? `: ${describeFiles(files)}` : ""}  ${checkoutLink(st, run.workspace.path, ctx.homeDir)}`,
     );
   } finally {
+    await runtime.close();
+  }
+}
+
+/**
+ * `jarvis forget <run…> | --all [--yes]`: finished runs leave Jarvis's store (src/app/forget.ts) —
+ * and their checkouts and branches, if gc has not taken them yet. Asks first at a terminal; without
+ * one, `--yes` is required.
+ */
+export async function runForget(
+  ctx: CliContext,
+  refs: readonly string[],
+  options: { all?: boolean; yes?: boolean },
+): Promise<void> {
+  const loaded = await loadForCli(ctx);
+  const runtime = createRuntime(loaded, { env: ctx.env });
+  const prompt = promptFor(ctx, runtime);
+  try {
+    const st = ctx.out.style;
+    const root = loaded.project?.root ?? ctx.cwd;
+    const runs = options.all
+      ? runtime.runs
+          .list({ includeTerminal: true, limit: 10_000 })
+          .filter((r) => canForget(r) && (r.workspace.repoRoot === root || r.workspace.path === root))
+      : refs.map((ref) => requireRun(ctx, runtime, ref));
+    if (runs.length === 0) {
+      ctx.out.line(`nothing to forget here ${st.muted("(only finished runs are forgotten)")}`);
+      return;
+    }
+    const busy = runs.filter((r) => !canForget(r));
+    if (busy.length > 0) {
+      ctx.out.error(
+        `${busy.map((r) => `${shortRunId(r.id)} is ${r.state}`).join(", ")}: only finished runs are forgotten — \`jarvis cancel\` first`,
+      );
+      throw new CliExit(EXIT.error);
+    }
+    for (const r of runs)
+      ctx.out.line(
+        `  ${st.name(shortRunId(r.id))}  ${st.muted(r.state.toLowerCase())}  ${oneLine(r.task, 70)}`,
+      );
+    if (!options.yes) {
+      if (!prompt) {
+        ctx.out.error("forgetting cannot be undone: add --yes to confirm without a terminal");
+        throw new CliExit(EXIT.error);
+      }
+      const answer = await prompt.ask(
+        `forget ${runs.length} run(s), their artifacts and events? ${st.muted("[y/N]")} `,
+      );
+      if (answer?.toLowerCase() !== "y") {
+        ctx.out.line(st.muted("nothing forgotten"));
+        return;
+      }
+    }
+    for (const r of runs)
+      if (r.workspace.mode === "worktree" && existsSync(r.workspace.path))
+        await new WorktreeWorkspace(r.workspace, ctx.env).remove({ pruneBranch: true });
+    const done = forgetRuns(runtime, runs);
+    ctx.out.result(done, () =>
+      ctx.out.line(
+        `${st.ok("✓")} forgot ${done.runs} run(s): ${done.artifacts} artifact version(s), ${done.events} event(s), ${done.blobs} stored document(s)`,
+      ),
+    );
+  } finally {
+    prompt?.close();
     await runtime.close();
   }
 }

@@ -210,6 +210,32 @@ describe("jarvis work / resume / approve / daemon", () => {
     expect(created.err).toContain("▶ fix · ABC-11");
   });
 
+  it("forget: finished runs leave the store; a waiting one is refused; without a terminal --yes is needed", async () => {
+    const done = await jarvis(["work", "ABC-20", "--workflow", "smoke"]);
+    expect(done.code).toBe(0);
+    const waiting = await jarvis(["work", "ABC-21", "--workflow", "gated"]);
+    expect(waiting.code).toBe(10);
+    const waitingId = /run ([0-9a-z]{8})/.exec(waiting.err)?.[1] as string;
+    const refused = await jarvis(["forget", waitingId, "--yes"]);
+    expect(refused.code).toBe(1);
+    expect(refused.err).toContain("only finished runs are forgotten");
+    const asks = await jarvis(["forget", "--all"]);
+    expect(asks.code).toBe(1);
+    expect(asks.err).toContain("add --yes");
+    const forgot = await jarvis(["forget", "--all", "--yes"]);
+    expect(forgot.code).toBe(0);
+    expect(forgot.out).toMatch(
+      /✓ forgot 1 run\(s\): 1 artifact version\(s\), \d+ event\(s\), 1 stored document\(s\)/,
+    );
+    const loaded = await loadConfig({ cwd: sb.project, homeDir: sb.home, env: {} });
+    const rt = createRuntime(loaded, { env: {} });
+    const left = rt.runs.list({ includeTerminal: true }).map((r) => r.task);
+    const events = rt.events.list({ limit: 10_000 }).filter((e) => e.runId && !rt.runs.get(e.runId));
+    rt.close();
+    expect(left).toEqual(["ABC-21"]);
+    expect(events).toEqual([]);
+  });
+
   it("reports unknown workflows and runs", async () => {
     const r = await jarvis(["work", "X", "--workflow", "nope"]);
     expect(r.code).toBe(1);
