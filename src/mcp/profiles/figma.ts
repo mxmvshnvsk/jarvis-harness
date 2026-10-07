@@ -10,7 +10,8 @@ import { type McpProfile, type ProfileCapability, params } from "../types.ts";
 export function figmaRef(link: string): { fileKey: string; nodeId?: string } | undefined {
   let url: URL;
   try {
-    url = new URL(link.trim());
+    // a link pasted into zsh comes with `\?`, `\=`, `\&` (url-quote-magic); inside quotes they stay
+    url = new URL(link.trim().replace(/\\(?=[?=&#])/g, ""));
   } catch {
     return undefined;
   }
@@ -33,11 +34,15 @@ const figmaGet: ProfileCapability = {
   ),
   args: (a) => {
     const ref = typeof a.url === "string" ? figmaRef(a.url) : undefined;
-    return {
-      fileKey: ref?.fileKey ?? a.fileKey,
-      nodeId: ref?.nodeId ?? a.nodeId,
-      depth: a.depth,
-    };
+    const fileKey = ref?.fileKey ?? a.fileKey;
+    const nodeId = ref?.nodeId ?? a.nodeId;
+    // a whole design file is more than the API gives at once ("Request too large"), and more than a
+    // step needs: a frame, by its node-id (pilot: a link lost its node-id in the shell)
+    if (!fileKey || !nodeId)
+      throw new Error(
+        `figma.get needs a frame link with node-id (figma.com/design/<key>/…?node-id=…); got ${typeof a.url === "string" ? a.url : "no url"}`,
+      );
+    return { fileKey, nodeId, depth: a.depth };
   },
 };
 

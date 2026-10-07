@@ -352,6 +352,11 @@ describe("Figma (figma-developer-mcp)", () => {
     expect(figmaRef("https://www.figma.com/proto/K3/Flow")).toEqual({ fileKey: "K3" });
     expect(figmaRef("https://example.com/design/K4/x")).toBeUndefined();
     expect(figmaRef("not a link")).toBeUndefined();
+    // pasted into zsh, inside double quotes: the escapes stay in the string
+    expect(figmaRef("https://www.figma.com/design/K5/x\\?node-id\\=22632-2211\\&t\\=Zk-0")).toEqual({
+      fileKey: "K5",
+      nodeId: "22632-2211",
+    });
     const entry = resolveProfile({ profile: "figma" } as never)?.map["figma.get"];
     expect(entry?.tools).toEqual(["get_figma_data"]);
     expect(
@@ -362,6 +367,10 @@ describe("Figma (figma-developer-mcp)", () => {
         },
       ),
     ).toEqual({ fileKey: "AbC123xyz", nodeId: "12-345", depth: 2 });
+    // never the whole file: the API refuses it, and a step needs a frame
+    expect(() => entry?.args?.({ url: "https://www.figma.com/design/AbC123xyz/F" })).toThrow(
+      "figma.get needs a frame link with node-id",
+    );
   });
 
   it("is an internet server: not for agents of a confidential project", async () => {
