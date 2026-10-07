@@ -6,6 +6,7 @@ import { preflightMcp, workflowCapabilities } from "../../src/app/preflight.ts";
 import type { Runtime } from "../../src/app/runtime.ts";
 import { run } from "../../src/cli/main.ts";
 import { embeddedLinks } from "../../src/mcp/profiles/atlassian.ts";
+import { figmaRef } from "../../src/mcp/profiles/figma.ts";
 import { resolveProfile, UnknownProfileError } from "../../src/mcp/profiles/index.ts";
 import { filterBySchema, serversNeeded } from "../../src/mcp/provider.ts";
 import { HeldLease } from "../../src/orchestration/lease.ts";
@@ -335,6 +336,41 @@ describe("profiled server", () => {
     const third = await bind(["jira.*"]).invoke("jira.comment", args3);
     expect(third.source).toBe("executed");
     expect(readFileSync(state, "utf8").trim().split("\n")).toHaveLength(2);
+  });
+});
+
+describe("Figma (figma-developer-mcp)", () => {
+  it("takes the frame's link as it is: file key and node id for get_figma_data", () => {
+    expect(figmaRef("https://www.figma.com/design/AbC123xyz/Order-form?node-id=12-345&t=x")).toEqual({
+      fileKey: "AbC123xyz",
+      nodeId: "12-345",
+    });
+    expect(figmaRef("https://figma.com/file/K2/Old?node-id=3%3A4")).toEqual({ fileKey: "K2", nodeId: "3:4" });
+    expect(figmaRef("https://www.figma.com/proto/K3/Flow")).toEqual({ fileKey: "K3" });
+    expect(figmaRef("https://example.com/design/K4/x")).toBeUndefined();
+    expect(figmaRef("not a link")).toBeUndefined();
+    const entry = resolveProfile({ profile: "figma" } as never)?.map["figma.get"];
+    expect(entry?.tools).toEqual(["get_figma_data"]);
+    expect(
+      filterBySchema(
+        entry?.args?.({ url: "https://www.figma.com/design/AbC123xyz/F?node-id=12-345", depth: "2" }) ?? {},
+        {
+          properties: { fileKey: {}, nodeId: {}, depth: { type: "number" } },
+        },
+      ),
+    ).toEqual({ fileKey: "AbC123xyz", nodeId: "12-345", depth: 2 });
+  });
+
+  it("is an internet server: not for agents of a confidential project", async () => {
+    await setup(`${serverYaml("design", "      profile: figma")}`, "confidential");
+    const bound = (rt as Runtime).tools.allowed(["figma.get"]).map((c) => c.name);
+    expect(bound).toEqual([]);
+    expect((rt as Runtime).registry.get("figma.get")?.network).toBe("internet");
+  });
+
+  it("an internal project's agents may read it, as an untrusted source", async () => {
+    await setup(`${serverYaml("design", "      profile: figma")}`, "internal");
+    expect((rt as Runtime).tools.allowed(["figma.get"]).map((c) => c.name)).toEqual(["figma.get"]);
   });
 });
 

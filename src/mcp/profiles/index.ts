@@ -2,9 +2,10 @@ import type { McpServerConfig } from "../../core/config/schema.ts";
 import type { McpProfile, ProfileCapability } from "../types.ts";
 import { atlassianProfile } from "./atlassian.ts";
 import { bitbucketProfile } from "./bitbucket.ts";
+import { figmaProfile } from "./figma.ts";
 
 export const BUILTIN_PROFILES: ReadonlyMap<string, McpProfile> = new Map(
-  [atlassianProfile, bitbucketProfile].map((p) => [p.name, p]),
+  [atlassianProfile, bitbucketProfile, figmaProfile].map((p) => [p.name, p]),
 );
 
 export class UnknownProfileError extends Error {

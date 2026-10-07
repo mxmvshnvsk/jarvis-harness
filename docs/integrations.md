@@ -49,6 +49,7 @@ Jarvis подключает MCP-серверы по официальному Typ
 |---|---|---|
 | `atlassian` | `jira.get`, `jira.search`, `confluence.get`, `confluence.search` | `jira.comment` (по маркеру в тексте), `jira.transition` (чтением статуса), `confluence.create` |
 | `bitbucket` | `bitbucket.pr.get`, `bitbucket.pr.list`, `bitbucket.pr.diff` | `bitbucket.pr.create`, `bitbucket.pr.comment` |
+| `figma` | `figma.get` (фрейм по ссылке) | — |
 
 Профиль `atlassian` понимает официальный Atlassian Remote MCP (Cloud), распространённый community-сервер
 (`jira_*` / `confluence_*`) и серверы для Data Center `@atlassian-dc-mcp/jira` и `@atlassian-dc-mcp/confluence`
@@ -128,6 +129,33 @@ mcp:
 страницы в storage-формате и дописывает к тексту «Embedded on the page …» со списком таких адресов; агенты
 указывают их в источниках как опору для UI. `confluence.get` с `raw: true` отдаёт сам storage HTML с
 макросами (заметно длиннее) — для разборов: `jarvis mcp call confluence.get --arg id=<id> --arg raw=true`.
+
+### Макеты в Figma
+
+Профиль `figma` — фрейм по ссылке (`figma.com/design/<key>/…?node-id=…`) через community-сервер
+`figma-developer-mcp`: слои, тексты, размеры, цвета и отступы структурой, которую текстовая модель читает
+лучше картинки. `figma.get` есть у research, requirements и implementation: ссылки из задачи и «Embedded on the
+page» они читают сами. Токен — личный (Figma → Settings → Security → Personal access tokens; выпускается и для
+входа через Google), видит то же, что ты.
+
+```yaml
+mcp:
+  servers:
+    figma:
+      transport: stdio
+      command: npx
+      args: ["-y", "figma-developer-mcp", "--stdio"]
+      env:
+        FIGMA_API_KEY: keychain:figma          # jarvis auth set figma
+        FRAMELINK_TELEMETRY: "off"             # сервер по умолчанию шлёт телеметрию стороннему сервису
+        DO_NOT_TRACK: "1"
+      network: internet
+      profile: figma
+```
+
+Figma — интернет: при `dataClass: confidential` политика (ADR-0016) агентам этот сервер не выдаёт; при
+`internal` выдаёт как недоверенный источник. Решение о том, что макеты и их тексты проходят через API Figma к
+модели, — за командой. Проверка без прогона: `jarvis mcp call figma.get --arg url="<ссылка на фрейм>"`.
 
 `profile: { base: atlassian, map: { "jira.worklog": "jira_add_worklog" } }` добавляет только чистые
 чтения; эффекты из конфигурации объявить нельзя (их проверку должен знать код).

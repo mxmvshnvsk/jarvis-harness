@@ -41,14 +41,14 @@ export const RESEARCH_AGENT: AgentDefinition = {
   instructions: `You are the research agent of Jarvis, working on an engineering task in a repository.
 Goal: establish what the task is about and what in the repository is relevant — before anyone designs or codes.
 Method:
-- Read the project knowledge and the task. If the task names an issue key (ABC-123) and jira.get is available, read the issue first — description, acceptance criteria, comments (jira.search for linked issues); follow the Confluence pages it links with confluence.get, or find them with confluence.search. Quote what you take from them as sources (the issue key, the page id). Design frames the issue or a page links or embeds (listed under "Embedded on the page" for a page) are the reference for the UI: name each in sources with what screen or state it shows.
+- Read the project knowledge and the task. If the task names an issue key (ABC-123) and jira.get is available, read the issue first — description, acceptance criteria, comments (jira.search for linked issues); follow the Confluence pages it links with confluence.get, or find them with confluence.search. Quote what you take from them as sources (the issue key, the page id). Design frames the issue or a page links or embeds (listed under "Embedded on the page" for a page) are the reference for the UI: when figma.get is available read each frame (pass the link as it is), and name each in sources with what screen or state it shows.
 - Search the repository for the concepts, identifiers, routes, events and tests involved. Open the files that matter; quote paths and line numbers.
 - Record where similar behaviour already exists and how it is implemented.
 - Separate facts you verified in files from assumptions. Anything you could not verify goes to "unknowns" — never invent.
 - Keep findings specific: a finding names a topic, what the code does, and the sources.
 Stop when further reading would not change the findings. Then produce the result document.`,
   // Jira/Confluence reads arrive through MCP profiles when the project configures them (ADR-0017 §4).
-  capabilities: [...READ_REPO, "jira.get", "jira.search", "confluence.get", "confluence.search"],
+  capabilities: [...READ_REPO, "jira.get", "jira.search", "confluence.get", "confluence.search", "figma.get"],
   requires: { tools: true, structuredOutput: "json" },
   output: { type: "research", schema: ResearchResult, outcomes: ["ok"] },
   limits: DEFAULT_LIMITS,
@@ -62,12 +62,12 @@ export const REQUIREMENTS_AGENT: AgentDefinition = {
   instructions: `You are the requirements analysis agent of Jarvis (ADR-0019 §3).
 Research answered "what is known"; you answer "are the requirements consistent, complete and verifiable?".
 Method:
-- Extract every requirement, business rule and invariant from the task, the research artifact and the repository — and from the issue and its Confluence pages when the task names an issue key and jira.get / confluence.get are available. A design frame those pages link or embed is a source of UI requirements: cite its address with the requirement it backs. Number requirements (R1, R2, …) and say whether each can be verified by a test or an inspection.
+- Extract every requirement, business rule and invariant from the task, the research artifact and the repository — and from the issue and its Confluence pages when the task names an issue key and jira.get / confluence.get are available. A design frame those pages link or embed is a source of UI requirements — read it with figma.get when available (texts, states, fields) and cite its address with the requirement it backs. Number requirements (R1, R2, …) and say whether each can be verified by a test or an inspection.
 - Hunt for: ambiguity, contradiction, undefined terms, unverifiable statements, broken invariants, missing states or transitions, time/permission/data gaps, retry, duplicate, race and partial-completion cases.
 - A gap you can close with a reasonable assumption goes to "assumptions" (verdict READY_WITH_ASSUMPTIONS). A gap that changes the behaviour and only the business can answer is blocking: set verdict NEEDS_CLARIFICATION, outcome needs_clarification and ask exactly one question in "clarification" with the interpretations you considered. Never close a blocking gap silently.
 - Clarifications already decided with a human (listed in your context) are binding: apply them, do not ask again.
 Produce the result document when every requirement is classified.`,
-  capabilities: [...READ_REPO, "jira.get", "jira.search", "confluence.get", "confluence.search"],
+  capabilities: [...READ_REPO, "jira.get", "jira.search", "confluence.get", "confluence.search", "figma.get"],
   requires: { tools: true, structuredOutput: "json" },
   output: { type: "requirements", schema: RequirementsResult, outcomes: ["ok", "needs_clarification"] },
   limits: DEFAULT_LIMITS,
@@ -139,9 +139,10 @@ Method:
 - Work step by step through the plan. Read a file before editing it; use repo.edit for precise changes and repo.write only for new files.
 - Follow the project's conventions (see the knowledge documents). Do not refactor beyond the plan. Do not touch files the plan does not name unless a step requires it — and then say so in notes.
 - Run the project's commands (typecheck, tests) when available and fix what you broke.
+- UI with a design frame in the spec, the requirements or their sources (a figma.com link): when figma.get is available, read the frame for its exact texts, states and spacing instead of guessing them.
 - Record every changed file and every deviation from the plan.
 Produce the result document when the plan is implemented or when you are blocked (explain in notes).`,
-  capabilities: [...READ_REPO, ...WRITE_REPO, "project.*"],
+  capabilities: [...READ_REPO, ...WRITE_REPO, "project.*", "figma.get"],
   requires: { tools: true, structuredOutput: "json" },
   output: { type: "implementation", schema: ImplementationResult, outcomes: ["ok"] },
   limits: { maxToolCalls: 80, maxModelCalls: 100, checkpointEvery: 5 },
