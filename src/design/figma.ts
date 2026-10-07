@@ -26,11 +26,16 @@ export interface FigmaNode {
   readonly children?: readonly FigmaNode[];
 }
 
+type Components = Record<string, { name: string; componentSetId?: string }>;
+type ComponentSets = Record<string, { name: string; description?: string }>;
+
 export interface FigmaDesign {
-  readonly name: string;
+  /** The server's answer puts the name and the dictionaries in `metadata`; its types say top level. */
+  readonly name?: string;
+  readonly metadata?: { name?: string; components?: Components; componentSets?: ComponentSets };
   readonly nodes: readonly FigmaNode[];
-  readonly components?: Record<string, { name: string; componentSetId?: string }>;
-  readonly componentSets?: Record<string, { name: string; description?: string }>;
+  readonly components?: Components;
+  readonly componentSets?: ComponentSets;
   readonly globalVars?: { styles?: Record<string, Style> };
   readonly elements?: Record<string, Omit<FigmaNode, "id" | "name" | "children" | "template">>;
 }
@@ -64,6 +69,9 @@ export interface FrameDescription {
 
 export function describeFrame(design: FigmaDesign, options: DescribeOptions = {}): FrameDescription {
   const styles = design.globalVars?.styles ?? {};
+  const fileName = design.metadata?.name ?? design.name ?? "?";
+  const components = design.metadata?.components ?? design.components ?? {};
+  const componentSets = design.metadata?.componentSets ?? design.componentSets ?? {};
   const resolve = <T>(v: T | string | undefined): { value: T | undefined; name?: string } => {
     if (typeof v !== "string") return { value: v };
     const found = styles[v];
@@ -95,9 +103,9 @@ export function describeFrame(design: FigmaDesign, options: DescribeOptions = {}
   };
   const componentOf = (n: FigmaNode): string | undefined => {
     if (!n.componentId) return undefined;
-    const c = design.components?.[n.componentId];
+    const c = components[n.componentId];
     if (!c) return undefined;
-    const set = c.componentSetId ? design.componentSets?.[c.componentSetId]?.name : undefined;
+    const set = c.componentSetId ? componentSets[c.componentSetId]?.name : undefined;
     return set ? `${set} (${c.name})` : c.name;
   };
   const props = (p: FigmaNode["componentProperties"]): string =>
@@ -180,14 +188,14 @@ export function describeFrame(design: FigmaDesign, options: DescribeOptions = {}
   for (const n of design.nodes) walk(n, 0);
 
   const top = design.nodes[0];
-  const title = top ? (componentOf(expand(top)) ?? top.name ?? top.id) : design.name;
+  const title = top ? (componentOf(expand(top)) ?? top.name ?? top.id) : fileName;
   const sorted = (m: Map<string, number>) =>
     [...m.entries()]
       .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
       .map(([k, v]) => `${k}${v > 1 ? ` ×${v}` : ""}`);
   const lines = [
     `### ${title}`,
-    `Figma: ${design.name}${top ? ` · node ${top.id}` : ""}${options.link ? ` · ${options.link}` : ""}`,
+    `Figma: ${fileName}${top ? ` · node ${top.id}` : ""}${options.link ? ` · ${options.link}` : ""}`,
     "",
     "Texts, in order:",
     ...(texts.length > 0 ? texts : ["- (none)"]),

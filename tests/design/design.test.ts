@@ -74,6 +74,15 @@ describe("a Figma frame described by code", () => {
     expect(t).toContain("Colours (for meaning, not to copy): #7A7A7F, rgba(3, 3, 6, 0.88)");
   });
 
+  it("reads the server's actual shape: the name and the dictionaries under metadata", () => {
+    const { name: _n, components, componentSets, ...rest } = FRAME;
+    const actual = { ...rest, metadata: { name: "Order form '26", components, componentSets } };
+    const t = describeFrame(parseFigmaDesign(JSON.stringify(actual)) as FigmaDesign).text;
+    expect(t).toContain("### [D] UniversalModalHeader (Content=True)");
+    expect(t).toContain("Figma: Order form '26 · node 12:345");
+    expect(t).toContain("Design-system components: [D] UniversalModalHeader");
+  });
+
   it("knows the JSON answer from the tree or YAML formats", () => {
     expect(parseFigmaDesign(JSON.stringify(FRAME))?.name).toBe("Order form '26");
     expect(parseFigmaDesign("NAME: x\nNODES:\n")).toBeUndefined();
