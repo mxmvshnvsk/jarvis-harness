@@ -202,6 +202,7 @@ export function docFacts(name: string, text: string): DocFacts | undefined {
       ...n(doc.goals, "goal"),
       ...n(doc.risks, "risk"),
       ...n(doc.openQuestions, "open question", true),
+      ...n(doc.contradictions, "contradiction", true),
     ],
     risks: strings(doc.risks),
     openQuestions: strings(doc.openQuestions),

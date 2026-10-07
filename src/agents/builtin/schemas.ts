@@ -22,6 +22,20 @@ const Base = {
     .describe("required when outcome is not ok"),
 };
 
+/**
+ * Requirements that contradict each other, the design or the code, never resolved silently. Pilot: the
+ * issue and its page both gave «flag = true» to both branches of one rule, and the research copied it.
+ */
+const Contradiction = z.object({
+  statement: z.string().min(1).describe("what one source says, quoted or close to it"),
+  conflictsWith: z
+    .string()
+    .min(1)
+    .describe("what contradicts it: another source, another branch of the same rule, the design or the code"),
+  sources: z.array(Source).default([]),
+  question: z.string().min(1).describe("the one question for the analyst that settles it"),
+});
+
 export const ResearchResult = z.object({
   ...Base,
   findings: z.array(
@@ -30,6 +44,10 @@ export const ResearchResult = z.object({
   affectedAreas: z.array(z.string()).default([]).describe("directories, modules, services"),
   existingImplementations: z.array(z.string()).default([]).describe("where similar behaviour already exists"),
   unknowns: z.array(z.string()).default([]).describe("what could not be established from the sources"),
+  contradictions: z
+    .array(Contradiction)
+    .default([])
+    .describe("requirements that contradict each other, the design or the code — never resolved silently"),
   outcome: z.enum(["ok"]).default("ok"),
 });
 

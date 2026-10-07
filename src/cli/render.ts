@@ -122,8 +122,11 @@ export function documentToMarkdown(doc: Record<string, unknown>): string {
   if (title) out.push(`# ${title}`, "");
   const summary = scalar(doc.summary);
   if (summary) out.push(summary, "");
+  // contradictions first: a question for the analyst, not a detail to find at the end
+  const contradictions = Array.isArray(doc.contradictions) ? doc.contradictions : [];
+  if (contradictions.length > 0) out.push("## ⚠ Contradictions", "", ...itemLines(contradictions, ""), "");
   for (const [key, value] of Object.entries(doc)) {
-    if (SKIP_KEYS.has(key) || value === undefined || value === null) continue;
+    if (SKIP_KEYS.has(key) || key === "contradictions" || value === undefined || value === null) continue;
     if (Array.isArray(value) && value.length === 0) continue;
     out.push(`## ${humanize(key)}`, "");
     const s = scalar(value);

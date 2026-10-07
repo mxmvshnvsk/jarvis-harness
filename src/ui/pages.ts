@@ -478,6 +478,10 @@ function stepRow(s: StepRow, now: number): Html {
     else if (r.agent) notes.push(r.agent);
     if (r.modelCalls > 0) notes.push(`${r.modelCalls} call${r.modelCalls === 1 ? "" : "s"}`);
     if (r.tools && Object.keys(r.tools).length > 0) notes.push(toolMix(r.tools));
+    if (r.contradictions)
+      notes.push(
+        `⚠ ${r.contradictions} contradiction${r.contradictions === 1 ? "" : "s"} in the requirements`,
+      );
     if (r.budgetExhausted)
       notes.push(
         `${r.budgetExhausted === "model" ? "model call" : r.budgetExhausted === "budget" ? "budget" : "tool"} limit reached`,

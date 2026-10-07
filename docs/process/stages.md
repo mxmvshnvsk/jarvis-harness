@@ -106,6 +106,11 @@ Remaining commands of ADR-0001 §15:
   the calls and the task's sources as read (`context.compacted` … `fallback`); `design.collect` writes the issue and
   its Confluence pages as read to a `sources` artifact, an input of research and requirements
 - `jarvis ui` New task offers research first and selects it
+- research lists contradictions in the requirements (`contradictions`: both sides, sources, one question for the
+  analyst) instead of copying a contradictory rule — pilot: both branches of one rule had «flag = true»; they come
+  first in the document and are counted on the step's line; requirements settles each or treats it as blocking
+- a file read again in a step: a pointer while its text is still above, else the text pinned against trimming;
+  compaction shows while it runs (`context.compacting`) and leaves a line; unlimitedScale defaults to 10
 - output styling: one palette for every command (`src/cli/style.ts`; headings bold, the subject bold cyan, metadata
   dim, commands cyan, ok/additions green, warnings yellow, errors/removals red), backticked spans render as commands,
   `jarvis diff` coloured like git, `candidates show` renders the markdown; errors are prefixed `error:`, notices go

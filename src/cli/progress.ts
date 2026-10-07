@@ -139,9 +139,12 @@ export function formatStepReport(
     ? ` ${st.warn(`· ${r.budgetExhausted === "model" ? "model call" : r.budgetExhausted === "budget" ? "budget" : "tool"} limit reached, result may be incomplete`)}`
     : "";
   const outcome = r.outcome && r.outcome !== "success" ? ` ${st.muted("·")} ${st.warn(r.outcome)}` : "";
+  const conflicts = r.contradictions
+    ? ` ${st.warn(`· ⚠ ${r.contradictions} contradiction${r.contradictions === 1 ? "" : "s"} in the requirements`)}`
+    : "";
   const produced = artifacts.length > 0 ? `  ${st.muted("→")} ${producedOf(artifacts, link)}` : "";
   const lines = [
-    `${glyph} ${pos}${name}  ${duration(r.durationMs).padEnd(7)} ${st.muted(facts.join(" · "))}${retries}${limit}${outcome}${produced}`.trimEnd(),
+    `${glyph} ${pos}${name}  ${duration(r.durationMs).padEnd(7)} ${st.muted(facts.join(" · "))}${retries}${limit}${conflicts}${outcome}${produced}`.trimEnd(),
   ];
   if (!ok && r.reason) {
     const d = diagnose(r.reason);

@@ -29,6 +29,8 @@ export interface StepReport {
   readonly maxToolCalls?: number;
   /** The agent stopped on a limit, not because it was done: its document may be incomplete. */
   readonly budgetExhausted?: string;
+  /** Contradictions in the requirements the result lists (research, requirements). */
+  readonly contradictions?: number;
   /** A `quick:` tool answered for the agent (no model call), or why it could not. */
   readonly quick?: { readonly tool: string; readonly used: boolean; readonly reason?: string };
   /** Scratch files the agent left and the run deleted (`workspace.scratchRemoved`). */
@@ -68,6 +70,7 @@ interface Open {
   tools?: Record<string, number>;
   maxToolCalls?: number;
   budgetExhausted?: string;
+  contradictions?: number;
   scratchRemoved?: string[];
 }
 
@@ -130,6 +133,7 @@ export class Journey {
       case "agent.finish": {
         const exhausted = str(p.budgetExhausted);
         if (o && exhausted) o.budgetExhausted = exhausted;
+        if (o && num(p.contradictions) > 0) o.contradictions = num(p.contradictions);
         return [];
       }
       case "model.call":
@@ -211,6 +215,7 @@ export class Journey {
       ...(o.tools ? { tools: o.tools } : {}),
       ...(o.maxToolCalls ? { maxToolCalls: o.maxToolCalls } : {}),
       ...(o.budgetExhausted ? { budgetExhausted: o.budgetExhausted } : {}),
+      ...(o.contradictions ? { contradictions: o.contradictions } : {}),
       ...(o.quick ? { quick: o.quick } : {}),
       ...(o.scratchRemoved ? { scratchRemoved: o.scratchRemoved } : {}),
     };

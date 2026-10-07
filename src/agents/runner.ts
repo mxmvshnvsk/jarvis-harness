@@ -466,6 +466,7 @@ export class AgentRuntimeRunner implements AgentRunner {
         finalizedFromLoop: result.calls === 0,
         artifact: `${artifact.artifactId}@${artifact.version}`,
         ...(budgetExhausted ? { budgetExhausted } : {}),
+        ...((n) => (n > 0 ? { contradictions: n } : {}))(contradictionsIn(result.value)),
       });
       return {
         status: "success",
@@ -514,4 +515,10 @@ function formatToolResult(
   if (result.denied) return `[${name}] denied: ${result.denied}`;
   const head = `[${name}] ${result.ok ? "ok" : `error: ${result.error ?? "failed"}`}`;
   return result.text ? `${head}\n${result.text}` : head;
+}
+
+/** How many contradictions a result lists (research, requirements): shown with the step, not buried. */
+function contradictionsIn(value: unknown): number {
+  const list = (value as { contradictions?: unknown } | undefined)?.contradictions;
+  return Array.isArray(list) ? list.length : 0;
 }

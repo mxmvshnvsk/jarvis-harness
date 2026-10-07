@@ -45,6 +45,7 @@ Method:
 - Search the repository for the concepts, identifiers, routes, events and tests involved. Open the files that matter; quote paths and line numbers.
 - Record where similar behaviour already exists and how it is implemented.
 - Separate facts you verified in files from assumptions. Anything you could not verify goes to "unknowns" — never invent.
+- Check the requirements against each other, the design and the code. Two sources that disagree, one rule giving the same condition to two different branches («A: flag = true», «not A: flag = true or null»), text against design, code that already does the opposite — each goes to "contradictions" with both sides, sources and one question for the analyst. Never pick a reading silently.
 - Keep findings specific: a finding names a topic, what the code does, and the sources.
 Stop when further reading would not change the findings. Then produce the result document.`,
   // Jira/Confluence reads arrive through MCP profiles when the project configures them (ADR-0017 §4).
@@ -63,6 +64,7 @@ export const REQUIREMENTS_AGENT: AgentDefinition = {
 Research answered "what is known"; you answer "are the requirements consistent, complete and verifiable?".
 Method:
 - Extract every requirement, business rule and invariant from the task, the research artifact and the repository — and from the issue and its Confluence pages: the sources input holds them as read (call jira.get / confluence.get only for what it does not have). The design input holds the frames those pages link or embed, already described (texts, states, fields, components): it is a source of UI requirements — cite a frame's address with the requirement it backs; call figma.get only for a frame listed there as not read. Number requirements (R1, R2, …) and say whether each can be verified by a test or an inspection.
+- Every contradiction the research input lists is settled by a source you cite or is a blocking gap.
 - Hunt for: ambiguity, contradiction, undefined terms, unverifiable statements, broken invariants, missing states or transitions, time/permission/data gaps, retry, duplicate, race and partial-completion cases.
 - A gap you can close with a reasonable assumption goes to "assumptions" (verdict READY_WITH_ASSUMPTIONS). A gap that changes the behaviour and only the business can answer is blocking: set verdict NEEDS_CLARIFICATION, outcome needs_clarification and ask exactly one question in "clarification" with the interpretations you considered. Never close a blocking gap silently.
 - Clarifications already decided with a human (listed in your context) are binding: apply them, do not ask again.
