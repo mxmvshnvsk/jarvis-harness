@@ -1,6 +1,6 @@
 import { type Activity, clock, kilo } from "../app/activity.ts";
 import { duration } from "../app/journey.ts";
-import type { HealthState, ModelHealth, ModelsHealth } from "../app/modelHealth.ts";
+import type { HealthState, ModelHealth, ModelPerf, ModelsHealth } from "../app/modelHealth.ts";
 import type { Change } from "../cli/checkout.ts";
 import { toolMix } from "../cli/progress.ts";
 import { documentToMarkdown } from "../cli/render.ts";
@@ -832,7 +832,9 @@ ${
 <span class="meta">${kilo(w.outputTokens)}${w.outputLimit ? ` / ${kilo(w.outputLimit)}` : ""} output tok · ${w.requests}${w.requestLimit ? ` / ${w.requestLimit}` : ""} requests · ${w.minutes} min window${w.share !== undefined ? ` · ${pct(w.share)}` : ""}</span></div>`
     : ""
 }
+${m.inFlight.calls > 0 ? html`<span class="meta now-line"><span class="spin" aria-hidden="true"></span>${m.inFlight.calls} request${m.inFlight.calls === 1 ? "" : "s"} being answered now${m.inFlight.longestMs ? ` · longest ${duration(m.inFlight.longestMs)}` : ""}</span>` : ""}
 <span class="meta">last ${r.minutes} min: ${lineOf}</span>
+${m.perf ? perfHtml(m.perf) : ""}
 ${r.lastFailure ? html`<span class="meta">last failure ${wall(r.lastFailure.at)} · ${r.lastFailure.reason}</span>` : ""}
 ${
   waiting.length > 0
@@ -843,6 +845,36 @@ ${
     : ""
 }
 </li>`;
+}
+
+/** The numbers of the last half hour as label/value rows: how fast, how much, how well. */
+function perfHtml(p: ModelPerf): Html {
+  const pcs = (v: { p50: number; p90: number; max: number } | undefined, f: (n: number) => string) =>
+    v ? `p50 ${f(v.p50)} · p90 ${f(v.p90)} · max ${f(v.max)}` : "—";
+  const rows: Array<[string, string]> = [
+    ["latency", pcs(p.latencyMs, duration)],
+    ...(p.firstTokenMs
+      ? ([["first token", `${pcs(p.firstTokenMs, duration)} · ${p.streamed} streamed`]] as Array<
+          [string, string]
+        >)
+      : []),
+    ["speed", pcs(p.outputPerSecond, (n) => `${Math.round(n)} tok/s`)],
+    ["throughput", `${kilo(p.outputPerMinute)} out · ${kilo(p.promptPerMinute)} in tok/min`],
+    [
+      "per call",
+      `in avg ${kilo(p.prompt.avg)} (max ${kilo(p.prompt.max)}) · out avg ${kilo(p.output.avg)} (max ${kilo(p.output.max)})`,
+    ],
+    ["total", `${kilo(p.prompt.total)} in · ${kilo(p.output.total)} out`],
+    [
+      "cache",
+      `${Math.round(p.cachedShare * 100)}% cached${p.prefixReuseP50 !== undefined ? ` · prefix reusable p50 ${Math.round(p.prefixReuseP50 * 100)}%` : ""}`,
+    ],
+    [
+      "answers",
+      `${Math.round(p.successRate * 1000) / 10}% ok${p.retriedCalls > 0 ? ` · ${p.retriedCalls} after a retry` : ""}${p.cut > 0 ? ` · ${p.cut} cut at maxOutput` : ""}`,
+    ],
+  ];
+  return html`<dl class="perf">${rows.map(([k, v]) => html`<dt>${k}</dt><dd>${v}</dd>`)}</dl>`;
 }
 
 /** The popover's body: each model, then where the full numbers are. */

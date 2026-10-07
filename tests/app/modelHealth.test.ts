@@ -90,4 +90,53 @@ describe("how the models are doing", () => {
       ).models[0]?.state,
     ).toBe("down");
   });
+
+  it("how it answers: latency, first token, speed, throughput, tokens per call; requests in flight now", () => {
+    const at = (min: number) => new Date(Date.parse("2026-10-07T08:00:00Z") - min * 60_000).toISOString();
+    const answered = (
+      min: number,
+      latencyMs: number,
+      outputTokens: number,
+      extra: Record<string, unknown> = {},
+    ) =>
+      ev("model.call", at(min), {
+        modelId: "flash",
+        latencyMs,
+        promptTokens: 30_000,
+        cachedTokens: 3_000,
+        outputTokens,
+        streamed: true,
+        firstTokenMs: 900,
+        finishReason: "stop",
+        ...extra,
+      });
+    const h = modelsHealth(
+      base({
+        events: [
+          answered(20, 6000, 1200),
+          answered(10, 8000, 1600),
+          answered(5, 10_000, 4000, { finishReason: "length", retries: 1 }),
+          // a stream of another step, still being answered
+          {
+            ...ev("model.progress", "2026-10-07T07:59:50Z", { modelId: "flash", elapsedMs: 12_000 }),
+            runId: "run_x",
+            stepId: "tests",
+          } as StoredEvent,
+        ],
+      }),
+    );
+    const perf = h.models[0]?.perf;
+    expect(perf?.latencyMs).toMatchObject({ p50: 8000, max: 10_000 });
+    expect(perf?.firstTokenMs?.p50).toBe(900);
+    expect(perf?.streamed).toBe(3);
+    expect(perf?.outputPerMinute).toBe(Math.round(6800 / 30));
+    expect(perf?.promptPerMinute).toBe(3000);
+    expect(perf?.prompt).toMatchObject({ avg: 30_000, max: 30_000, total: 90_000 });
+    expect(perf?.output.max).toBe(4000);
+    expect(perf?.cachedShare).toBeCloseTo(0.1);
+    expect(perf?.cut).toBe(1);
+    expect(perf?.retriedCalls).toBe(1);
+    expect(h.models[0]?.inFlight).toEqual({ calls: 1, longestMs: 12_000 });
+    expect(h.models[1]?.inFlight).toEqual({ calls: 0 });
+  });
 });

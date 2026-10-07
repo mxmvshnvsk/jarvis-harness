@@ -1,7 +1,7 @@
 import type { Run } from "../core/domain/run.ts";
 import type { StoredEvent } from "../telemetry/events.ts";
 import { reasonOf } from "./activity.ts";
-import { failureReason, percentiles } from "./modelStats.ts";
+import { failureReason, type ModelStats, modelStats, type Percentiles, percentiles } from "./modelStats.ts";
 import type { Runtime } from "./runtime.ts";
 
 /**
@@ -39,8 +39,35 @@ export interface ModelHealth {
     readonly lastCallAt?: string;
     readonly lastFailure?: { readonly at: string; readonly reason: string };
   };
+  /**
+   * How it answers over the same half hour (src/app/modelStats.ts): latency, first token, speed,
+   * throughput, tokens per call, cache. Pilot: "is it slow, or is my prompt huge?" was a question for
+   * `jarvis models stats` in another terminal.
+   */
+  readonly perf?: ModelPerf;
+  /** Requests being answered now (a progress event in the last 20 s and no answer since). */
+  readonly inFlight: { readonly calls: number; readonly longestMs?: number };
   /** Short ids of the runs waiting for this model to answer again, and for its quota window. */
   readonly waiting: { readonly model: readonly string[]; readonly quota: readonly string[] };
+}
+
+export interface ModelPerf {
+  readonly latencyMs?: Percentiles;
+  readonly firstTokenMs?: Percentiles;
+  readonly streamed: number;
+  /** Output tokens per second of answering, per call. */
+  readonly outputPerSecond?: Percentiles;
+  /** Tokens moved per minute over the window: what the model actually got through. */
+  readonly outputPerMinute: number;
+  readonly promptPerMinute: number;
+  readonly prompt: { readonly avg: number; readonly max: number; readonly total: number };
+  readonly output: { readonly avg: number; readonly max: number; readonly total: number };
+  readonly cachedShare: number;
+  readonly prefixReuseP50?: number;
+  /** Answers cut at maxOutput (`finish_reason: length`). */
+  readonly cut: number;
+  readonly successRate: number;
+  readonly retriedCalls: number;
 }
 
 export interface ModelsHealth {
@@ -67,7 +94,7 @@ export interface HealthInput {
         readonly requests: number;
       }
     | undefined;
-  /** `model.call`, `model.retry`, `model.error` of the last half hour. */
+  /** `model.call`, `model.retry`, `model.error`, `model.progress` of the last half hour. */
   readonly events: readonly StoredEvent[];
   /** Runs parked in WAITING_BUDGET, with the model they wait on. */
   readonly parked: ReadonlyArray<{ readonly run: Run; readonly modelId?: string }>;
@@ -75,7 +102,10 @@ export interface HealthInput {
 }
 
 export function modelsHealth(input: HealthInput): ModelsHealth {
-  const models = input.models.map((m) => healthOf(m, input));
+  const stats = new Map(
+    modelStats(input.events.filter((e) => e.kind !== "model.progress")).map((s) => [s.modelId, s]),
+  );
+  const models = input.models.map((m) => healthOf(m, input, stats.get(m.id)));
   const state = models.reduce<HealthState>(
     (worst, m) => (RANK[m.state] > RANK[worst] ? m.state : worst),
     "idle",
@@ -83,7 +113,52 @@ export function modelsHealth(input: HealthInput): ModelsHealth {
   return { state, models, at: input.now.toISOString() };
 }
 
-function healthOf(m: { id: string; pool: string }, input: HealthInput): ModelHealth {
+function perfOf(s: ModelStats): ModelPerf {
+  return {
+    ...(s.latencyMs ? { latencyMs: s.latencyMs } : {}),
+    ...(s.streamed?.firstTokenMs ? { firstTokenMs: s.streamed.firstTokenMs } : {}),
+    streamed: s.streamed?.calls ?? 0,
+    ...(s.outputPerSecond ? { outputPerSecond: s.outputPerSecond } : {}),
+    outputPerMinute: Math.round(s.outputTokens.total / RECENT_MINUTES),
+    promptPerMinute: Math.round(s.promptTokens.total / RECENT_MINUTES),
+    prompt: s.promptTokens,
+    output: s.outputTokens,
+    cachedShare: s.cachedShare,
+    ...(s.prefixReuse ? { prefixReuseP50: s.prefixReuse.p50 } : {}),
+    // finish_reason "length": the answer hit maxOutput
+    cut: s.finishReasons.length ?? 0,
+    successRate: s.successRate,
+    retriedCalls: s.retriedCalls,
+  };
+}
+
+/** Streams of this model that reported progress lately and have not been answered since. */
+function inFlightOf(
+  modelId: string,
+  events: readonly StoredEvent[],
+  now: Date,
+): { calls: number; longestMs?: number } {
+  const key = (e: StoredEvent) => `${e.runId ?? "-"}/${e.stepId ?? "-"}`;
+  const last = new Map<string, StoredEvent>();
+  for (const e of events) {
+    const p = (e.payload ?? {}) as Record<string, unknown>;
+    if (
+      p.modelId !== modelId ||
+      (e.kind !== "model.progress" && e.kind !== "model.call" && e.kind !== "model.error")
+    )
+      continue;
+    const k = key(e);
+    const seen = last.get(k);
+    if (!seen || e.seq > seen.seq) last.set(k, e);
+  }
+  const live = [...last.values()].filter(
+    (e) => e.kind === "model.progress" && now.getTime() - Date.parse(e.ts) < 20_000,
+  );
+  const longest = Math.max(0, ...live.map((e) => num((e.payload as Record<string, unknown>).elapsedMs)));
+  return { calls: live.length, ...(live.length > 0 ? { longestMs: longest } : {}) };
+}
+
+function healthOf(m: { id: string; pool: string }, input: HealthInput, stats?: ModelStats): ModelHealth {
   const pay = (e: StoredEvent) => (e.payload ?? {}) as Record<string, unknown>;
   const mine = input.events.filter((e) => str(pay(e).modelId) === m.id);
   const calls = mine.filter((e) => e.kind === "model.call");
@@ -183,6 +258,8 @@ function healthOf(m: { id: string; pool: string }, input: HealthInput): ModelHea
     pool: m.pool,
     ...(window ? { window } : {}),
     recent,
+    ...(stats ? { perf: perfOf(stats) } : {}),
+    inFlight: inFlightOf(m.id, input.events, input.now),
     waiting: { model: waitingModel, quota: waitingQuota },
   };
 }
@@ -191,9 +268,9 @@ function healthOf(m: { id: string; pool: string }, input: HealthInput): ModelHea
 export function modelsHealthOf(runtime: Runtime, now: Date = new Date()): ModelsHealth {
   const config = runtime.loaded.config;
   const since = new Date(now.getTime() - RECENT_MINUTES * 60_000).toISOString();
-  const events = ["model.call", "model.retry", "model.error"].flatMap((kind) =>
-    runtime.events.list({ kind, since, limit: 20_000 }),
-  );
+  const events = ["model.call", "model.retry", "model.error", "model.progress"]
+    .flatMap((kind) => runtime.events.list({ kind, since, limit: 20_000 }))
+    .sort((a, b) => a.seq - b.seq);
   const parked = runtime.runs.list({ state: ["WAITING_BUDGET"], limit: 200 }).map((run) => {
     const modelId =
       run.waitingFor?.kind === "model"
