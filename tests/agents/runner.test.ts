@@ -7,6 +7,7 @@ import { AgentRegistry } from "../../src/agents/definition.ts";
 import { AgentRuntimeRunner, inParallel } from "../../src/agents/runner.ts";
 import { type BudgetStop, budgetGranted, budgetStopOf, grantBudget } from "../../src/app/budgetStop.ts";
 import type { Runtime } from "../../src/app/runtime.ts";
+import { recordGiven } from "../../src/interaction/answers.ts";
 import { AgenticExecutor, DeterministicExecutor } from "../../src/orchestration/executors.ts";
 import { LocalWorkflowEngine } from "../../src/orchestration/runtime.ts";
 import { BUILTIN_TOOLS } from "../../src/orchestration/tools/builtin.ts";
@@ -834,6 +835,81 @@ context: { maxContext: 8000 }
     expect(second).toContain("First draft");
     expect(second).toContain("never ask it again");
     expect(rt.artifacts.listLatest(run.id, "spec")[0]?.version).toBe(2);
+  });
+
+  it("what a person said when accepting the spec reaches every later agent (pilot: the answers never left the gate)", async () => {
+    sb.write("project/.jarvis/project.yaml", "version: 1\nworkspace: { mode: cwd }\n");
+    rt = await testRuntime(sb, { PATH: process.env.PATH ?? "" });
+    const wf = workflowOf({
+      name: "sa",
+      entry: "spec",
+      steps: [
+        {
+          id: "spec",
+          kind: "agentic",
+          agent: "specification",
+          outputs: ["spec"],
+          transitions: { onSuccess: "approve" },
+        },
+        { id: "approve", kind: "approval", artifactType: "spec", transitions: { onSuccess: "impact" } },
+        {
+          id: "impact",
+          kind: "agentic",
+          agent: "impact",
+          inputs: ["spec"],
+          outputs: ["impact"],
+          transitions: { onSuccess: "DONE" },
+        },
+      ],
+    });
+    const engine = engineWith(rt, wf);
+    server.respond((req) => {
+      const system = (req.body.messages as Array<{ content: string }>)[0]?.content ?? "";
+      if (system.includes("# Agent: specification"))
+        return completion(
+          JSON.stringify({
+            summary: "Slots on the order form.",
+            title: "Delivery slots",
+            goals: ["Slots"],
+            requirements: [{ id: "R1", text: "Slots come from logistics-api", acceptance: ["shown"] }],
+            openQuestions: ["What if logistics-api is down?", "Which wording?"],
+            outcome: "ok",
+          }),
+        );
+      return completion("not a document");
+    });
+    const run = createRun(rt, "sa");
+    expect((await engine.execute(run.id, { owner: "cli:t" })).run.state).toBe("WAITING_HUMAN");
+    const spec = rt.artifacts.listLatest(run.id, "spec")[0];
+    if (!spec) throw new Error("no spec");
+    rt.artifacts.approve({
+      runId: run.id,
+      stepId: "approve",
+      artifactId: spec.artifactId,
+      version: 1,
+      actor: ACTOR,
+      decision: "approve",
+      comment: "Keep the slots for 3 days.",
+    });
+    recordGiven(
+      rt,
+      spec,
+      [
+        { question: "What if logistics-api is down?", mode: "answer", text: "Use the local schedule" },
+        { question: "Which wording?", mode: "analyst" },
+      ],
+      ACTOR.id,
+    );
+    await engine.execute(run.id, { owner: "cli:t" });
+    const impact = server.requests.find((r) =>
+      ((r.body.messages as Array<{ content: string }>)[0]?.content ?? "").includes("# Agent: impact"),
+    );
+    const text = JSON.stringify(impact?.body.messages);
+    expect(text).toContain("# Decided by a human when accepting documents (binding)");
+    expect(text).toContain("spec/spec.json@1, accepted by");
+    expect(text).toContain("Keep the slots for 3 days.");
+    expect(text).toContain("A: Use the local schedule");
+    expect(text).toContain("open, for the analyst");
   });
 
   it("gives the next agent the code earlier steps read, as it is now (pilot: the same file re-read by four agents)", async () => {

@@ -4,6 +4,7 @@ import { z } from "zod";
 import { stableJson } from "../context/serialize.ts";
 import type { KnowledgeConfig } from "../core/config/schema.ts";
 import type { ArtifactVersion } from "../core/domain/artifact.ts";
+import { ANSWERS, givenFor, SUGGESTIONS } from "../interaction/answers.ts";
 import { renderPackage } from "../knowledge/package.ts";
 import type { EngineeringContextPackage } from "../knowledge/resolver.ts";
 import type { Message } from "../models/types.ts";
@@ -133,11 +134,13 @@ export function buildBaseMessages(input: BuildInput): Message[] {
     outputContract(def),
   ].join("\n");
   const clarifications = describeClarifications(ctx);
+  const decided = describeAcceptances(ctx);
   const review = humanReviewOf(ctx, def);
   const l2 = [
     loopReasons ? `# Why this step runs again\n${loopReasons}` : "",
     review ? review.instructions : "",
     clarifications ? `# Clarifications decided with a human (binding)\n${clarifications}` : "",
+    decided ? `# Decided by a human when accepting documents (binding)\n${decided}` : "",
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -302,6 +305,39 @@ function describeClarifications(ctx: StepContext): string | undefined {
     }
   }
   return lines.join("\n");
+}
+
+/**
+ * What a person said when accepting a document — the comment of «Accept», the answers to its open
+ * questions given on the page — for every later step. Pilot: a spec was accepted with its open questions
+ * answered in the comment, and impact, plan and implementation never saw it (only a «Send back» reached
+ * an agent, and only the one sent back to).
+ */
+export function describeAcceptances(ctx: StepContext): string | undefined {
+  const lines: string[] = [];
+  for (const a of ctx.runtime.artifacts.listLatest(ctx.run.id)) {
+    if (a.type === ANSWERS || a.type === SUGGESTIONS) continue;
+    const accepted = ctx.runtime.artifacts
+      .approvalsFor(a.artifactId, a.version)
+      .find((x) => x.decision === "approve");
+    if (!accepted) continue;
+    const given = givenFor(ctx.runtime, a) ?? [];
+    const comment = (accepted.comment ?? "").replace(/^approved in run \S+(: )?/, "").trim();
+    if (!comment && given.length === 0) continue;
+    lines.push(`- ${a.type}/${a.name}@${a.version}, accepted by ${accepted.actor.id}:`);
+    if (comment)
+      lines.push(
+        ...clip(comment, 6000)
+          .split("\n")
+          .map((l) => `  ${l}`),
+      );
+    for (const g of given)
+      lines.push(
+        `  Q: ${g.question}`,
+        `  A: ${g.mode === "analyst" ? "open, for the analyst — do not decide it; keep today's behaviour and say so" : g.mode === "scope" ? "out of the task's scope" : (g.text ?? "")}`,
+      );
+  }
+  return lines.length > 0 ? lines.join("\n") : undefined;
 }
 
 function describeLoopReasons(ctx: StepContext): string | undefined {
