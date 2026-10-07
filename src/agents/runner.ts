@@ -322,8 +322,11 @@ export class AgentRuntimeRunner implements AgentRunner {
     let finalAnswer: string | undefined;
     // an agent that changes the workspace and only reads: told to start, then stopped (pilot: an
     // implementation read for 64 model calls and 268 tools, trimming and reading back, and edited nothing)
+    // the implementation only: the agents of verify (tests, telemetry) may rightly find nothing to change
+    // (pilot: both were told to «start the plan step» while they checked)
     const writer =
-      toolDefs.some((t) => WRITE_TOOLS.has(t.name)) || def.capabilities.some((c) => WRITE_TOOLS.has(c));
+      def.output.type === "implementation" &&
+      (toolDefs.some((t) => WRITE_TOOLS.has(t.name)) || def.capabilities.some((c) => WRITE_TOOLS.has(c)));
     let lastEdit = modelCalls;
     for (;;) {
       if (ctx.cancelRequested()) {

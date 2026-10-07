@@ -317,7 +317,8 @@ export const BUILTIN_TOOLS: Record<string, DeterministicTool> = {
       }
       const related =
         name.startsWith("test") && /\bjest\b/.test(command)
-          ? ` --findRelatedTests ${code.map((f) => (dir ? f.slice(dir.length + 1) : f)).join(" ")}`
+          ? // no test relates to the changed files: not a failure (pilot: jest exited 1 on «0 matches»)
+            ` --passWithNoTests --findRelatedTests ${code.map((f) => (dir ? f.slice(dir.length + 1) : f)).join(" ")}`
           : "";
       const r = await ctx.tools.invoke(`project.${name}`, related ? { args: related.trim() } : {});
       results.push({

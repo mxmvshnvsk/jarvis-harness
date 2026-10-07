@@ -187,6 +187,7 @@ describe("worktree workspace end to end (ADR-0003)", () => {
         "tools:",
         "  local:",
         '    test-pkg: "cd pkg && echo tests ran in pkg && exit 3"',
+        '    test-jest: "cd pkg && echo jest"',
         '    typecheck-other: "cd other && echo never"',
         '    lint: "echo not a check"',
       ].join("\n"),
@@ -217,15 +218,18 @@ steps:
     const runId = rt.runs.list({ includeTerminal: true })[0]?.id as string;
     const checks = JSON.parse(rt.artifacts.text(rt.artifacts.listLatest(runId, "checks")[0] as never)) as {
       changed: string[];
-      results: Array<{ check: string; ok: boolean; skipped?: string; tail?: string }>;
+      results: Array<{ check: string; command: string; ok: boolean; skipped?: string; tail?: string }>;
       reasons: Array<{ summary: string }>;
     };
     rt.close();
     expect(checks.changed).toEqual(["pkg/a.ts"]);
     expect(checks.results.map((r) => [r.check, r.ok, r.skipped ?? ""])).toEqual([
       ["test-pkg", false, ""],
+      ["test-jest", true, ""],
       ["typecheck-other", true, "no changed code in its scope"],
     ]);
+    // jest on the related tests only, and no related test is not a failure
+    expect(checks.results[1]?.command).toBe("cd pkg && echo jest --passWithNoTests --findRelatedTests a.ts");
     expect(checks.reasons[0]?.summary).toContain(
       "test-pkg failed: $ cd pkg && echo tests ran in pkg && exit 3 | tests ran in pkg",
     );
