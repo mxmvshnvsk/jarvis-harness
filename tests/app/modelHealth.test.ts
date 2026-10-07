@@ -172,7 +172,7 @@ describe("how the models are doing", () => {
     expect(modelsBadge(h)).toMatch(/^∞ until /);
     expect(modelsSummary(h)).toContain("flash: unlimited hours until");
     expect(modelsPopover(h).value).toContain("∞ unlimited (its pool has no limits)");
-    expect(modelsPopover(h).value).toContain("1990k / 2000k input");
+    expect(modelsPopover(h).value).toContain("2.0m / 2.0m input");
 
     // outside the hours: the window counts again, and when they begin is said
     const day = modelsHealth(

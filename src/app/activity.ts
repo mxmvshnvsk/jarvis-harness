@@ -257,7 +257,12 @@ export function clock(ms: number): string {
   return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${sec}` : `${m}:${sec}`;
 }
 
+/** Token counts for people: `950`, `4.2k`, `54k`, `15.6m` (pilot: `in 15799k` read as a phone number). */
 export function kilo(n: number): string {
+  if (n >= 999_500) {
+    const m = n / 1_000_000;
+    return m >= 100 ? `${Math.round(m)}m` : `${m.toFixed(1)}m`;
+  }
   return n >= 10_000 ? `${Math.round(n / 1000)}k` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
 }
 
