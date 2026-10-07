@@ -156,6 +156,30 @@ describe("jarvis ui: pages", () => {
     expect(rules.match(/#[0-9A-Fa-f]{6}\b/g) ?? []).toEqual([]);
   });
 
+  it("the models indicator: a dot in the header, its state and popover from /models.json", async () => {
+    const page = await get("/", authed());
+    expect(page.body).toContain('aria-controls="models-pop"');
+    expect(page.body).toContain('<div id="models-pop" class="pop" role="dialog" aria-label="Models" hidden>');
+    expect((await get("/models.json")).status).toBe(403);
+    const res = await get("/models.json", authed());
+    expect(res.status).toBe(200);
+    expect(String(res.headers["content-type"])).toContain("application/json");
+    const data = JSON.parse(res.body) as { state: string; title: string; html: string };
+    expect(["ok", "busy", "down", "idle"]).toContain(data.state);
+    expect(data.title).toMatch(/^Models: /);
+    expect(data.html).toContain("jarvis models stats");
+  });
+
+  it("a finished run keeps an empty card slot, so the live refresh takes the spinner away", async () => {
+    const { run } = seedWaiting("Order form: phone number mask", JSON.stringify({ title: "Mask" }));
+    rt.runs.transition(run.id, "RUNNING");
+    rt.runs.transition(run.id, "COMPLETED", { reason: "workflow done" });
+    const page = await get(`/runs/${run.id.replace(/^run_/, "").slice(0, 8)}`, authed());
+    expect(page.status).toBe(200);
+    expect(page.body).toContain('<div data-live="card" hidden></div>');
+    expect(page.body).not.toContain('class="spin"');
+  });
+
   it("runs: what waits for you first, with what it waits for and a link", async () => {
     const { run } = seedWaiting(
       "Billing: rounding in invoice totals",

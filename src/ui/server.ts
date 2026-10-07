@@ -9,6 +9,7 @@ import {
   requestRerun,
   rerunRequested,
 } from "../app/decide.ts";
+import { modelsHealthOf } from "../app/modelHealth.ts";
 import type { Runtime } from "../app/runtime.ts";
 import { type OpenIn, reviewFiles } from "../cli/checkout.ts";
 import type { Actor } from "../core/domain/actor.ts";
@@ -27,6 +28,8 @@ import {
   errorContent,
   forbiddenPage,
   layout,
+  modelsPopover,
+  modelsSummary,
   repoPicker,
   runContent,
   runsContent,
@@ -408,6 +411,21 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
           back: { href: `/runs/${shortRunId(run.id)}`, label: `run ${shortRunId(run.id)}` },
         },
         artifactContent(model, extras),
+      );
+    }
+    if (path === "/models.json") {
+      // the header's indicator: polled by the page and on every event of the journal
+      const health = modelsHealthOf(runtime);
+      return send(
+        r,
+        200,
+        JSON.stringify({
+          state: health.state,
+          title: modelsSummary(health),
+          html: modelsPopover(health).value,
+        }),
+        "application/json; charset=utf-8",
+        { "Cache-Control": "no-store" },
       );
     }
     if (path === "/live") {

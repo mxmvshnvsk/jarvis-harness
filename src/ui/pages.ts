@@ -1,5 +1,6 @@
 import { type Activity, clock, kilo } from "../app/activity.ts";
 import { duration } from "../app/journey.ts";
+import type { HealthState, ModelHealth, ModelsHealth } from "../app/modelHealth.ts";
 import type { Change } from "../cli/checkout.ts";
 import { toolMix } from "../cli/progress.ts";
 import { documentToMarkdown } from "../cli/render.ts";
@@ -80,8 +81,12 @@ export function layout(chrome: Chrome, content: Html): string {
 ${chrome.back ? html`<a class="back" href="${chrome.back.href}">← ${chrome.back.label}</a>` : ""}
 ${chrome.repos ?? ""}
 ${chrome.page === "runs" ? html`<nav aria-label="Pages"><a href="/" aria-current="page">Runs</a></nav>` : ""}
+<div class="status">
+<div class="models-wrap"><button type="button" class="models" data-models aria-expanded="false" aria-controls="models-pop" title="Models: checking…"><span class="dot" data-state="idle" aria-hidden="true"></span><span>models</span></button>
+<div id="models-pop" class="pop" role="dialog" aria-label="Models" hidden><div data-models-body><p class="muted">Checking the models…</p></div></div></div>
 <span class="live" data-state="connecting" role="status"><span class="dot" aria-hidden="true"></span><span class="label">connecting…</span><span aria-hidden="true">·</span><span>${chrome.address}</span></span>
 <button type="button" class="theme" data-theme-switch aria-label="Theme (switch)"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.25" fill="none" stroke="currentColor" stroke-width="1.5"></circle><path d="M8 1.75a6.25 6.25 0 0 1 0 12.5z" fill="currentColor"></path></svg><span class="label">Auto</span></button>
+</div>
 </div></header>
 <main id="main" class="wrap">
 ${content}
@@ -443,7 +448,8 @@ ${card.decision ? "" : terminalHint(card, page.terminal, page.run)}
 function nowHtml(page: RunPage, now: number): Html {
   const a = page.activity;
   if (!a?.step || !page.leaseLive) {
-    if (page.run.state !== "RUNNING") return html``;
+    // an empty region, not none: the live refresh replaces it, so a finished run's spinner goes away
+    if (page.run.state !== "RUNNING") return html`<div data-live="card" hidden></div>`;
     return html`<section class="panel now" aria-label="Now" data-live="card"><div class="row"><span class="warn">⏸ no process drives this run (interrupted or crashed)</span></div>
 <div class="actions"><span class="hint">Go on with <code>jarvis resume ${shortRunId(page.run.id)}</code></span><button type="button" class="btn" data-copy="jarvis resume ${shortRunId(page.run.id)}">Copy command</button></div></section>`;
   }
@@ -709,3 +715,71 @@ export function forbiddenPage(): string {
 }
 
 export { escapeHtml };
+
+/* ---- the models indicator (ADR-0023): a dot in the header, the details in a popover ---- */
+
+const HEALTH: Record<HealthState, { label: string; pill: string }> = {
+  ok: { label: "ok", pill: "ok" },
+  busy: { label: "busy", pill: "wait" },
+  down: { label: "down", pill: "bad" },
+  idle: { label: "idle", pill: "plain" },
+};
+
+/** One line for the indicator's tooltip: the worst model and why. */
+export function modelsSummary(h: ModelsHealth): string {
+  if (h.models.length === 0) return "Models: none configured";
+  const worst = h.models.find((m) => m.state === h.state);
+  const why = worst?.reasons[0];
+  return `Models: ${HEALTH[h.state].label}${worst && h.state !== "ok" && h.state !== "idle" ? ` — ${worst.id}${why ? `: ${why}` : ""}` : ""}`;
+}
+
+const pct = (share: number) => `${Math.round(share * 100)}%`;
+const wall = (ts: string) => new Date(ts).toTimeString().slice(0, 5);
+
+function modelHtml(m: ModelHealth): Html {
+  const w = m.window;
+  const used = w?.share !== undefined ? Math.min(100, Math.round(w.share * 100)) : undefined;
+  const r = m.recent;
+  const lineOf = [
+    `${r.calls} call${r.calls === 1 ? "" : "s"}`,
+    ...(r.failed > 0 ? [`${r.failed} failed`] : []),
+    ...(r.retries > 0 ? [`${r.retries} retr${r.retries === 1 ? "y" : "ies"}`] : []),
+    ...(r.latencyP50Ms ? [`p50 ${duration(r.latencyP50Ms)}`] : []),
+    ...(r.lastCallAt ? [`last ${wall(r.lastCallAt)}`] : []),
+  ].join(" · ");
+  const waiting = [
+    ...m.waiting.model.map((id) => ({ id, why: "the model" })),
+    ...m.waiting.quota.map((id) => ({ id, why: "quota" })),
+  ];
+  return html`<li class="mh">
+<div class="row"><span class="dot" data-state="${m.state}" aria-hidden="true"></span><b class="mono">${m.id}</b><span class="pill ${HEALTH[m.state].pill}">${HEALTH[m.state].label}</span></div>
+${m.reasons.length > 0 ? html`<ul class="why">${m.reasons.map((x) => html`<li>${x}</li>`)}</ul>` : ""}
+${
+  w
+    ? html`<div class="win">${used !== undefined ? html`<div class="bar" role="img" aria-label="quota window ${used}% used"><span class="${w.share !== undefined && w.share >= 1 ? "full" : w.share !== undefined && w.share >= w.soft ? "soft" : ""}" style="width:${used}%"></span></div>` : ""}
+<span class="meta">${kilo(w.outputTokens)}${w.outputLimit ? ` / ${kilo(w.outputLimit)}` : ""} output tok · ${w.requests}${w.requestLimit ? ` / ${w.requestLimit}` : ""} requests · ${w.minutes} min window${w.share !== undefined ? ` · ${pct(w.share)}` : ""}</span></div>`
+    : ""
+}
+<span class="meta">last ${r.minutes} min: ${lineOf}</span>
+${r.lastFailure ? html`<span class="meta">last failure ${wall(r.lastFailure.at)} · ${r.lastFailure.reason}</span>` : ""}
+${
+  waiting.length > 0
+    ? html`<span class="meta">waiting: ${join(
+        waiting.map((x) => html`<a href="/runs/${x.id}">${x.id}</a> (${x.why})`),
+        ", ",
+      )}</span>`
+    : ""
+}
+</li>`;
+}
+
+/** The popover's body: each model, then where the full numbers are. */
+export function modelsPopover(h: ModelsHealth): Html {
+  return html`<div class="pop-head"><b>Models</b><span class="pill ${HEALTH[h.state].pill}">${HEALTH[h.state].label}</span><span class="meta">at ${wall(h.at)}</span></div>
+${
+  h.models.length > 0
+    ? html`<ul class="mhs">${h.models.map(modelHtml)}</ul>`
+    : html`<p class="muted">No models configured — add one to ~/.jarvis/config.yaml.</p>`
+}
+<p class="hint">In the terminal: <code>jarvis models stats</code> (latency, failures, tokens) · <code>jarvis models list</code> (pools, probes)</p>`;
+}

@@ -16,7 +16,7 @@ const LIGHT = `:root{
   --on-fill:#FFFFFF;--info-bg:#E6ECFB;--wait-bg:#FBEFD9;--wait:#7A4100;
   --ok:#1E7A3E;--ok-bg:#E7F4EA;--ok-ink:#14552B;--ok-fill:#1E7A3E;
   --bad:#B3261E;--bad-bg:#FBECEA;--chip:#F3F1EC;--focus-row:#FBF3E4;--track:#ECEAE4;--border-btn:#C9C6BE;
-  --spin-track:#C9D5F5;--code-on-banner:rgba(255,255,255,.6);
+  --spin-track:#C9D5F5;--code-on-banner:rgba(255,255,255,.6);--warn-dot:#C27A12;--shadow:rgba(20,20,18,.14);
   --sans:'IBM Plex Sans',system-ui,-apple-system,'Segoe UI',sans-serif;
   --mono:'IBM Plex Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
 }`;
@@ -29,7 +29,7 @@ const DARK = `
   --on-fill:#FFFFFF;--info-bg:#1E2740;--wait-bg:#36270F;--wait:#F2B861;
   --ok:#6CCB88;--ok-bg:#16301E;--ok-ink:#9BE0AF;--ok-fill:#23793F;
   --bad:#FF948A;--bad-bg:#3A1B18;--chip:#272824;--focus-row:#2E2512;--track:#2C2D29;--border-btn:#4A4B44;
-  --spin-track:#2E3A5C;--code-on-banner:rgba(0,0,0,.25);
+  --spin-track:#2E3A5C;--code-on-banner:rgba(0,0,0,.25);--warn-dot:#F2B861;--shadow:rgba(0,0,0,.5);
 `;
 
 export const STYLE = `
@@ -56,13 +56,34 @@ a{color:var(--accent)}a:hover{color:var(--accent-dark)}
 .repo{display:flex;align-items:center;gap:8px;font-size:14px;color:var(--muted)}
 select,textarea,input[type=text]{font-family:inherit;font-size:14px;color:var(--ink);border:1px solid var(--field-line);border-radius:6px;background:var(--panel)}
 select{height:36px;padding:0 8px;max-width:60vw}
-.live{margin-left:auto;display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:12px;color:var(--muted)}
+.status{margin-left:auto;display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px}
+.live{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:12px;color:var(--muted)}
 .dot{width:8px;height:8px;border-radius:4px;background:var(--faint)}
 .live[data-state=live] .dot{background:var(--ok)}
 .live[data-state=lost] .dot{background:var(--bad)}
 .theme{display:inline-flex;align-items:center;gap:6px;min-height:36px;padding:0 10px;border:1px solid var(--border-btn);border-radius:6px;background:var(--panel);color:var(--ink-2);font-family:inherit;font-size:13px;cursor:pointer}
 .theme:hover{border-color:var(--ink-2);color:var(--ink)}
 .theme svg{width:14px;height:14px}
+.dot[data-state=ok]{background:var(--ok)}
+.dot[data-state=busy]{background:var(--warn-dot)}
+.dot[data-state=down]{background:var(--bad)}
+.dot[data-state=idle]{background:var(--faint)}
+.models-wrap{position:relative}
+.models{display:inline-flex;align-items:center;gap:8px;min-height:36px;padding:0 10px;border:1px solid var(--border-btn);border-radius:6px;background:var(--panel);color:var(--ink-2);font-family:var(--mono);font-size:12px;cursor:pointer}
+.models:hover,.models[aria-expanded=true]{border-color:var(--ink-2);color:var(--ink)}
+.models .dot[data-state=down]{box-shadow:0 0 0 3px var(--bad-bg)}
+.pop{position:absolute;right:0;top:calc(100% + 8px);width:min(440px,calc(100vw - 32px));max-height:min(70vh,640px);overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:12px;box-shadow:0 16px 40px var(--shadow);padding:14px 16px;z-index:30}
+.pop[hidden]{display:none}
+.pop>div{display:flex;flex-direction:column;gap:12px}
+.pop-head{display:flex;align-items:center;gap:10px}
+.pop-head .meta{margin-left:auto}
+.mhs{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:12px}
+.mh{display:flex;flex-direction:column;gap:6px;padding-top:12px;border-top:1px solid var(--line-soft)}
+.mh:first-child{border-top:0;padding-top:0}
+.mh .why{margin:0;padding-left:18px;font-size:13px;line-height:19px;color:var(--ink-2)}
+.win{display:flex;flex-direction:column;gap:4px}
+.bar>span.soft{background:var(--warn-dot)}
+.bar>span.full{background:var(--bad)}
 main.wrap{padding-top:28px;padding-bottom:48px;display:flex;flex-direction:column;gap:28px}
 h1{margin:0;font-size:30px;line-height:38px;font-weight:600;overflow-wrap:anywhere}
 h2{margin:0;font-size:18px;font-weight:600}
@@ -209,7 +230,8 @@ tr:last-child td{border-bottom:0}
   h1{font-size:24px;line-height:31px}
   .card{flex-basis:100%;padding:16px}
   .decision{padding:18px}
-  .live{margin-left:0}
+  .status{margin-left:0}
+  .pop{position:fixed;left:16px;right:16px;width:auto;max-height:calc(100vh - 120px)}
   th,td{padding:10px 14px}
   /* the diff scrolls sideways on a phone; a comment under a line stays in view */
   .thread{padding-left:16px;position:sticky;left:0;width:calc(100vw - 34px)}
@@ -240,8 +262,13 @@ export const SCRIPT = `
       if (!res.ok) return;
       const next = new DOMParser().parseFromString(await res.text(), 'text/html');
       for (const el of document.querySelectorAll('[data-live]')) {
-        const fresh = next.querySelector('[data-live="' + el.dataset.live + '"]');
-        if (!fresh) continue;
+        let fresh = next.querySelector('[data-live="' + el.dataset.live + '"]');
+        if (!fresh) {
+          // the region is gone from the fresh page (a finished run has no "now" card): keep its slot empty
+          fresh = document.createElement('div');
+          fresh.dataset.live = el.dataset.live;
+          fresh.hidden = true;
+        }
         if (el.contains(document.activeElement) && document.activeElement !== document.body) continue;
         if (el.querySelector('textarea') && [...el.querySelectorAll('textarea')].some((t) => t.value)) continue;
         el.replaceWith(fresh);
@@ -261,10 +288,13 @@ export const SCRIPT = `
     const source = new EventSource('/live' + (runId ? '?run=' + encodeURIComponent(runId) : ''));
     source.onopen = () => say('live', 'live');
     source.onerror = () => say('lost', 'reconnecting…');
+    let modelsSoon;
     source.addEventListener('journal', (e) => {
       let data = {};
       try { data = JSON.parse(e.data); } catch {}
       if (!runId || (data.runs || []).includes(runId)) refresh();
+      clearTimeout(modelsSoon);
+      modelsSoon = setTimeout(() => refreshModels(), 1000);
     });
   }
   const tick = Number(body.dataset.tick || 0);
@@ -346,6 +376,48 @@ export const SCRIPT = `
         document.cookie = 'jarvis_theme=' + next + '; Path=/; SameSite=Strict; Max-Age=31536000';
       }
       showTheme(next);
+    });
+  }
+
+  // the models indicator: a dot that says how the models are doing; details in a popover on click
+  const modelsButton = document.querySelector('[data-models]');
+  const modelsPop = document.getElementById('models-pop');
+  let modelsBusy = false;
+  async function refreshModels() {
+    if (!modelsButton || modelsBusy) return;
+    modelsBusy = true;
+    try {
+      const res = await fetch('/models.json', { credentials: 'same-origin', cache: 'no-store' });
+      if (!res.ok) return;
+      const data = await res.json();
+      modelsButton.querySelector('.dot').dataset.state = data.state;
+      modelsButton.title = data.title;
+      modelsButton.setAttribute('aria-label', data.title);
+      const body = modelsPop && modelsPop.querySelector('[data-models-body]');
+      if (body) body.innerHTML = data.html;
+    } catch {
+      /* the next tick tries again */
+    } finally {
+      modelsBusy = false;
+    }
+  }
+  const setPop = (open) => {
+    if (!modelsButton || !modelsPop) return;
+    modelsPop.hidden = !open;
+    modelsButton.setAttribute('aria-expanded', String(open));
+    // on a phone the popover is fixed to the window's width, right under the button (the header wraps)
+    modelsPop.style.top = open && window.innerWidth <= 640 ? modelsButton.getBoundingClientRect().bottom + 8 + 'px' : '';
+    if (open) refreshModels();
+  };
+  if (modelsButton) {
+    refreshModels();
+    setInterval(refreshModels, 10000);
+    modelsButton.addEventListener('click', () => setPop(modelsPop.hidden));
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && modelsPop && !modelsPop.hidden) { setPop(false); modelsButton.focus(); }
+    });
+    document.addEventListener('click', (e) => {
+      if (modelsPop && !modelsPop.hidden && !e.target.closest('.models-wrap')) setPop(false);
     });
   }
 
