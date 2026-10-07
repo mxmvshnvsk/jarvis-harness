@@ -23,6 +23,7 @@ const gitEnv = {
   GIT_COMMITTER_EMAIL: "t@t",
 };
 const started: Array<{ module: string; note?: string }> = [];
+const adopted: string[] = [];
 
 const git = (...args: string[]) =>
   execFileSync("git", args, { cwd: sb.project, encoding: "utf8", env: { ...process.env, ...gitEnv } });
@@ -59,6 +60,10 @@ function stubLauncher(): Launcher {
     get: (id) => launches.find((l) => l.id === id),
     drives: () => false,
     resume: () => false,
+    adopt: (run) => {
+      adopted.push(run.id);
+      return true;
+    },
     tend: () => {},
     tail: () => "",
   };
@@ -266,5 +271,55 @@ describe("Knowledge → Modules", () => {
         what: "review what the research found",
       }),
     );
+  });
+
+  it("a research parked on the quota window: paused, not failed — when it goes on, and Resume now", async () => {
+    const run = rt.runs.create({
+      task: "Map the module `src/orders` of this repository for onboarding.",
+      workflow: "onboard-module",
+      owner: DEV,
+      workspace: { mode: "cwd", repoRoot: sb.project, path: sb.project, baseRef: "HEAD" },
+      dataClass: "internal",
+    });
+    rt.artifacts.put({
+      runId: run.id,
+      type: "module-input",
+      name: "module.json",
+      content: JSON.stringify({ module: "src/orders" }),
+      provenance: { kind: "tool", capability: "onboard.module" },
+    });
+    rt.runs.update(run.id, { currentStep: "map", currentIteration: 1 });
+    rt.runs.transition(run.id, "RUNNING");
+    const reason =
+      'model flash: budget admission denied for pool "corp": output tokens: 14155 used of 30000 in window, need 16000';
+    rt.events.emit({
+      kind: "model.error",
+      runId: run.id,
+      stepId: "map",
+      payload: { modelId: "flash", kind: "quota_exhausted", message: reason },
+    });
+    rt.runs.transition(run.id, "WAITING_BUDGET", { reason });
+    rt.checkpoints.save({
+      runId: run.id,
+      stepId: "map",
+      iteration: 1,
+      kind: "suspend",
+      state: { resumeAfter: new Date(Date.now() + 7 * 60_000).toISOString() },
+    });
+    const mod = await page("/knowledge/modules?path=src/orders");
+    expect(mod).toContain("waits for quota");
+    expect(mod).toContain("Paused, not failed");
+    expect(mod).toContain("output tokens: 14155 used of 30000 in window");
+    const short = run.id.replace(/^run_/, "").slice(0, 8);
+    const runPage = await page(`/runs/${short}`);
+    expect(runPage).toContain("paused, not failed");
+    expect(runPage).toContain("Waits for the quota window of pool <code>corp</code>");
+    expect(runPage).toContain("the run waits"); // the feed says it waits, not "gave up"
+    expect(runPage).not.toContain("gave up");
+    const runs = await page("/");
+    expect(runs).toContain("waits for the quota window of corp");
+    const r = await post(`/runs/${short}/resume`, [["back", "/knowledge/modules?path=src%2Forders"]]);
+    expect(r.location).toBe("/knowledge/modules?path=src%2Forders&notice=resumed");
+    expect(adopted).toEqual([run.id]);
   });
 });

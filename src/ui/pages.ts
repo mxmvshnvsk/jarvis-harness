@@ -1,5 +1,6 @@
 import { type Activity, clock, kilo } from "../app/activity.ts";
 import { type BudgetStop, sourceOf, unitOf } from "../app/budgetStop.ts";
+import { type BudgetWait, whenText } from "../app/budgetWait.ts";
 import { duration } from "../app/journey.ts";
 import type { McpHealth, McpServerHealth } from "../app/mcpHealth.ts";
 import type { HealthState, ModelHealth, ModelPerf, ModelsHealth } from "../app/modelHealth.ts";
@@ -172,7 +173,8 @@ function statePill(run: Run, extra?: string): Html {
             ? "plain"
             : "wait";
   const glyph = { ok: "✓", bad: "✗", info: "◌", plain: "–", wait: "⏸" }[tone];
-  return html`<span class="pill ${tone}">${glyph} ${s}${extra ? ` · ${extra}` : ""}</span>`;
+  const label = s === "WAITING_BUDGET" ? "PAUSED · waits for quota" : s;
+  return html`<span class="pill ${tone}">${glyph} ${label}${extra ? ` · ${extra}` : ""}</span>`;
 }
 
 function changeLine(c: Change): Html {
@@ -401,8 +403,13 @@ ${
 ${launches.map((l) => launchHtml(l, now, start?.homeDir ?? ""))}
 ${
   page.running.length > 0 || launches.length > 0
-    ? page.running.map(
-        (r) => html`<div class="panel running">
+    ? page.running.map((r) =>
+        r.wait
+          ? html`<div class="panel running paused">
+<div class="what"><a href="${runHref(r.run)}">${firstLine(r.run.task)}</a><span class="meta">${r.run.workflow} · ${shortRunId(r.run.id)} · ⏸ ${r.wait.kind === "model" ? `waits for the model ${r.wait.model ?? ""}` : `waits for the quota window${r.wait.pool ? ` of ${r.wait.pool}` : ""}`} · goes on ${whenText(r.wait.resumeAfter, now)}</span></div>
+<a href="${runHref(r.run)}">Open</a>
+</div>`
+          : html`<div class="panel running">
 <div class="what"><a href="${runHref(r.run)}">${firstLine(r.run.task)}</a><span class="meta">${r.run.workflow} · ${shortRunId(r.run.id)} · ${activityText(r.activity, r.position)}</span></div>
 <div class="budget">${toolBudget(r.activity, now)}</div>
 <a href="${runHref(r.run)}">Follow</a>
@@ -604,6 +611,27 @@ ${card.decision ? "" : terminalHint(card, page.terminal, page.run)}
 </section>`;
 }
 
+/** A run parked on a quota window or a model: not failed — when it goes on, and who resumes it. */
+function waitHtml(page: RunPage, wait: BudgetWait, now: number, actions?: Actions): Html {
+  const short = shortRunId(page.run.id);
+  const what =
+    wait.kind === "model"
+      ? html`Waits for the model <code>${wait.model ?? "?"}</code> to answer again`
+      : html`Waits for the quota window${wait.pool ? html` of pool <code>${wait.pool}</code>` : ""}`;
+  const who = page.driven
+    ? html`<span class="hint">This page resumes it then — keep <code>jarvis ui</code> open.</span>`
+    : html`<span class="hint">No process waits for it: resume it here, or <code>jarvis resume ${short}</code>.</span>`;
+  return html`<section class="panel decision budgetwait" aria-labelledby="wait-h" data-live="card">
+<div class="row"><span class="pill wait">⏸ paused, not failed</span><h2 id="wait-h">${what}</h2></div>
+<p>Goes on by itself at <b>${whenText(wait.resumeAfter, now)}</b>.${wait.detail ? html` <span class="hint">Window: ${wait.detail}.</span>` : ""}</p>
+<div class="actions">${who}${
+    actions
+      ? html`<form method="post" action="/runs/${encodeURIComponent(short)}/resume"><input type="hidden" name="t" value="${actions.token}"><button type="submit" class="btn">Resume now</button></form><span class="hint">tries at once — if the window is still full, it waits again</span>`
+      : html`<button type="button" class="btn" data-copy="jarvis resume ${short}">Copy command</button>`
+  }</div>
+</section>`;
+}
+
 function nowHtml(page: RunPage, now: number): Html {
   const a = page.activity;
   if (!a?.step || !page.leaseLive) {
@@ -655,7 +683,7 @@ export function runContent(page: RunPage, now: number, actions?: Actions, notice
 <div class="row">${statePill(r, extra)}<span class="meta" style="font-size:13px">${meta}</span></div>
 <h1>${firstLine(r.task, 300)}</h1>
 ${rest ? html`<p class="muted" style="white-space:pre-wrap">${cut(rest, 600)}</p>` : ""}
-${r.stateReason && r.state !== "RUNNING" ? html`<p class="muted">${r.stateReason}</p>` : ""}
+${r.stateReason && r.state !== "RUNNING" && r.state !== "WAITING_BUDGET" ? html`<p class="muted">${r.stateReason}</p>` : ""}
 </div>
 ${notice ?? ""}
 <div class="cols">
@@ -664,7 +692,7 @@ ${notice ?? ""}
 <ol style="margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:2px">${page.steps.map((s) => stepRow(s, now))}</ol>
 </section>
 <div class="mainc">
-${card ? (card.kind === "loop" ? loopCardHtml(card, page, actions) : card.kind === "approval" ? approvalCardHtml(card, page) : card.kind === "budget" ? budgetCardHtml(card, page, actions) : otherCardHtml(card.what, page)) : nowHtml(page, now)}
+${card ? (card.kind === "loop" ? loopCardHtml(card, page, actions) : card.kind === "approval" ? approvalCardHtml(card, page) : card.kind === "budget" ? budgetCardHtml(card, page, actions) : otherCardHtml(card.what, page)) : page.wait ? waitHtml(page, page.wait, now, actions) : nowHtml(page, now)}
 ${feedHtml(page.feed)}
 <section class="panel arts" aria-labelledby="artifacts" data-live="arts">
 <h2 id="artifacts">Artifacts</h2>

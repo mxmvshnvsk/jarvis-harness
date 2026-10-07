@@ -67,6 +67,8 @@ export interface Launcher {
   drives(runId: string): boolean;
   /** Go on with a run the page drives (after a decision, a wait): `jarvis resume <run>` in the background. */
   resume(run: Run): boolean;
+  /** "Resume now" on the page: the page drives the run from now on (if no one did) and resumes it. */
+  adopt(run: Run): boolean;
   /** Called on every tick: match launches to their runs, resume runs whose wait is over. */
   tend(now?: Date): void;
   /** The last lines of a launch's log. */
@@ -210,6 +212,11 @@ export function createLauncher(options: LauncherOptions): Launcher {
     get: (id) => launches.find((l) => l.id === id),
     drives,
     resume,
+    adopt(run) {
+      if (!drives(run.id))
+        runtime.events.emit({ kind: "run.driver", runId: run.id, payload: { by: "ui", adopted: true } });
+      return resume(run);
+    },
     tend(now = new Date()) {
       // a launch's run: the newest one with its task (or its module) created since it started
       for (const l of launches) {

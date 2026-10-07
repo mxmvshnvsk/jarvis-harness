@@ -1,3 +1,4 @@
+import { type BudgetWait, budgetWaitOf, whenText } from "../app/budgetWait.ts";
 import { type Candidate, candidatesOf, existingAt, targetOf } from "../app/candidates.ts";
 import type { Runtime } from "../app/runtime.ts";
 import type { Run } from "../core/domain/run.ts";
@@ -19,6 +20,7 @@ export type Research =
   | { readonly kind: "queued"; readonly launch: string; readonly position: number }
   | { readonly kind: "starting"; readonly launch: string }
   | { readonly kind: "running"; readonly run: Run }
+  | { readonly kind: "paused"; readonly run: Run; readonly wait: BudgetWait }
   | { readonly kind: "waiting"; readonly run: Run }
   | { readonly kind: "failed"; readonly run: Run; readonly reason: string }
   | { readonly kind: "candidate"; readonly run: Run; readonly candidate: Candidate }
@@ -71,8 +73,9 @@ export function researchOf(
     const module = moduleOfRun(runtime, run.id)?.module;
     if (!module || out.has(module)) continue;
     const candidate = candidates.find((c) => c.artifact.runId === run.id);
-    if (run.state === "RUNNING" || run.state === "CREATED" || run.state === "WAITING_BUDGET")
-      out.set(module, { kind: "running", run });
+    const wait = budgetWaitOf(runtime, run);
+    if (wait) out.set(module, { kind: "paused", run, wait });
+    else if (run.state === "RUNNING" || run.state === "CREATED") out.set(module, { kind: "running", run });
     else if (run.state === "WAITING_HUMAN" || run.state === "SUSPENDED")
       out.set(module, { kind: "waiting", run });
     else if (candidate?.decision === "approve")
@@ -115,6 +118,7 @@ function badge(node: TreeNode, r: Research | undefined): Html {
       queued: ["queued", "info"],
       starting: ["starting…", "info"],
       running: ["researching…", "info"],
+      paused: ["waits for quota", "wait"],
       waiting: ["waits for you", "wait"],
       failed: ["research failed", "bad"],
       candidate: ["candidate waits", "info"],
@@ -231,7 +235,7 @@ ${form(
   html`<fieldset class="mparts"><legend class="sr">Parts of ${n.path}</legend>
 ${parts.map((p) => {
   const busy = page.research.get(p.path);
-  const disabled = busy && ["queued", "starting", "running", "waiting"].includes(busy.kind);
+  const disabled = busy && ["queued", "starting", "running", "paused", "waiting"].includes(busy.kind);
   const pick = !disabled && needsResearch(p) && !p.tooBig;
   return html`<label class="mpart"><input type="checkbox" name="path" value="${p.path}"${pick ? " checked" : ""}${disabled ? " disabled" : ""}><code>${p.path}</code><span class="hint">${p.files} files${p.tooBig ? " · big itself" : ""}</span>${badge(p, busy)}</label>`;
 })}
@@ -314,7 +318,10 @@ function researchHtml(page: ModulesPage, actions?: Actions): Html {
   else if (r.kind === "starting")
     body = html`<p class="row"><span class="spin" aria-hidden="true"></span> Starting — the scan reads the folder, then the agent begins.</p>`;
   else if (r.kind === "running")
-    body = html`<p class="row"><span class="spin" aria-hidden="true"></span> ${r.run.currentStep === "verify" ? "Checking every claim against the code (no model)…" : r.run.state === "WAITING_BUDGET" ? "Waits for a model or a quota window, then goes on by itself." : "The agent maps the folder — read-only."}</p><p><a class="btn" href="${runHref(r.run)}">Open the run</a></p>`;
+    body = html`<p class="row"><span class="spin" aria-hidden="true"></span> ${r.run.currentStep === "verify" ? "Checking every claim against the code (no model)…" : "The agent maps the folder — read-only."}</p><p><a class="btn" href="${runHref(r.run)}">Open the run</a></p>`;
+  else if (r.kind === "paused")
+    body = html`<div class="banner info">⏸ Paused, not failed: ${r.wait.kind === "model" ? html`the model <code>${r.wait.model ?? "?"}</code> does not answer` : html`the quota window${r.wait.pool ? html` of pool <code>${r.wait.pool}</code>` : ""} is full`}. Goes on by itself at <b>${whenText(r.wait.resumeAfter)}</b>.${r.wait.detail ? html` <span class="hint">Window: ${r.wait.detail}.</span>` : ""}</div>
+<div class="row">${actions ? html`<form method="post" action="/runs/${encodeURIComponent(shortRunId(r.run.id))}/resume"><input type="hidden" name="t" value="${actions.token}"><input type="hidden" name="back" value="${here(n.path)}"><button type="submit" class="btn">Resume now</button></form>` : ""}<a class="btn" href="${runHref(r.run)}">Open the run</a></div>`;
   else if (r.kind === "waiting")
     body = html`<div class="banner info">The research waits for you (a budget, or the agent asks).</div><p><a class="btn primary" href="${runHref(r.run)}">Open the run</a></p>`;
   else if (r.kind === "failed")

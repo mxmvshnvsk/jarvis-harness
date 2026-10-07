@@ -1,6 +1,7 @@
 import { basename } from "node:path";
 import { type Activity, activityOf, noticeOf } from "../app/activity.ts";
 import { type BudgetGrant, type BudgetStop, budgetGranted, budgetStopOf } from "../app/budgetStop.ts";
+import { type BudgetWait, budgetWaitOf } from "../app/budgetWait.ts";
 import { awaitedArtifact, type Decision, decisionOn, rerunRequested, waitingCard } from "../app/decide.ts";
 import { Journey, type LoopReport, type StepReport } from "../app/journey.ts";
 import type { Runtime } from "../app/runtime.ts";
@@ -79,6 +80,8 @@ export interface WaitingRun {
 
 export interface RunningRun {
   readonly run: Run;
+  /** Parked on a quota window or a model that is down: goes on by itself. */
+  readonly wait?: BudgetWait;
   readonly activity?: Activity;
   readonly position?: { readonly index: number; readonly total: number };
 }
@@ -196,6 +199,10 @@ export async function runsPage(
         card: await waitCardOf(runtime, run, options.homeDir),
         terminal: waitingCard(runtime, run.id) !== undefined,
       });
+    } else if (run.state === "WAITING_BUDGET") {
+      // in progress, only paused: with what runs, not with what ended
+      const wait = budgetWaitOf(runtime, run);
+      running.push({ run, ...(wait ? { wait } : {}) });
     } else if (run.state === "RUNNING" && live(run, now)) {
       const events = runEvents(runtime, run.id);
       const activity = activityOf(events, new Date(now));
@@ -264,6 +271,8 @@ export interface RunPage {
   readonly terminal: boolean;
   /** Started from the page: it goes on in the background after a decision (src/ui/launcher.ts). */
   readonly driven?: boolean;
+  /** Parked on a quota window or a model: what it waits for and until when. */
+  readonly wait?: BudgetWait;
   readonly feed: readonly FeedItem[];
   readonly artifacts: ReadonlyArray<ArtifactVersion & { readonly state: string }>;
   readonly leaseLive: boolean;
@@ -344,7 +353,10 @@ export function feedItem(e: StoredEvent): FeedItem | undefined {
       const notice = noticeOf(e);
       // the notice carries a wall clock of its own: the feed has one
       return notice
-        ? at(notice.replace(/^(\S+) \d\d:\d\d:\d\d /, "$1 "), e.kind === "model.error" ? "bad" : "warn")
+        ? at(
+            notice.replace(/^(\S+) \d\d:\d\d:\d\d /, "$1 "),
+            e.kind === "model.error" && e.payload?.kind !== "quota_exhausted" ? "bad" : "warn",
+          )
         : undefined;
     }
     default:
@@ -412,7 +424,7 @@ export async function runPage(
     const last = all.at(-1);
     const inFlight = started.has(id) && !finished.has(id);
     const status: StepRow["status"] =
-      run.currentStep === id && run.state === "WAITING_HUMAN"
+      run.currentStep === id && (run.state === "WAITING_HUMAN" || run.state === "WAITING_BUDGET")
         ? "waiting"
         : inFlight && run.state === "RUNNING"
           ? "running"
@@ -474,6 +486,10 @@ export async function runPage(
     feed: feed.slice(-15),
     artifacts: artifactStates(runtime, run),
     leaseLive,
+    ...(() => {
+      const wait = budgetWaitOf(runtime, run);
+      return wait ? { wait } : {};
+    })(),
   };
 }
 

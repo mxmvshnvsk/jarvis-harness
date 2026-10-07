@@ -409,6 +409,9 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
       empty: html`<div class="banner bad">Say what to change — a comment, or comments on lines of the diff</div>`,
       "not-waiting": html`<div class="banner bad">The run no longer waits here: nothing recorded</div>`,
       amount: html`<div class="banner bad">Say how many more — a whole number above zero</div>`,
+      resumed: html`<div class="banner ok">Resumed — it goes on in the background; if the window is still full, it waits again</div>`,
+      resuming: html`<div class="banner ok">It is being resumed already</div>`,
+      "no-launcher": html`<div class="banner bad">This page cannot start runs: resume it with <code>jarvis resume</code></div>`,
       started: html`<div class="banner ok">Started — it prepares its checkout and shows up under Running; where it needs you, it waits here</div>`,
       "no-task": html`<div class="banner bad">Say what to do and pick a workflow</div>`,
       "no-repo": html`<div class="banner bad">Not a repository this page knows: start <code>jarvis ui</code> in it</div>`,
@@ -529,6 +532,7 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
       started: html`<div class="banner ok">Research started — it shows up under Runs too; the bell tells you when its candidate is ready</div>`,
       queued: html`<div class="banner ok">${count || "1"} research${count && count !== "1" ? "es" : ""} queued — they run one after another</div>`,
       unqueued: html`<div class="banner ok">Taken out of the queue</div>`,
+      resumed: html`<div class="banner ok">Resumed — it goes on in the background; if the window is still full, it waits again</div>`,
       "term-added": html`<div class="banner ok">Added to the glossary as a draft — the next run's searches widen with it</div>`,
       "no-file": html`<div class="banner bad">Not a knowledge file of this repository</div>`,
       "no-path": html`<div class="banner bad">Not a folder of a module here — pick one in the tree or from the path's suggestions</div>`,
@@ -567,7 +571,9 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
       counts: countsOf(),
     };
     const conflict = await conflictOf(base);
-    const running = [...research.values()].some((x) => ["starting", "running", "queued"].includes(x.kind));
+    const running = [...research.values()].some((x) =>
+      ["starting", "running", "paused", "queued"].includes(x.kind),
+    );
     return page(
       r,
       200,
@@ -948,7 +954,7 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
         "Cache-Control": "no-store",
       });
     }
-    const m = /^\/runs\/([^/]+)\/(decide|rerun|open|budget)$/.exec(r.url.pathname);
+    const m = /^\/runs\/([^/]+)\/(decide|rerun|open|budget|resume)$/.exec(r.url.pathname);
     const run = m ? resolveRun(m[1] as string) : undefined;
     if (!m || !run || !actions) return notFound(r, `Nothing to do at ${r.url.pathname}.`);
     const form = await formOf(r.req);
@@ -982,6 +988,16 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
           ? `/runs/${short}?notice=opened&editor=${encodeURIComponent(editor)}`
           : `/runs/${short}?notice=no-editor`,
       );
+    }
+    if (m[2] === "resume") {
+      // a run parked on a quota window or a model: try now (it parks again if the window is still full)
+      const back = (form.get("back") ?? "").startsWith("/knowledge/")
+        ? (form.get("back") as string)
+        : `/runs/${short}`;
+      const sep = back.includes("?") ? "&" : "?";
+      if (run.state !== "WAITING_BUDGET") return redirect(r, `${back}${sep}notice=not-waiting`);
+      if (!options.launcher) return redirect(r, `${back}${sep}notice=no-launcher`);
+      return redirect(r, `${back}${sep}notice=${options.launcher.adopt(run) ? "resumed" : "resuming"}`);
     }
     if (m[2] === "budget") {
       const stop = budgetStopOf(runtime, run);

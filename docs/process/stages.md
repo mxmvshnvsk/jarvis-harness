@@ -86,6 +86,11 @@ Remaining commands of ADR-0001 §15:
   runs), Skills (overrides, did it reach the agent), Glossary (problems: a symbol not in the code, a synonym of two
   terms; add a term after a check of its symbols against the code); use in runs from `agent.start` provenance and
   `knowledge.read`; a wide document no longer counts as a folder's coverage
+- quota admission reserves the typical answer of the same kind of call (p95 of the agent's recent answers, turns
+  and final answers apart, 2k..maxOutput) instead of the whole maxOutput — pilot: a 30k-per-window pool stopped
+  everything after 14k spent with a 16k reserve; a run paused on WAITING_BUDGET shows in `jarvis ui` as paused,
+  not failed (with the pool, how full it is, when it goes on), among the running ones, with Resume now; the feed
+  says the run waits instead of "gave up"
 - output styling: one palette for every command (`src/cli/style.ts`; headings bold, the subject bold cyan, metadata
   dim, commands cyan, ok/additions green, warnings yellow, errors/removals red), backticked spans render as commands,
   `jarvis diff` coloured like git, `candidates show` renders the markdown; errors are prefixed `error:`, notices go

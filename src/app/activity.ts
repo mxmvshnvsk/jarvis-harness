@@ -398,6 +398,11 @@ export function noticeOf(event: StoredEvent): string | undefined {
     const delay = num(p.delayMs) > 0 ? ` in ${(num(p.delayMs) / 1000).toFixed(1)}s` : "";
     return `⚠ ${wallClock(event.ts)} ${model}: ${reason}${took} — retry ${num(p.attempt)}${of}${delay}${traceText}`;
   }
+  if (event.kind === "model.error" && str(p.kind) === "quota_exhausted") {
+    // not a failure: the run parks and goes on when the window frees
+    const pool = /pool "([^"]+)"/.exec(message)?.[1];
+    return `⏸ ${wallClock(event.ts)} ${model}: ${pool ? `the quota window of pool ${pool} is full` : "quota used up"} — the run waits`;
+  }
   if (event.kind === "model.error") {
     const attempts = num(p.retries) + 1;
     return `✗ ${wallClock(event.ts)} ${model}: ${reason}${took} — gave up after ${attempts} attempt${attempts === 1 ? "" : "s"}${traceText}`;

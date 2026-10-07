@@ -22,6 +22,7 @@ const gitEnv = {
   GIT_COMMITTER_EMAIL: "t@t",
 };
 const started: Array<{ module: string; note?: string }> = [];
+const adopted: string[] = [];
 
 const git = (...args: string[]) =>
   execFileSync("git", args, { cwd: sb.project, encoding: "utf8", env: { ...process.env, ...gitEnv } });
@@ -58,6 +59,10 @@ function stubLauncher(): Launcher {
     get: (id) => launches.find((l) => l.id === id),
     drives: () => false,
     resume: () => false,
+    adopt: (run) => {
+      adopted.push(run.id);
+      return true;
+    },
     tend: () => {},
     tail: () => "",
   };
