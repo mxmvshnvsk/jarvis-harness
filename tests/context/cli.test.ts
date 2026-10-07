@@ -155,8 +155,9 @@ describe("jarvis context / compact / reset-context", () => {
     const view = await jarvis(["context", short]);
     expect(view.code).toBe(0);
     expect(view.out).toMatch(/step research #1\s+model flash/);
+    // kept as the parked call saw it: the trim made before that call is in the checkpoint
     expect(view.out).toMatch(
-      /history\s+\d+ tokens\s+10 messages in 5 blocks\s+\(0 handoff, 0 trimmed results\)/,
+      /history\s+\d+ tokens\s+10 messages in 5 blocks\s+\(0 handoff, 1 trimmed result\)/,
     );
     expect(view.out).toMatch(/levels\s+watch 90%/);
     const json = JSON.parse((await jarvis(["--json", "context", short])).out) as {

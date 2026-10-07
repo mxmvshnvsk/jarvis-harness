@@ -1,4 +1,5 @@
 import { type Activity, clock, kilo } from "../app/activity.ts";
+import { type BudgetStop, sourceOf, unitOf } from "../app/budgetStop.ts";
 import { duration } from "../app/journey.ts";
 import type { McpHealth, McpServerHealth } from "../app/mcpHealth.ts";
 import type { HealthState, ModelHealth, ModelPerf, ModelsHealth } from "../app/modelHealth.ts";
@@ -12,6 +13,7 @@ import { type DiffFile, escapeHtml, type Html, html, join, markdownToHtml, type 
 import type {
   ApprovalCard,
   ArtifactPage,
+  BudgetCard,
   FeedItem,
   LoopCard,
   RunPage,
@@ -171,7 +173,12 @@ function terminalHint(card: WaitCard, terminal: boolean, run: Run): Html {
   const cmd = `jarvis continue ${shortRunId(run.id)}`;
   if (terminal)
     return html`<p class="hint">A terminal waits at this card: what you decide there shows here, and the other way round.</p>`;
-  const key = card.kind === "loop" ? html` (<code>r</code> runs ${card.step} again)` : "";
+  const key =
+    card.kind === "loop"
+      ? html` (<code>r</code> runs ${card.step} again)`
+      : card.kind === "budget"
+        ? html` (<code>enter</code> more, <code>f</code> finish)`
+        : "";
   return html`<div class="actions"><span class="hint">Decide in the terminal: <code>${cmd}</code>${key}</span><button type="button" class="btn" data-copy="${cmd}">Copy command</button></div>`;
 }
 
@@ -193,6 +200,15 @@ function waitingCardHtml(w: WaitingRun, now: number, actions?: Actions): Html {
 <h3>${firstLine(run.task)}</h3>
 <p>${card.step} sent the work back ${card.iterations ? `${card.iterations} times` : "too often"}${card.reasons.length > 0 ? html`: ${reasons}${more}` : "."}</p>
 <div class="actions"><a class="btn primary" href="${runHref(run)}">Open the run</a>${actions ? form(actions, `${runHref(run)}/open`, html`<button type="submit" class="btn">Open in editor</button>`) : ""}</div>
+</article>`;
+  }
+  if (card.kind === "budget") {
+    const s = card.stop;
+    return html`<article class="panel card">
+<div class="row"><span class="pill wait">⏸ budget · ${s.stepId}</span>${meta}</div>
+<h3>${firstLine(run.task)}</h3>
+<p>${s.stepId} stopped at ${amount(s.used)} of ${amount(s.cap)} ${unitOf(s.dimension)} — ${sourceOf(s)}.${card.granted ? html` <span class="ok">${grantText(s, card.granted)}</span>` : ""}</p>
+<div class="actions"><a class="btn primary" href="${runHref(run)}">Open the run</a></div>
 </article>`;
   }
   if (card.kind === "approval") {
@@ -418,7 +434,9 @@ function stepRow(s: StepRow, now: number): Html {
     if (r.modelCalls > 0) notes.push(`${r.modelCalls} call${r.modelCalls === 1 ? "" : "s"}`);
     if (r.tools && Object.keys(r.tools).length > 0) notes.push(toolMix(r.tools));
     if (r.budgetExhausted)
-      notes.push(`${r.budgetExhausted === "model" ? "model call" : "tool"} limit reached`);
+      notes.push(
+        `${r.budgetExhausted === "model" ? "model call" : r.budgetExhausted === "budget" ? "budget" : "tool"} limit reached`,
+      );
     // the loop's line names the outcome already
     if (r.outcome && r.outcome !== "success" && s.loops.at(-1)?.outcome !== r.outcome) notes.push(r.outcome);
     if (r.status !== "success" && r.reason) notes.push(cut(r.reason, 120));
@@ -472,6 +490,60 @@ ${
     ? html`<div class="banner info">↻ ${card.step} runs again — asked${card.rerun.actor ? ` by ${card.rerun.actor}` : ""}${card.rerun.channel === "ui" ? " from the page" : card.rerun.channel === "cli" ? " in the terminal" : ""}</div><div class="actions">${goesOn(page.terminal, page.run, page.driven === true)}</div>`
     : actions
       ? html`<div class="actions">${form(actions, `${runHref(page.run)}/rerun`, html`<button type="submit" class="btn primary big">Run ${card.step} again</button>`)}<span class="hint">same as <code>r</code> on the terminal's card; ${page.terminal ? "the terminal waiting there goes on" : html`no terminal waits: <code>jarvis continue ${shortRunId(page.run.id)}</code> does it`}</span></div>`
+      : terminalHint(card, page.terminal, page.run)
+}
+</section>`;
+}
+
+const amount = (n: number) => n.toLocaleString("en-US");
+
+function grantText(s: BudgetStop, g: NonNullable<BudgetCard["granted"]>): string {
+  const what = g.finish
+    ? `${s.stepId} finishes with what it has`
+    : `+${amount(g.amount ?? 0)} ${unitOf(s.dimension)}`;
+  const where = g.channel === "ui" ? " from the page" : g.channel === "cli" ? " in the terminal" : "";
+  return `↻ ${what} — decided${g.actor ? ` by ${g.actor}` : ""}${where}`;
+}
+
+/** The run stopped on a budget: what ran out, then more and go on, or finish with what it has. */
+function budgetCardHtml(card: BudgetCard, page: RunPage, actions?: Actions): Html {
+  const s = card.stop;
+  const unit = unitOf(s.dimension);
+  const action = `${runHref(page.run)}/budget`;
+  return html`<section class="panel decision" aria-labelledby="decision" data-live="card">
+<div class="row" style="flex-direction:column;align-items:flex-start;gap:4px">
+<span class="warn" style="font-size:13px;font-weight:500">Waits for you</span>
+<h2 id="decision" style="font-size:22px;line-height:28px">${s.stepId} stopped: ${amount(s.used)} of ${amount(s.cap)} ${unit}</h2>
+<span class="muted" style="font-size:14px">${sourceOf(s)} · ${
+    s.scope === "agent"
+      ? "its conversation is kept: more calls go on from where it stopped"
+      : "the step goes on from its last model call; the cap grows for this run only"
+  }</span>
+</div>
+${
+  card.changes && card.changes.length > 0
+    ? html`<div class="changed"><span class="hint">Changed in the checkout so far</span>${card.changes.slice(0, 12).map(changeLine)}${card.changes.length > 12 ? html`<span class="muted">+${card.changes.length - 12} more</span>` : ""}</div>`
+    : ""
+}
+${
+  card.granted
+    ? html`<div class="banner info">${grantText(s, card.granted)}</div><div class="actions">${goesOn(page.terminal, page.run, page.driven === true)}</div>`
+    : actions
+      ? html`<div class="actions">${form(
+          actions,
+          action,
+          html`<input type="hidden" name="choice" value="more"><input type="hidden" name="amount" value="${s.suggested}"><button type="submit" class="btn primary big">+${amount(s.suggested)} ${unit} and go on</button>`,
+        )}${form(
+          actions,
+          action,
+          html`<input type="hidden" name="choice" value="more"><label class="sr" for="budget-amount">How many more ${unit}</label><input id="budget-amount" class="amount" type="number" name="amount" min="1" step="1" required placeholder="another amount"><button type="submit" class="btn">Grant</button>`,
+          html` class="row"`,
+        )}${form(
+          actions,
+          action,
+          html`<input type="hidden" name="choice" value="finish"><button type="submit" class="btn">Finish with what it has</button>`,
+        )}</div>
+<p class="hint">Finish: the step writes its result from what it has, marked incomplete for the steps after it. Same as <code>enter</code> / <code>m</code> / <code>f</code> on the terminal's card; ${page.terminal ? "the terminal waiting there goes on" : html`no terminal waits: <code>jarvis continue ${shortRunId(page.run.id)}</code> goes on`}.</p>`
       : terminalHint(card, page.terminal, page.run)
 }
 </section>`;
@@ -580,7 +652,7 @@ ${notice ?? ""}
 <ol style="margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:2px">${page.steps.map((s) => stepRow(s, now))}</ol>
 </section>
 <div class="mainc">
-${card ? (card.kind === "loop" ? loopCardHtml(card, page, actions) : card.kind === "approval" ? approvalCardHtml(card, page) : otherCardHtml(card.what, page)) : nowHtml(page, now)}
+${card ? (card.kind === "loop" ? loopCardHtml(card, page, actions) : card.kind === "approval" ? approvalCardHtml(card, page) : card.kind === "budget" ? budgetCardHtml(card, page, actions) : otherCardHtml(card.what, page)) : nowHtml(page, now)}
 ${feedHtml(page.feed)}
 <section class="panel arts" aria-labelledby="artifacts" data-live="arts">
 <h2 id="artifacts">Artifacts</h2>

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { type BudgetStop, budgetStopOf, grantBudget } from "../../src/app/budgetStop.ts";
 import type { Runtime } from "../../src/app/runtime.ts";
 import { ACTOR, createRun, engineFor, testRuntime, workflowOf, writeArtifact } from "../helpers/engine.ts";
 import { completion, type FakeOpenAi, startFakeOpenAi } from "../helpers/fakeOpenAi.ts";
@@ -73,6 +74,32 @@ describe("per-run / per-step budget (ADR-0018 §4)", () => {
     });
     const calls_ = rt.events.list({ runId: run.id, kind: "model.call" });
     expect(calls_[0]?.stepId).toBe("work");
+
+    // a person grants more: added to the cap for this step, recorded with the actor
+    const stop = budgetStopOf(rt, result.run);
+    expect(stop).toMatchObject({
+      scope: "perStep",
+      dimension: "outputTokens",
+      used: 21,
+      cap: 20,
+      suggested: 5000,
+    });
+    grantBudget(
+      rt,
+      result.run,
+      stop as BudgetStop,
+      { kind: "user", id: "dev@example.com", verified: false },
+      { more: 14 },
+      "cli",
+    );
+    expect(rt.events.list({ runId: run.id, kind: "budget.grant" })[0]).toMatchObject({
+      stepId: "work",
+      actor: "user:dev@example.com",
+      payload: { scope: "perStep", outputTokens: 14 },
+    });
+    const again = await engine.execute(run.id, owner);
+    expect(again.run.state).toBe("WAITING_HUMAN");
+    expect(server.requests).toHaveLength(5); // 21, 28 < 34 allowed; 35 ≥ 34 refused
   });
 });
 

@@ -333,7 +333,11 @@ export function nextCommands(d: RunDetail, goOn?: string): Array<{ cmd: string; 
     out.push({
       cmd: "jarvis continue",
       why:
-        r.waitingFor?.kind === "clarification" ? "answer the questions and go on" : "read, decide and go on",
+        r.waitingFor?.kind === "clarification"
+          ? "answer the questions and go on"
+          : r.waitingFor?.kind === "budget"
+            ? "more budget and go on, or finish the step with what it has"
+            : "read, decide and go on",
     });
     if (pending) out.push({ cmd: `jarvis show ${id} ${pending.type}`, why: `just read the ${pending.type}` });
   } else if (r.state === "WAITING_BUDGET") {

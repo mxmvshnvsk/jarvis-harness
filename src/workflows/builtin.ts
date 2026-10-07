@@ -29,6 +29,7 @@ steps:
   - id: spec
     kind: agentic
     agent: specification
+    onLimit: ask  # a half-done result costs more than a question: at its limit the run asks
     phase: spec
     inputs: [research, requirements]
     outputs: [spec]
@@ -65,6 +66,7 @@ steps:
   - id: implementation
     kind: agentic
     agent: implementation
+    onLimit: ask
     phase: implementation
     inputs: [spec, plan]
     outputs: [implementation]
@@ -214,6 +216,7 @@ steps:
   - id: spec
     kind: agentic
     agent: specification
+    onLimit: ask
     phase: spec
     inputs: [research, requirements]
     outputs: [spec]
@@ -302,6 +305,7 @@ steps:
   - id: spec
     kind: agentic
     agent: specification
+    onLimit: ask
     phase: spec
     inputs: [research]
     outputs: [spec]
@@ -316,6 +320,7 @@ steps:
   - id: implementation
     kind: agentic
     agent: implementation
+    onLimit: ask
     phase: implementation
     inputs: [research, spec]
     outputs: [implementation]

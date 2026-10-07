@@ -1,3 +1,4 @@
+import { BudgetExceededError, grantsFromEvents } from "../budget/runBudget.ts";
 import { ContextManager, effectiveWindow, resolveThresholds, summarizerMessages } from "../context/index.ts";
 import type { ArtifactVersion } from "../core/domain/artifact.ts";
 import { ModelError } from "../models/errors.ts";
@@ -11,7 +12,7 @@ import {
 import type { Message, ToolDefinition } from "../models/types.ts";
 import type { AgentRunner } from "../orchestration/executors.ts";
 import { InterruptedError, interruption } from "../orchestration/interrupt.ts";
-import type { StepContext, StepOutcome } from "../orchestration/types.ts";
+import { type StepContext, type StepOutcome, SuspendRun } from "../orchestration/types.ts";
 import type { ToolResult } from "../tools/types.ts";
 import { buildBaseMessages } from "./context.ts";
 import type { AgentRegistry } from "./definition.ts";
@@ -137,13 +138,20 @@ export class AgentRuntimeRunner implements AgentRunner {
     let transcript: Message[] = restored?.transcriptRef
       ? (JSON.parse(rt.blobs.getText(restored.transcriptRef)) as Message[])
       : [];
-    // project/user `agents.<id>.limits` over the built-in ones
+    // project/user `agents.<id>.limits` over the built-in ones, plus what a person granted on a stop
     const override = config.agents[def.id]?.limits;
+    const grants = grantsFromEvents(rt.db.db, ctx.run.id, ctx.step.id, ctx.iteration);
     const limits = {
       ...def.limits,
-      maxToolCalls: override?.maxToolCalls ?? def.limits.maxToolCalls,
-      maxModelCalls: override?.maxModelCalls ?? def.limits.maxModelCalls,
+      maxToolCalls: (override?.maxToolCalls ?? def.limits.maxToolCalls) + grants.toolCalls,
+      maxModelCalls: (override?.maxModelCalls ?? def.limits.maxModelCalls) + grants.modelCalls,
     };
+    // a used-up limit: finish with what there is (marked incomplete), or — `onLimit: ask`, a person at
+    // hand — the run waits for more calls or "finish"; never asks where nobody answers (CI)
+    const ask =
+      (config.agents[def.id]?.onLimit ?? ctx.step.onLimit ?? "finish") === "ask" &&
+      config.interactive !== false &&
+      !grants.finish;
     let toolCalls = restored?.toolCalls ?? 0;
     let modelCalls = restored?.modelCalls ?? 0;
     const emit = (kind: string, payload: Record<string, unknown>) =>
@@ -160,6 +168,11 @@ export class AgentRuntimeRunner implements AgentRunner {
       maxToolCalls: limits.maxToolCalls,
       maxModelCalls: limits.maxModelCalls,
       restoredToolCalls: toolCalls,
+      ...(grants.toolCalls + grants.modelCalls > 0
+        ? { granted: { toolCalls: grants.toolCalls, modelCalls: grants.modelCalls } }
+        : {}),
+      ...(grants.finish ? { finishing: true } : {}),
+      ...(ask ? { onLimit: "ask" } : {}),
       knowledge: pkg.provenance,
     });
 
@@ -231,7 +244,26 @@ export class AgentRuntimeRunner implements AgentRunner {
 
     let budgetExhaustedNotice = false;
     /** Which limit ended the loop, if one did: the result may be incomplete (pilot: silent partial maps). */
-    let budgetExhausted: "tools" | "model" | undefined;
+    let budgetExhausted: "tools" | "model" | "budget" | undefined;
+    /** The run parks with the conversation kept: the step goes on from here on resume. */
+    const parkable = (error: unknown) =>
+      error instanceof InterruptedError ||
+      error instanceof BudgetExceededError ||
+      (error instanceof ModelError && (error.kind === "quota_exhausted" || error.kind === "transient"));
+    /** `onLimit: ask`: keep the conversation and wait for a person — more calls, or finish. */
+    const parkOnLimit = (dimension: "toolCalls" | "modelCalls", used: number, cap: number): never => {
+      checkpoint();
+      const what = dimension === "toolCalls" ? "tool calls" : "model calls";
+      emit("agent.limit", { dimension, used, cap, onLimit: "ask" });
+      throw new SuspendRun(
+        "WAITING_HUMAN",
+        `${def.id} used its ${cap} ${what}: more, or finish with what it has`,
+        {
+          checkpointState: { budget: { scope: "agent", dimension, used, cap, agent: def.id } },
+          waitingFor: { kind: "budget", detail: `agent ${dimension}` },
+        },
+      );
+    };
     /** The answer the loop ended with (no tool calls) — often the result document already. */
     let finalAnswer: string | undefined;
     for (;;) {
@@ -239,14 +271,27 @@ export class AgentRuntimeRunner implements AgentRunner {
         checkpoint();
         return { status: "failure", reason: "cancel requested" };
       }
+      if (grants.finish) {
+        // a person said "finish with what it has": straight to the result document
+        budgetExhausted =
+          toolCalls >= limits.maxToolCalls
+            ? "tools"
+            : modelCalls >= limits.maxModelCalls
+              ? "model"
+              : "budget";
+        break;
+      }
       // Ctrl-C between calls: keep the conversation, park the run (src/orchestration/interrupt.ts)
+      if (interruption.requested) checkpoint();
       interruption.throwIfRequested();
       if (modelCalls >= limits.maxModelCalls) {
+        if (ask) parkOnLimit("modelCalls", modelCalls, limits.maxModelCalls);
         budgetExhausted = "model";
         break;
       }
       const allowTools = toolDefs.length > 0 && toolCalls < limits.maxToolCalls;
       if (!allowTools && toolDefs.length > 0 && !budgetExhaustedNotice) {
+        if (ask) parkOnLimit("toolCalls", toolCalls, limits.maxToolCalls);
         budgetExhausted = "tools";
         transcript = [
           ...transcript,
@@ -254,15 +299,22 @@ export class AgentRuntimeRunner implements AgentRunner {
         ];
         budgetExhaustedNotice = true;
       }
-      await manage();
-      const response = await ctx.gateway.call({
-        modelId: route.modelId,
-        role: def.role,
-        agentId: def.id,
-        messages: [...base, ...transcript],
-        ...(allowTools ? { tools: toolDefs } : {}),
-        temperature: 0,
-      });
+      let response: Awaited<ReturnType<typeof ctx.gateway.call>>;
+      try {
+        await manage();
+        response = await ctx.gateway.call({
+          modelId: route.modelId,
+          role: def.role,
+          agentId: def.id,
+          messages: [...base, ...transcript],
+          ...(allowTools ? { tools: toolDefs } : {}),
+          temperature: 0,
+        });
+      } catch (error) {
+        // a cap of the run, the quota window, a model that is down: go on from this very call later
+        if (parkable(error)) checkpoint();
+        throw error;
+      }
       modelCalls += 1;
       if (response.toolCalls.length === 0) {
         finalAnswer = response.text;
@@ -273,6 +325,7 @@ export class AgentRuntimeRunner implements AgentRunner {
         ...transcript,
         { role: "assistant", content: response.text, toolCalls: response.toolCalls },
       ];
+      const callsBefore = toolCalls;
       for (const call of response.toolCalls) {
         // several calls in one answer may overrun the limit (pilot: 41/40): each needs an answer,
         // the ones past the limit get "skipped" instead of running
@@ -304,8 +357,10 @@ export class AgentRuntimeRunner implements AgentRunner {
           ...transcript,
           { role: "tool", toolCallId: call.id, content: formatToolResult(call.name, result, parseError) },
         ];
-        if (toolCalls % limits.checkpointEvery === 0) checkpoint();
       }
+      // after the whole answer: a checkpoint mid-way would keep tool calls without their results
+      if (Math.floor(toolCalls / limits.checkpointEvery) > Math.floor(callsBefore / limits.checkpointEvery))
+        checkpoint();
     }
 
     // Finalization: the structured result document (ADR-0007 §4). When the loop already ended with a
@@ -417,11 +472,7 @@ export class AgentRuntimeRunner implements AgentRunner {
         };
       }
       // the run parks (quota window, a model that is down, Ctrl-C): keep the conversation to go on from
-      if (
-        error instanceof InterruptedError ||
-        (error instanceof ModelError && (error.kind === "quota_exhausted" || error.kind === "transient"))
-      )
-        checkpoint();
+      if (parkable(error)) checkpoint();
       throw error;
     }
   }

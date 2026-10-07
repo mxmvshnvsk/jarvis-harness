@@ -2,6 +2,7 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import { existsSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
+import { budgetGranted, budgetStopOf, grantBudget } from "../app/budgetStop.ts";
 import {
   awaitedArtifact,
   DecisionTakenError,
@@ -326,7 +327,8 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
       taken: html`<div class="banner bad">This version was decided meanwhile (in a terminal or another window): yours is not recorded</div>`,
       stale: html`<div class="banner bad">The run no longer waits for this version: nothing recorded</div>`,
       empty: html`<div class="banner bad">Say what to change — a comment, or comments on lines of the diff</div>`,
-      "not-waiting": html`<div class="banner bad">The run no longer waits at this loop: nothing recorded</div>`,
+      "not-waiting": html`<div class="banner bad">The run no longer waits here: nothing recorded</div>`,
+      amount: html`<div class="banner bad">Say how many more — a whole number above zero</div>`,
       started: html`<div class="banner ok">Started — it prepares its checkout and shows up under Running; where it needs you, it waits here</div>`,
       "no-task": html`<div class="banner bad">Say what to do and pick a workflow</div>`,
       "no-repo": html`<div class="banner bad">Not a repository this page knows: start <code>jarvis ui</code> in it</div>`,
@@ -409,7 +411,7 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
         "Cache-Control": "no-store",
       });
     }
-    const m = /^\/runs\/([^/]+)\/(decide|rerun|open)$/.exec(r.url.pathname);
+    const m = /^\/runs\/([^/]+)\/(decide|rerun|open|budget)$/.exec(r.url.pathname);
     const run = m ? resolveRun(m[1] as string) : undefined;
     if (!m || !run || !actions) return notFound(r, `Nothing to do at ${r.url.pathname}.`);
     const form = await formOf(r.req);
@@ -443,6 +445,21 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
           ? `/runs/${short}?notice=opened&editor=${encodeURIComponent(editor)}`
           : `/runs/${short}?notice=no-editor`,
       );
+    }
+    if (m[2] === "budget") {
+      const stop = budgetStopOf(runtime, run);
+      if (!stop) return redirect(r, `/runs/${short}?notice=not-waiting`);
+      const choice = form.get("choice");
+      const more = Number(form.get("amount"));
+      if (choice !== "finish" && !(choice === "more" && Number.isInteger(more) && more > 0))
+        return redirect(r, `/runs/${short}?notice=amount`);
+      if (!budgetGranted(runtime, run.id)) {
+        const who = await actor();
+        if (!who) return redirect(r, `/runs/${short}?notice=actor`);
+        grantBudget(runtime, run, stop, who, choice === "finish" ? { finish: true } : { more }, "ui");
+      }
+      options.launcher?.resume(run); // a run the page started goes on in the background
+      return redirect(r, `/runs/${short}`);
     }
     if (m[2] === "rerun") {
       if (run.state !== "WAITING_HUMAN" || run.waitingFor?.kind !== "loop")

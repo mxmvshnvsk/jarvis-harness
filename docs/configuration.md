@@ -251,6 +251,28 @@ agents:
 incomplete»), в итоге прогона и в `jarvis show` («⚠ incomplete»), а следующий агент получает такой вход
 с пометкой `INCOMPLETE` — чтобы не принимать его за полный.
 
+Для шагов, где полусделанный результат дороже вопроса, — `onLimit: ask`: на лимите агент сохраняет разговор,
+прогон ждёт человека (`WAITING_HUMAN`, `waitingFor: budget`), а карточка `jarvis continue` или страница
+`jarvis ui` предлагает добавить вызовов (шаг продолжается с того же места) или закончить с тем, что есть
+(как без `ask`, с пометкой `INCOMPLETE`). Во встроенных workflow так у шагов `spec` и `implementation`.
+Где отвечать некому (`interactive: false`, профиль `ci`), `ask` ведёт себя как `finish`.
+
+```yaml
+agents:
+  research: { onLimit: ask }           # над шагом workflow; finish — как раньше, без вопроса
+```
+
+```yaml
+# .jarvis/workflows/<name>.yaml
+  - id: implementation
+    kind: agentic
+    agent: implementation
+    onLimit: ask                       # finish (по умолчанию) | ask
+```
+
+Добавленное записывается в журнал событием `budget.grant` с автором и каналом (`cli` / `ui`) и
+прибавляется к лимиту только этого шага этого прогона; конфигурация не меняется.
+
 ### Режимы `humanGate`
 
 | Режим | На гейте без интерактива |

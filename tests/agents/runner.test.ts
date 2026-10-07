@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { BUILTIN_AGENTS } from "../../src/agents/builtin/index.ts";
 import { AgentRegistry } from "../../src/agents/definition.ts";
 import { AgentRuntimeRunner } from "../../src/agents/runner.ts";
+import { type BudgetStop, budgetGranted, budgetStopOf, grantBudget } from "../../src/app/budgetStop.ts";
 import type { Runtime } from "../../src/app/runtime.ts";
 import { AgenticExecutor, DeterministicExecutor } from "../../src/orchestration/executors.ts";
 import { LocalWorkflowEngine } from "../../src/orchestration/runtime.ts";
@@ -514,6 +515,97 @@ context: { maxContext: 8000 }
     expect(text).toMatch(
       /INCOMPLETE: agent research ran out of tool calls|incomplete: its agent ran out of budget/,
     );
+  });
+
+  it("onLimit: ask — the run waits at the limit with the conversation kept; more goes on, finish ends it", async () => {
+    sb.write(
+      "project/.jarvis/project.yaml",
+      "version: 1\nworkspace: { mode: cwd }\nagents: { research: { limits: { maxToolCalls: 2 }, onLimit: ask } }\n",
+    );
+    rt = await testRuntime(sb, { PATH: process.env.PATH ?? "" });
+    const wf = workflowOf({
+      name: "ra",
+      entry: "research",
+      steps: [
+        {
+          id: "research",
+          kind: "agentic",
+          agent: "research",
+          outputs: ["research"],
+          transitions: { onSuccess: "DONE" },
+        },
+      ],
+    });
+    const engine = engineWith(rt, wf);
+    // one tool call an answer, while tools are offered
+    server.respond((req) =>
+      req.body.tools ? toolCallCompletion("repo.list", {}) : completion(JSON.stringify(RESEARCH_DOC)),
+    );
+    const run = createRun(rt, "ra");
+    const first = await engine.execute(run.id, { owner: "cli:t" });
+    expect(first.run.state).toBe("WAITING_HUMAN");
+    expect(first.run.waitingFor).toMatchObject({ kind: "budget", detail: "agent toolCalls" });
+    const stop = budgetStopOf(rt, first.run);
+    expect(stop).toMatchObject({
+      scope: "agent",
+      dimension: "toolCalls",
+      used: 2,
+      cap: 2,
+      stepId: "research",
+      agent: "research",
+    });
+    expect(rt.events.list({ runId: run.id, kind: "tool.call" })).toHaveLength(2);
+    expect(rt.artifacts.listLatest(run.id, "research")).toHaveLength(0);
+
+    // more: two calls on, from the same conversation — the first two are not run again
+    grantBudget(rt, first.run, stop as BudgetStop, ACTOR, { more: 2 }, "cli");
+    expect(budgetGranted(rt, run.id)).toMatchObject({ finish: false, amount: 2, channel: "cli" });
+    const sentBefore = server.requests.length;
+    const second = await engine.execute(run.id, { owner: "cli:t" });
+    expect(second.run.state).toBe("WAITING_HUMAN");
+    expect(budgetStopOf(rt, second.run)).toMatchObject({ used: 4, cap: 4 });
+    expect(rt.events.list({ runId: run.id, kind: "tool.call" })).toHaveLength(4);
+    const resumedWith = JSON.stringify(server.requests[sentBefore]?.body.messages);
+    expect(resumedWith.match(/\[repo\.list\] ok/g)?.length).toBe(2);
+
+    // finish: the result document from what it has, marked incomplete
+    grantBudget(rt, second.run, budgetStopOf(rt, second.run) as BudgetStop, ACTOR, { finish: true }, "ui");
+    const done = await engine.execute(run.id, { owner: "cli:t" });
+    expect(done.run.state).toBe("COMPLETED");
+    expect(rt.events.list({ runId: run.id, kind: "tool.call" })).toHaveLength(4);
+    expect(rt.artifacts.listLatest(run.id, "research")[0]?.provenance).toMatchObject({
+      budgetExhausted: "tools",
+    });
+  });
+
+  it("onLimit: ask does not wait where nobody answers (interactive: false): it finishes as before", async () => {
+    sb.write(
+      "project/.jarvis/project.yaml",
+      "version: 1\nworkspace: { mode: cwd }\nagents: { research: { limits: { maxToolCalls: 1 }, onLimit: ask } }\nprofiles: { ci: { interactive: false } }\n",
+    );
+    rt = await testRuntime(sb, { PATH: process.env.PATH ?? "", JARVIS_PROFILE: "ci" });
+    const wf = workflowOf({
+      name: "rb",
+      entry: "research",
+      steps: [
+        {
+          id: "research",
+          kind: "agentic",
+          agent: "research",
+          outputs: ["research"],
+          transitions: { onSuccess: "DONE" },
+        },
+      ],
+    });
+    server.respond((req) =>
+      req.body.tools ? toolCallCompletion("repo.list", {}) : completion(JSON.stringify(RESEARCH_DOC)),
+    );
+    const run = createRun(rt, "rb");
+    const result = await engineWith(rt, wf).execute(run.id, { owner: "cli:t" });
+    expect(result.run.state).toBe("COMPLETED");
+    expect(rt.artifacts.listLatest(run.id, "research")[0]?.provenance).toMatchObject({
+      budgetExhausted: "tools",
+    });
   });
 
   it("gives an agent sent back by a human its previous version and the review (pilot: a dead loop)", async () => {

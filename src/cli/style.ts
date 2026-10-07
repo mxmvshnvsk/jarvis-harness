@@ -143,7 +143,15 @@ export function incompleteOf(
 ): { agentId: string; limit: string } | undefined {
   const p = a.provenance;
   return p.kind === "agent" && p.budgetExhausted
-    ? { agentId: p.agentId, limit: p.budgetExhausted === "model" ? "model call" : "tool call" }
+    ? {
+        agentId: p.agentId,
+        limit:
+          p.budgetExhausted === "model"
+            ? "model call"
+            : p.budgetExhausted === "budget"
+              ? "budget"
+              : "tool call",
+      }
     : undefined;
 }
 

@@ -361,6 +361,11 @@ export const AgentConfigSchema = z.strictObject({
       maxModelCalls: z.int().positive().optional(),
     })
     .optional(),
+  /**
+   * When the agent uses up its tool or model calls: `finish` — the result from what it has, marked
+   * incomplete; `ask` — the run waits for a person to grant more or let it finish. Over the step's own.
+   */
+  onLimit: z.enum(["finish", "ask"]).optional(),
 });
 export type AgentConfig = z.infer<typeof AgentConfigSchema>;
 

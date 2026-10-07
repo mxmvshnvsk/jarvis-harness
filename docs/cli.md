@@ -289,6 +289,20 @@ Enter никогда не принимает. Уточняющие вопрос�
 >
 ```
 
+Остановка на бюджете (`waitingFor: budget`): лимит `budget.perStep|perRun` или, у шага с `onLimit: ask`,
+лимит вызовов агента — карточка: что кончилось и откуда лимит, что уже изменено в рабочей копии. `enter` —
+добавить половину лимита и продолжить с того же места (разговор агента сохранён), `m` — другое число, `f` —
+закончить шаг с тем, что есть (результат помечается неполным), `q` — позже. То же — кнопками на странице
+прогона в `jarvis ui`; решение со страницы карточка подхватывает сама.
+
+```
+⏸ implementation stopped: 80 of 80 tool calls — the implementation agent's limit (agents.implementation.limits)
+  its conversation is kept: more calls go on from where it stopped
+  changed  M src/upload/List.tsx  A src/upload/List.test.tsx
+
+  enter +40 tool calls and go on    m another amount    f finish with what it has (marked incomplete)    q later
+```
+
 На гейте прогона с собственной рабочей копией (worktree) в меню есть и `o` — открыть изменения в редакторе,
 прежде чем принять или вернуть.
 

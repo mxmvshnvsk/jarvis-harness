@@ -472,6 +472,68 @@ steps:
     expect(path.out.trim()).toBe(sb.project);
   });
 
+  it("a stop on a budget: the card says what ran out; m grants another amount, f finishes the step", async () => {
+    const loaded = await loadConfig({ cwd: sb.project, homeDir: sb.home, env: {} });
+    const rt = createRuntime(loaded, { env: {} });
+    const park = (task: string, budget: Record<string, unknown>, detail: string) => {
+      const r = rt.runs.create({
+        task,
+        workflow: "gated",
+        owner: { kind: "user", id: "me@corp", verified: false },
+        workspace: { mode: "cwd", repoRoot: sb.project, path: sb.project, baseRef: "HEAD" },
+        dataClass: "internal",
+      });
+      // as the engine leaves it when the step's cap stops a model call (ADR-0018 §4)
+      rt.runs.update(r.id, { currentStep: "write", currentIteration: 1 });
+      rt.runs.transition(r.id, "RUNNING");
+      rt.checkpoints.save({ runId: r.id, stepId: "write", iteration: 1, kind: "suspend", state: { budget } });
+      rt.runs.transition(r.id, "WAITING_HUMAN", {
+        reason: "budget",
+        waitingFor: { kind: "budget", detail },
+      });
+      rt.events.emit({ kind: "run.state", runId: r.id, payload: { state: "WAITING_HUMAN" } });
+      return r;
+    };
+    const capped = park(
+      "ABC-21",
+      { scope: "perStep", dimension: "outputTokens", used: 40_312, cap: 40_000 },
+      "perStep outputTokens",
+    );
+    const short = capped.id.replace(/^run_/, "").slice(0, 8);
+    const card = await jarvis(["continue", short], ON, ["m", "12000", "a"]);
+    expect(card.out).toContain("write stopped: 40,312 of 40,000 output tokens");
+    expect(card.out).toContain("budget.perStep");
+    expect(card.out).toContain("enter +20,000 output tokens and go on");
+    expect(card.out).toContain("f finish with what it has (marked incomplete)");
+    expect(card.out).toContain("+12,000 output tokens — write goes on");
+    expect(rt.events.list({ runId: capped.id, kind: "budget.grant" })[0]).toMatchObject({
+      stepId: "write",
+      iteration: 1,
+      actor: "user:me@corp",
+      payload: { scope: "perStep", outputTokens: 12_000, channel: "cli" },
+    });
+    expect(card.out).toContain("COMPLETED");
+
+    const limited = park(
+      "ABC-22",
+      { scope: "agent", dimension: "toolCalls", used: 80, cap: 80, agent: "implementation" },
+      "agent toolCalls",
+    );
+    const short2 = limited.id.replace(/^run_/, "").slice(0, 8);
+    const later = await jarvis(["continue", short2], ON, ["q"]);
+    expect(later.out).toContain("write stopped: 80 of 80 tool calls");
+    expect(later.out).toContain("the implementation agent's limit (agents.implementation.limits)");
+    expect(later.out).toContain("its conversation is kept");
+    expect(rt.runs.require(limited.id).state).toBe("WAITING_HUMAN");
+    await jarvis(["continue", short2], ON, ["f", "a"]);
+    expect(rt.events.list({ runId: limited.id, kind: "budget.grant" })[0]?.payload).toMatchObject({
+      scope: "agent",
+      finish: true,
+      channel: "cli",
+    });
+    rt.close();
+  });
+
   it("accessible mode: a numbered menu, answered with numbers", async () => {
     const r = await jarvis(["work", "ABC-10", "--workflow", "gated"], { ...ON, JARVIS_ACCESSIBLE: "1" }, [
       "2",

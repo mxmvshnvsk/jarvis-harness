@@ -108,7 +108,7 @@ function lastOf(runtime: Runtime, runId: string, kind: string): StoredEvent | un
 }
 
 /** Where the run last stopped for a person: requests before it belong to an earlier stop. */
-function parkedAt(runtime: Runtime, runId: string): number {
+export function parkedAt(runtime: Runtime, runId: string): number {
   const parks = runtime.events
     .list({ runId, kind: "run.state", limit: 100_000 })
     .filter((e) => e.payload?.state === "WAITING_HUMAN");
@@ -149,7 +149,7 @@ export function rerunRequested(
  * asking and when it stops, so the page can say whether a decision goes on at once or waits for
  * `jarvis continue`. Returns the function that closes it.
  */
-export function openCard(runtime: Runtime, run: Run, kind: "approval" | "loop"): () => void {
+export function openCard(runtime: Runtime, run: Run, kind: "approval" | "loop" | "budget"): () => void {
   const payload = { kind, pid: process.pid, host: hostname() };
   runtime.events.emit({ kind: "card.open", runId: run.id, payload });
   let closed = false;

@@ -32,6 +32,61 @@ export class BudgetExceededError extends Error {
   }
 }
 
+/**
+ * More budget granted by a person for a run that stopped on a cap or a limit (`budget.grant` events,
+ * src/app/budgetStop.ts): added to the configured caps, never replacing them. `finish` — the step
+ * ends with what it has: its agent goes straight to its result document.
+ */
+export interface Grants {
+  readonly perRun: StepUsage;
+  readonly perStep: StepUsage;
+  readonly toolCalls: number;
+  readonly modelCalls: number;
+  readonly finish: boolean;
+}
+
+export const NO_GRANTS: Grants = {
+  perRun: { outputTokens: 0, requests: 0 },
+  perStep: { outputTokens: 0, requests: 0 },
+  toolCalls: 0,
+  modelCalls: 0,
+  finish: false,
+};
+
+/** The grants of a run (perRun) and of one step's iteration (perStep, the agent's limits, finish). */
+export function grantsFromEvents(db: DatabaseSync, runId: string, stepId: string, iteration: number): Grants {
+  const rows = db
+    .prepare(
+      "SELECT step_id AS stepId, iteration, payload_json AS payload FROM events WHERE kind = 'budget.grant' AND run_id = ?",
+    )
+    .all(runId) as Array<{ stepId: string | null; iteration: number | null; payload: string }>;
+  let grants = NO_GRANTS;
+  for (const row of rows) {
+    let p: Record<string, unknown>;
+    try {
+      p = JSON.parse(row.payload) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+    const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v > 0 ? v : 0);
+    const here = row.stepId === stepId && row.iteration === iteration;
+    const add = (u: StepUsage): StepUsage => ({
+      outputTokens: u.outputTokens + n(p.outputTokens),
+      requests: u.requests + n(p.requests),
+    });
+    if (p.scope === "perRun") grants = { ...grants, perRun: add(grants.perRun) };
+    else if (here && p.scope === "perStep") grants = { ...grants, perStep: add(grants.perStep) };
+    else if (here && p.scope === "agent")
+      grants = {
+        ...grants,
+        toolCalls: grants.toolCalls + n(p.toolCalls),
+        modelCalls: grants.modelCalls + n(p.modelCalls),
+      };
+    if (here && p.finish === true) grants = { ...grants, finish: true };
+  }
+  return grants;
+}
+
 export function usageFromEvents(
   db: DatabaseSync,
   runId: string,
@@ -84,8 +139,16 @@ export class BudgetedGateway implements ModelCaller {
   check(): void {
     const run = usageFromEvents(this.db, this.scope.runId);
     const step = usageFromEvents(this.db, this.scope.runId, this.scope.stepId, this.scope.iteration);
-    const perRun = this.budget.perRun;
-    const perStep = this.budget.perStep;
+    const grants = grantsFromEvents(this.db, this.scope.runId, this.scope.stepId, this.scope.iteration);
+    const plus = (cap: number | undefined, extra: number) => (cap === undefined ? undefined : cap + extra);
+    const perRun = {
+      outputTokens: plus(this.budget.perRun.outputTokens, grants.perRun.outputTokens),
+      requests: plus(this.budget.perRun.requests, grants.perRun.requests),
+    };
+    const perStep = {
+      outputTokens: plus(this.budget.perStep.outputTokens, grants.perStep.outputTokens),
+      requests: plus(this.budget.perStep.requests, grants.perStep.requests),
+    };
     if (perRun.outputTokens !== undefined && run.outputTokens >= perRun.outputTokens) {
       throw new BudgetExceededError("perRun", "outputTokens", run.outputTokens, perRun.outputTokens);
     }

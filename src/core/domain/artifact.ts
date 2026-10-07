@@ -9,7 +9,7 @@ export const ProvenanceSchema = z.discriminatedUnion("kind", [
     modelCallRefs: z.array(z.string()).default([]),
     toolCallRefs: z.array(z.string()).default([]),
     /** The agent finished on a limit, not because it was done: the document may be incomplete. */
-    budgetExhausted: z.enum(["tools", "model"]).optional(),
+    budgetExhausted: z.enum(["tools", "model", "budget"]).optional(),
   }),
   z.strictObject({
     kind: z.literal("tool"),

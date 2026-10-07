@@ -3,6 +3,14 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  type BudgetStop,
+  budgetGranted,
+  budgetStopOf,
+  grantBudget,
+  sourceOf,
+  unitOf,
+} from "../app/budgetStop.ts";
+import {
   awaitedArtifact,
   DecisionTakenError,
   decisionOn,
@@ -594,6 +602,114 @@ async function loopGate(
   }
 }
 
+const amount = (n: number) => n.toLocaleString("en-US");
+
+/** What a grant says, in a line: "+40 tool calls" or "finish with what it has". */
+function grantLine(stop: Pick<BudgetStop, "dimension">, g: { finish: boolean; amount?: number }): string {
+  return g.finish ? "finish with what it has" : `+${amount(g.amount ?? 0)} ${unitOf(stop.dimension)}`;
+}
+
+/**
+ * A run stopped on a budget (src/app/budgetStop.ts): a cap of the run or the step, or the agent's own
+ * limit on a step with `onLimit: ask`. Enter grants half the cap again and goes on from where the step
+ * stopped; `m` another amount; `f` finishes the step with what it has (marked incomplete). Pilot: the
+ * stop parked the run and `jarvis continue` showed nothing.
+ */
+async function budgetGate(
+  ctx: CliContext,
+  runtime: Runtime,
+  run: Run,
+  prompt: Prompt,
+  actor: Actor,
+): Promise<GateResult> {
+  const st = ctx.out.style;
+  const stop = budgetStopOf(runtime, run);
+  if (!stop) return "detached";
+  const unit = unitOf(stop.dimension);
+  const width = ctx.out.columns - 1;
+  ctx.out.line();
+  ctx.out.line(
+    `${st.warn("⏸")} ${st.heading(`${stop.stepId} stopped: ${amount(stop.used)} of ${amount(stop.cap)} ${unit}`)} ${st.muted(`— ${sourceOf(stop)}`)}`,
+  );
+  ctx.out.line(
+    `  ${st.muted(
+      stop.scope === "agent"
+        ? "its conversation is kept: more calls go on from where it stopped"
+        : "the step goes on from its last model call; the cap grows for this run only",
+    )}`,
+  );
+  if (run.workspace.mode === "worktree") {
+    const changes = changesIn(run.workspace.path);
+    if (changes && changes.length > 0)
+      ctx.out.line(cutStyled(`  ${st.muted("changed")}  ${formatChanges(changes, st)}`, width));
+  }
+  // granted on the page before this card opened: go on with it
+  const before = budgetGranted(runtime, run.id);
+  if (before) {
+    ctx.out.line(
+      `${st.warn("↻")} ${grantLine(stop, before)} ${st.muted(`(${whereFrom(before.channel, true)}${before.actor ? ` by ${before.actor}` : ""})`)}`,
+    );
+    return "decided";
+  }
+  const keys: Array<[string, string, string]> = [
+    ["", "enter", `+${amount(stop.suggested)} ${unit} and go on`],
+    ["m", "m", "another amount"],
+    ["f", "f", "finish with what it has (marked incomplete)"],
+    ["q", "q", "later"],
+  ];
+  const question = `${st.cmd(">")} `;
+  const elsewhere = watchRun(() => {
+    const now = runtime.runs.get(run.id);
+    if (now?.state !== "WAITING_HUMAN") return { line: movedLine(ctx, now), moved: true };
+    const g = budgetGranted(runtime, run.id);
+    return g
+      ? {
+          line: `${st.warn("↻")} ${grantLine(stop, g)} ${st.muted(`(${whereFrom(g.channel, false)}${g.actor ? ` by ${g.actor}` : ""})`)}`,
+          moved: false,
+        }
+      : undefined;
+  }, pollMs(ctx));
+  const closeCard = openCard(runtime, run, "budget");
+  const grant = (choice: { more: number } | { finish: true }) => {
+    grantBudget(runtime, run, stop, actor, choice, "cli");
+    ctx.out.line(
+      `${st.warn("↻")} ${"finish" in choice ? `${stop.stepId} finishes with what it has` : `+${amount(choice.more)} ${unit} — ${stop.stepId} goes on`}`,
+    );
+    return "decided" as const;
+  };
+  try {
+    for (;;) {
+      ctx.out.line();
+      if (ctx.out.accessible) {
+        for (const [i, [, , what]] of keys.entries()) ctx.out.line(`  ${i + 1}. ${what}`);
+        ctx.out.bell();
+      } else
+        ctx.out.line(`  ${keys.map(([, key, what]) => `${st.cmd(key)} ${st.muted(what)}`).join("    ")}`);
+      const answer = await prompt.ask(question, { signal: elsewhere.signal });
+      const seen = elsewhere.seen();
+      if (seen) return pickedUp(ctx, runtime, run.id, seen);
+      const picked = ctx.out.accessible && answer !== undefined ? keys[Number(answer) - 1]?.[0] : undefined;
+      const input = picked ?? answer;
+      if (input === undefined || input === "q") return "detached";
+      if (input === "") return grant({ more: stop.suggested });
+      if (input === "f") return grant({ finish: true });
+      if (input === "m") {
+        const raw = await prompt.ask(`  how many more ${unit}? `, { signal: elsewhere.signal });
+        const again = elsewhere.seen();
+        if (again) return pickedUp(ctx, runtime, run.id, again);
+        const n = Number((raw ?? "").replace(/[\s,_]/g, ""));
+        if (Number.isInteger(n) && n > 0) return grant({ more: n });
+        ctx.out.line(st.muted("  a whole number above zero"));
+        continue;
+      }
+      ctx.out.line(st.muted(ctx.out.accessible ? "  1–4" : "  enter, m, f or q"));
+    }
+  } finally {
+    elsewhere.stop();
+    closeCard();
+  }
+}
+
 interface Reason {
   readonly kind?: string;
   readonly text: string;
@@ -637,6 +753,7 @@ export async function humanGate(
       : "detached";
   }
   const open = tools.open ?? systemOpener(ctx);
+  if (run.waitingFor?.kind === "budget") return budgetGate(ctx, runtime, run, prompt, actor);
   if (run.waitingFor?.kind === "loop")
     return loopGate(ctx, runtime, run, prompt, tools.shell ?? systemShell(ctx), open, actor);
   const awaited = awaitedArtifact(runtime, run);

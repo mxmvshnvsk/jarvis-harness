@@ -36,7 +36,12 @@ function clip(text: string, max: number): string {
 export function incompleteNote(a: ArtifactVersion): string {
   const p = a.provenance;
   if (p.kind !== "agent" || !p.budgetExhausted) return "";
-  const what = p.budgetExhausted === "tools" ? "tool calls" : "model calls";
+  const what =
+    p.budgetExhausted === "tools"
+      ? "tool calls"
+      : p.budgetExhausted === "model"
+        ? "model calls"
+        : "its step budget (tokens or requests)";
   return `> INCOMPLETE: agent ${p.agentId} ran out of ${what} while producing this; what it did not cover is unknown. Verify what you rely on.\n\n`;
 }
 

@@ -131,7 +131,7 @@ export function formatStepReport(
   }
   const retries = r.retries > 0 ? ` ${st.warn(`· ${r.retries} retr${r.retries === 1 ? "y" : "ies"}`)}` : "";
   const limit = r.budgetExhausted
-    ? ` ${st.warn(`· ${r.budgetExhausted === "model" ? "model call" : "tool"} limit reached, result may be incomplete`)}`
+    ? ` ${st.warn(`· ${r.budgetExhausted === "model" ? "model call" : r.budgetExhausted === "budget" ? "budget" : "tool"} limit reached, result may be incomplete`)}`
     : "";
   const outcome = r.outcome && r.outcome !== "success" ? ` ${st.muted("·")} ${st.warn(r.outcome)}` : "";
   const produced = artifacts.length > 0 ? `  ${st.muted("→")} ${producedOf(artifacts, link)}` : "";

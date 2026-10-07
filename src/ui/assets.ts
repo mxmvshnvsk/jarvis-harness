@@ -56,6 +56,7 @@ a{color:var(--accent)}a:hover{color:var(--accent-dark)}
 .repo{display:flex;align-items:center;gap:8px;font-size:14px;color:var(--muted)}
 select,textarea,input[type=text]{font-family:inherit;font-size:14px;color:var(--ink);border:1px solid var(--field-line);border-radius:6px;background:var(--panel)}
 select{height:36px;padding:0 8px;max-width:60vw}
+input.amount{height:44px;width:11em;padding:0 10px;font-family:inherit;font-size:14px;color:var(--ink);border:1px solid var(--field-line);border-radius:6px;background:var(--panel)}
 .status{margin-left:auto;display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px}
 .live{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:12px;color:var(--muted)}
 .dot{width:8px;height:8px;border-radius:4px;background:var(--faint)}
@@ -301,7 +302,8 @@ export const SCRIPT = `
           fresh.hidden = true;
         }
         if (el.contains(document.activeElement) && document.activeElement !== document.body) continue;
-        if (el.querySelector('textarea') && [...el.querySelectorAll('textarea')].some((t) => t.value)) continue;
+        // something typed and not sent yet (a comment, an amount) stays: the refresh waits for it
+        if ([...el.querySelectorAll('textarea, input[type=number]')].some((t) => t.value)) continue;
         el.replaceWith(fresh);
       }
       const title = next.querySelector('title');

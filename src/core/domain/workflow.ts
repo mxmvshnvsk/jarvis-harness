@@ -50,6 +50,12 @@ export const StepDefinitionSchema = z.strictObject({
    * the agent is not asked; when it answers `needs_agent`, the agent does the step as usual.
    */
   quick: z.string().min(1).optional(),
+  /**
+   * Agentic steps, when the agent uses up its tool or model calls: `finish` (default) — the result
+   * from what it has, marked incomplete for the steps after it; `ask` — the run waits for a person:
+   * more calls and on, or finish. For steps whose half-done result costs more than a question.
+   */
+  onLimit: z.enum(["finish", "ask"]).optional(),
 });
 export type StepDefinition = z.infer<typeof StepDefinitionSchema>;
 

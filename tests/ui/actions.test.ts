@@ -270,3 +270,81 @@ describe("a used-up loop on the page", () => {
     expect(after).toContain(`jarvis continue ${short}`);
   });
 });
+
+describe("a stop on a budget, decided on the page", () => {
+  function budgetStop(budget: Record<string, unknown>) {
+    const run = rt.runs.create({
+      task: "Order form: phone number mask",
+      workflow: "gated",
+      owner: DEV,
+      workspace: { mode: "cwd", repoRoot: sb.project, path: sb.project, baseRef: "HEAD" },
+      dataClass: "internal",
+    });
+    rt.runs.update(run.id, { currentStep: "write", currentIteration: 1 });
+    rt.runs.transition(run.id, "RUNNING");
+    rt.checkpoints.save({ runId: run.id, stepId: "write", iteration: 1, kind: "suspend", state: { budget } });
+    rt.runs.transition(run.id, "WAITING_HUMAN", {
+      reason: "budget",
+      waitingFor: { kind: "budget", detail: "x" },
+    });
+    rt.events.emit({ kind: "run.state", runId: run.id, payload: { state: "WAITING_HUMAN" } });
+    return { run, short: run.id.slice(4, 12) };
+  }
+
+  it("the card says what ran out; more is recorded once, with the actor and channel ui", async () => {
+    const { run, short } = budgetStop({
+      scope: "agent",
+      dimension: "toolCalls",
+      used: 80,
+      cap: 80,
+      agent: "implementation",
+    });
+    const list = await getPage("/");
+    expect(list).toContain("⏸ budget · write");
+    expect(list).toContain("write stopped at 80 of 80 tool calls");
+    const page = await getPage(`/runs/${short}`);
+    expect(page).toContain("write stopped: 80 of 80 tool calls");
+    expect(page).toContain("its conversation is kept");
+    expect(page).toContain("+40 tool calls and go on");
+    expect(page).toContain("Finish with what it has");
+    expect(page).toContain(`action="/runs/${short}/budget"`);
+
+    const bad = await post(`/runs/${short}/budget`, { t: ui.token, choice: "more", amount: "-3" });
+    expect(bad.location).toBe(`/runs/${short}?notice=amount`);
+    expect((await post(`/runs/${short}/budget`, { t: "nope", choice: "finish" })).status).toBe(403);
+    expect(rt.events.list({ runId: run.id, kind: "budget.grant" })).toHaveLength(0);
+
+    const res = await post(`/runs/${short}/budget`, { t: ui.token, choice: "more", amount: "25" });
+    expect(res.status).toBe(303);
+    expect(res.location).toBe(`/runs/${short}`);
+    // a second press (another window) records nothing more
+    await post(`/runs/${short}/budget`, { t: ui.token, choice: "finish" });
+    const grants = rt.events.list({ runId: run.id, kind: "budget.grant" });
+    expect(grants).toHaveLength(1);
+    expect(grants[0]).toMatchObject({
+      stepId: "write",
+      actor: "user:dev@example.com",
+      payload: { scope: "agent", toolCalls: 25, channel: "ui" },
+    });
+    const after = await getPage(`/runs/${short}`);
+    expect(after).toContain("↻ +25 tool calls — decided by dev@example.com from the page");
+    expect(after).toContain(`jarvis continue ${short}`);
+  });
+
+  it("finish after a cap of the step: the allowance for the result document comes with it", async () => {
+    const { run, short } = budgetStop({
+      scope: "perStep",
+      dimension: "outputTokens",
+      used: 40_312,
+      cap: 40_000,
+    });
+    expect(await getPage(`/runs/${short}`)).toContain("budget.perStep");
+    await post(`/runs/${short}/budget`, { t: ui.token, choice: "finish" });
+    expect(rt.events.list({ runId: run.id, kind: "budget.grant" })[0]?.payload).toMatchObject({
+      scope: "perStep",
+      finish: true,
+      requests: 4,
+      outputTokens: 32_000,
+    });
+  });
+});

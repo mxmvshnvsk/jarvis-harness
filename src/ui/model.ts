@@ -1,5 +1,6 @@
 import { basename } from "node:path";
 import { type Activity, activityOf, noticeOf } from "../app/activity.ts";
+import { type BudgetGrant, type BudgetStop, budgetGranted, budgetStopOf } from "../app/budgetStop.ts";
 import { awaitedArtifact, type Decision, decisionOn, rerunRequested, waitingCard } from "../app/decide.ts";
 import { Journey, type LoopReport, type StepReport } from "../app/journey.ts";
 import type { Runtime } from "../app/runtime.ts";
@@ -53,12 +54,21 @@ export interface ApprovalCard {
   readonly decision?: Decision;
 }
 
+/** A stop on a budget (src/app/budgetStop.ts): more and go on, or finish the step with what it has. */
+export interface BudgetCard {
+  readonly kind: "budget";
+  readonly stop: BudgetStop;
+  readonly changes?: readonly Change[];
+  /** Decided since the run stopped (the page, the terminal's card): it goes on, or waits for `continue`. */
+  readonly granted?: BudgetGrant;
+}
+
 export interface OtherCard {
   readonly kind: "other";
   readonly what: string;
 }
 
-export type WaitCard = LoopCard | ApprovalCard | OtherCard;
+export type WaitCard = LoopCard | ApprovalCard | BudgetCard | OtherCard;
 
 export interface WaitingRun {
   readonly run: Run;
@@ -140,6 +150,14 @@ export async function waitCardOf(runtime: Runtime, run: Run, homeDir: string): P
       ...(changes ? { changes } : {}),
       ...(rerun ? { rerun } : {}),
     };
+  }
+  if (kind === "budget") {
+    const stop = budgetStopOf(runtime, run);
+    if (stop) {
+      const changes = run.workspace.mode === "worktree" ? changesIn(run.workspace.path) : undefined;
+      const granted = budgetGranted(runtime, run.id);
+      return { kind: "budget", stop, ...(changes ? { changes } : {}), ...(granted ? { granted } : {}) };
+    }
   }
   const awaited = kind === "approval" || !kind ? awaitedArtifact(runtime, run) : undefined;
   if (awaited) {
