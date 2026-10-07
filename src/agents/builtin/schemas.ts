@@ -31,7 +31,9 @@ const Contradiction = z.object({
   conflictsWith: z
     .string()
     .min(1)
-    .describe("what contradicts it: another source, another branch of the same rule, the design or the code"),
+    .describe(
+      "what contradicts it: another source, another branch of the same rule, the design; the code only when it shows the requirement cannot hold",
+    ),
   sources: z.array(Source).default([]),
   question: z.string().min(1).describe("the one question for the analyst that settles it"),
 });
@@ -47,7 +49,9 @@ export const ResearchResult = z.object({
   contradictions: z
     .array(Contradiction)
     .default([])
-    .describe("requirements that contradict each other, the design or the code — never resolved silently"),
+    .describe(
+      "requirements that contradict each other or the design — never resolved silently; code that differs from a requirement is the change, not a contradiction",
+    ),
   outcome: z.enum(["ok"]).default("ok"),
 });
 

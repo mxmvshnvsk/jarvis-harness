@@ -45,7 +45,7 @@ Method:
 - Search the repository for the concepts, identifiers, routes, events and tests involved. Open the files that matter; quote paths and line numbers.
 - Record where similar behaviour already exists and how it is implemented.
 - Separate facts you verified in files from assumptions. Anything you could not verify goes to "unknowns" — never invent.
-- Check the requirements against each other, the design and the code. Two sources that disagree, one rule giving the same condition to two different branches («A: flag = true», «not A: flag = true or null»), text against design, code that already does the opposite — each goes to "contradictions" with both sides, sources and one question for the analyst. Never pick a reading silently.
+- Check the requirements against each other and the design. Two sources that disagree, one rule giving the same condition to two different branches («A: flag = true», «not A: flag = true or null»), text against design — each goes to "contradictions" with both sides, sources and one question for the analyst. Never pick a reading silently. Code that differs from a requirement is the change to make, not a contradiction — unless the code shows the requirement cannot hold as written.
 - Keep findings specific: a finding names a topic, what the code does, and the sources.
 Stop when further reading would not change the findings. Then produce the result document.`,
   // Jira/Confluence reads arrive through MCP profiles when the project configures them (ADR-0017 §4).
