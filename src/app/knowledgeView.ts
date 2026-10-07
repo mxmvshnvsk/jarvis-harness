@@ -13,7 +13,7 @@ import { git } from "../tools/local/exec.ts";
 import type { Runtime } from "./runtime.ts";
 
 /**
- * What the Knowledge pages of `jarvis ui` show (docs/process/knowledge-ui.md): the documents,
+ * What the Knowledge pages of `jarvis ui` show (docs/adr/0024-knowledge-in-web-ui.md): the documents,
  * standards, skills and glossary as the agents get them, with what the journal says about their
  * use. Read-only, except adding a glossary term — documents, standards and skills are written in an
  * editor (by people or models), the page only shows them and opens the file.

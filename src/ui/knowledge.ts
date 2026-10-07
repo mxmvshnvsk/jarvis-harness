@@ -13,7 +13,7 @@ import { type Html, html, markdownToHtml } from "./html.ts";
 import type { Actions } from "./pages.ts";
 
 /**
- * Knowledge in `jarvis ui` (docs/process/knowledge-ui.md): what the agents know, as they get it.
+ * Knowledge in `jarvis ui` (docs/adr/0024-knowledge-in-web-ui.md): what the agents know, as they get it.
  * Read-only pages over the files — documents, standards and skills are written in an editor, by
  * people or models; the page shows them, says how the agents use them and opens the file. The one
  * thing written here is a new glossary term, checked against the code first.
