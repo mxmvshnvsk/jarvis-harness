@@ -79,6 +79,40 @@ export function extractJson(text: string): string | undefined {
   return undefined;
 }
 
+/**
+ * Escapes a `"` inside a string that cannot be its end: one not followed (after blanks) by `,` `}` `]` `:`
+ * or the end. Valid JSON comes back as it was; a quote followed by a comma inside the text stays broken.
+ */
+export function escapeStrayQuotes(text: string): string {
+  const start = text.search(/[[{]/);
+  if (start < 0) return text;
+  let out = text.slice(0, start);
+  let inString = false;
+  for (let i = start; i < text.length; i += 1) {
+    const ch = text[i] as string;
+    if (!inString) {
+      if (ch === '"') inString = true;
+      out += ch;
+      continue;
+    }
+    if (ch === "\\") {
+      out += ch + (text[i + 1] ?? "");
+      i += 1;
+      continue;
+    }
+    if (ch === '"') {
+      const next = /\S/.exec(text.slice(i + 1))?.[0];
+      if (next === undefined || next === "," || next === "}" || next === "]" || next === ":") {
+        inString = false;
+        out += ch;
+      } else out += '\\"';
+      continue;
+    }
+    out += ch;
+  }
+  return out;
+}
+
 export type ParsedStructured<T> =
   | { readonly ok: true; readonly value: T }
   | { readonly ok: false; readonly issues: string[] };
@@ -89,14 +123,25 @@ export function parseStructured<T>(
   schema: z.ZodType<T>,
   mode: StructuredMode = "text",
 ): ParsedStructured<T> {
-  const raw = mode === "text" ? extractJson(text) : (extractJson(text) ?? text);
-  if (raw === undefined) return { ok: false, issues: ["no JSON document found in the response"] };
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch (error) {
-    return { ok: false, issues: [`invalid JSON: ${error instanceof Error ? error.message : String(error)}`] };
+  const read = (from: string): { value: unknown } | { error: string } | undefined => {
+    const raw = mode === "text" ? extractJson(from) : (extractJson(from) ?? from);
+    if (raw === undefined) return undefined;
+    try {
+      return { value: JSON.parse(raw) };
+    } catch (error) {
+      return { error: `invalid JSON: ${error instanceof Error ? error.message : String(error)}` };
+    }
+  };
+  let got = read(text);
+  // a quote inside a string the model did not escape («Убрать "Способ доставки"»): mended by code, not by
+  // another model call (pilot: 40 s for a second document that only escaped the quotes)
+  if (got === undefined || "error" in got) {
+    const mended = read(escapeStrayQuotes(text));
+    if (mended && "value" in mended) got = mended;
   }
+  if (got === undefined) return { ok: false, issues: ["no JSON document found in the response"] };
+  if ("error" in got) return { ok: false, issues: [got.error] };
+  const parsed = got.value;
   const result = schema.safeParse(parsed);
   if (result.success) return { ok: true, value: result.data };
   return {

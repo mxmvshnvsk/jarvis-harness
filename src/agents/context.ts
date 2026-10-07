@@ -108,6 +108,7 @@ export function outputContract(def: AgentDefinition): string {
     `When asked for the result, answer with one JSON document matching this schema (artifact type "${def.output.type}"):`,
     stableJson(schema),
     `Allowed values of "outcome": ${def.output.outcomes.map((o) => `"${o}"`).join(", ")}. Use "ok" unless the instructions say otherwise, and fill "reasons" whenever outcome is not "ok".`,
+    'Inside string values quote with «» (or escape a double quote as \\"): a bare " ends the string and breaks the document.',
   ].join("\n");
 }
 

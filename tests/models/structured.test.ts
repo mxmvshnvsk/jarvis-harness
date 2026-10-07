@@ -8,6 +8,7 @@ import {
   ModelGateway,
   StructuredOutputError,
 } from "../../src/models/index.ts";
+import { escapeStrayQuotes, parseStructured } from "../../src/models/structured.ts";
 import { completion, type FakeOpenAi, startFakeOpenAi } from "../helpers/fakeOpenAi.ts";
 import { testConfig } from "../helpers/modelConfig.ts";
 
@@ -113,5 +114,30 @@ describe("generateStructured", () => {
     expect(soe.repairs).toBe(2);
     expect(soe.rawText).toBe("nope");
     expect(server.requests).toHaveLength(3);
+  });
+});
+
+describe("a quote the model did not escape inside a string (pilot: one more model call only to escape it)", () => {
+  const Doc = z.object({ summary: z.string(), notes: z.array(z.string()) });
+
+  it("is mended by code: the document parses, the quotes stay in the text", () => {
+    const answer =
+      'Here:\n```json\n{"summary": "Требование «Убрать переключатель "Способ доставки"» относится к шагу", "notes": ["a "b" c", "d"]}\n```';
+    const r = parseStructured(answer, Doc);
+    expect(r).toEqual({
+      ok: true,
+      value: {
+        summary: 'Требование «Убрать переключатель "Способ доставки"» относится к шагу',
+        notes: ['a "b" c', "d"],
+      },
+    });
+  });
+
+  it("leaves valid JSON as it is, and what it cannot tell apart to the repair call", () => {
+    const valid = '{"summary": "say \\"hi\\"", "notes": []}';
+    expect(escapeStrayQuotes(valid)).toBe(valid);
+    // a stray quote followed by a comma looks like the end of the string: not guessed
+    const r = parseStructured('{"summary": "the "x", then y", "notes": []}', Doc);
+    expect(r.ok).toBe(false);
   });
 });
