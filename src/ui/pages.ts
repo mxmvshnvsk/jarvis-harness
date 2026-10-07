@@ -1234,7 +1234,16 @@ ${
     ? html`<ul class="mhs">${h.models.map(modelHtml)}</ul>`
     : html`<p class="muted">No models configured — add one to ~/.jarvis/config.yaml.</p>`
 }
+${h.load ? loadHtml(h.load) : ""}
 <p class="hint">In the terminal: <code>jarvis models stats</code> (latency, failures, tokens) · <code>jarvis models list</code> (pools, probes)</p>`;
+}
+
+/** Requests at once over every run: what a pool's concurrency limit would cap (none is applied yet). */
+function loadHtml(load: NonNullable<ModelsHealth["load"]>): Html {
+  const n = load.inFlight.length;
+  return html`<div class="mh mload"><div class="row"><b>At once</b><span class="meta">${n === 0 ? "no model request now" : `${n} request${n === 1 ? "" : "s"} now`}${load.peak ? ` · peak today ${load.peak.count} at ${wall(load.peak.at)}` : ""}</span></div>
+${n > 0 ? html`<ul class="mload-runs">${load.inFlight.map((f) => html`<li><a href="/runs/${f.run}">${f.run}</a> <span class="meta">${f.step}${f.modelId ? ` · ${f.modelId}` : ""} · waiting ${clock(Math.max(0, f.waitingMs))}</span></li>`)}</ul>` : ""}
+<p class="hint">Over every run and process. <code>maxConcurrency</code> of a model holds within one run only; nothing caps runs together yet (a pool's <code>limits.concurrency</code>): watch this if the platform starts answering 429.</p></div>`;
 }
 
 /** The popover before the first numbers: open at once, saying what it waits for. */

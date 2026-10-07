@@ -103,6 +103,8 @@ input.amount{height:44px;width:11em;padding:0 10px;font-family:inherit;font-size
 .pop-head .meta{margin-left:auto}
 .mhs{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:12px}
 .mh{display:flex;flex-direction:column;gap:6px;padding-top:12px;border-top:1px solid var(--line-soft)}
+.mload .row{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
+.mload-runs{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:2px;font-size:13px}
 .mh:first-child{border-top:0;padding-top:0}
 .mh .why{margin:0;padding-left:18px;font-size:13px;line-height:19px;color:var(--ink-2)}
 .win{display:flex;flex-direction:column;gap:4px}

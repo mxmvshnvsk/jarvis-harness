@@ -1,6 +1,7 @@
 import type { Run } from "../core/domain/run.ts";
 import type { StoredEvent } from "../telemetry/events.ts";
 import { reasonOf } from "./activity.ts";
+import { type ModelLoad, modelLoadOf } from "./modelLoad.ts";
 import { failureReason, type ModelStats, modelStats, type Percentiles, percentiles } from "./modelStats.ts";
 import type { Runtime } from "./runtime.ts";
 
@@ -85,6 +86,8 @@ export interface ModelsHealth {
   readonly state: HealthState;
   readonly models: readonly ModelHealth[];
   readonly at: string;
+  /** Model requests at once over every run and process (src/app/modelLoad.ts). */
+  readonly load?: ModelLoad;
 }
 
 const RANK: Record<HealthState, number> = { idle: 0, ok: 1, busy: 2, down: 3 };
@@ -291,6 +294,10 @@ function healthOf(m: { id: string; pool: string }, input: HealthInput, stats?: M
 
 /** The same, read from a runtime: its configured models, their pools, the journal and the parked runs. */
 export function modelsHealthOf(runtime: Runtime, now: Date = new Date()): ModelsHealth {
+  return { ...modelsHealthOnly(runtime, now), load: modelLoadOf(runtime, now) };
+}
+
+function modelsHealthOnly(runtime: Runtime, now: Date): ModelsHealth {
   const config = runtime.loaded.config;
   const since = new Date(now.getTime() - RECENT_MINUTES * 60_000).toISOString();
   const events = ["model.call", "model.retry", "model.error", "model.progress"]
