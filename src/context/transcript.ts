@@ -48,6 +48,13 @@ export interface TrimOptions {
   readonly minChars?: number;
   /** Stores the full text, returns a reference the agent can read back. */
   readonly store: (text: string) => string;
+  /**
+   * Stop once this many characters are saved (default: trim every result it may). With it, the results
+   * `first` picks go before the others, and each group oldest first.
+   */
+  readonly saveChars?: number;
+  /** Results that are cheap to have again and rarely needed again (a search, a listing): trimmed first. */
+  readonly first?: (message: Message) => boolean;
 }
 
 export interface TrimResult {
@@ -57,6 +64,16 @@ export interface TrimResult {
 }
 
 const HEAD_CHARS = 240;
+
+/** The tool behind each result, by its call id (the assistant message that asked for it). */
+export function toolNamesOf(transcript: readonly Message[]): Map<string, string> {
+  const names = new Map<string, string>();
+  for (const m of transcript) for (const c of m.toolCalls ?? []) names.set(c.id, c.name);
+  return names;
+}
+
+/** Searches and listings: a pointer is as good as the result, and running them again is cheap. */
+export const CHEAP_TO_REDO = /(?:^|[._])(?:search|list|grep|glob|find)$|^git[._](?:log|status)$/;
 
 /** Tool results older than the `keepRecent` newest that a trim would shorten. */
 export function trimmable(
@@ -79,10 +96,25 @@ export function trimToolResults(transcript: readonly Message[], options: TrimOpt
   const protectedIndexes = new Set(toolIndexes.slice(Math.max(0, toolIndexes.length - options.keepRecent)));
   let trimmed = 0;
   let savedChars = 0;
+  const candidates = toolIndexes.filter((i) => {
+    const m = transcript[i] as Message;
+    if (protectedIndexes.has(i)) return false;
+    if (m.content.length < minChars || m.content.includes(TRIMMED_MARKER)) return false;
+    return !options.keep?.(m.content, m);
+  });
+  const chosen = new Set<number>();
+  if (options.saveChars === undefined) for (const i of candidates) chosen.add(i);
+  else {
+    const rank = (i: number) => (options.first?.(transcript[i] as Message) ? 0 : 1);
+    let planned = 0;
+    for (const i of [...candidates].sort((a, b) => rank(a) - rank(b) || a - b)) {
+      if (planned >= options.saveChars) break;
+      chosen.add(i);
+      planned += (transcript[i] as Message).content.length - HEAD_CHARS;
+    }
+  }
   const next = transcript.map((m, i) => {
-    if (m.role !== "tool" || protectedIndexes.has(i)) return m;
-    if (m.content.length < minChars || m.content.includes(TRIMMED_MARKER)) return m;
-    if (options.keep?.(m.content, m)) return m;
+    if (!chosen.has(i)) return m;
     const ref = options.store(m.content);
     const newline = m.content.indexOf("\n");
     const header = newline > 0 && newline < 200 ? m.content.slice(0, newline) : "";

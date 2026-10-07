@@ -1,11 +1,25 @@
 import { ModelError } from "../models/errors.ts";
 import type { Message } from "../models/types.ts";
 import { levelOf, type PressureLevel, pressureOf, type Thresholds } from "./pressure.ts";
-import { compactTranscript, isSourceResult, type Summary, trimmable, trimToolResults } from "./transcript.ts";
+import {
+  CHEAP_TO_REDO,
+  compactTranscript,
+  isSourceResult,
+  type Summary,
+  toolNamesOf,
+  trimmable,
+  trimToolResults,
+} from "./transcript.ts";
 
 /** At `watch`: keep the 3 newest tool results, and trim only once 4 older ones are untrimmed. */
 const WATCH_KEEP = 3;
 const WATCH_BATCH = 4;
+/**
+ * At `watch`, trim only down to this share of the `watch` threshold (0.4 → 0.3), searches and listings
+ * first, then the oldest results. Pilot: at 184k of a 459k window every old result went (66, 305k chars)
+ * and the agent read 19 of its files again at once.
+ */
+const WATCH_TARGET = 0.75;
 
 /**
  * Acts on context pressure before every model call (ADR-0013 §6, ADR-0001 §7):
@@ -49,6 +63,12 @@ export interface ManageResult {
   readonly pressure: number;
   readonly changed: boolean;
 }
+
+const charsOf = (messages: readonly Message[]): number =>
+  messages.reduce(
+    (n, m) => n + m.content.length + (m.toolCalls ?? []).reduce((k, c) => k + c.arguments.length, 0),
+    0,
+  );
 
 /** Errors that must reach the run (quota, auth), not be absorbed by a fallback. */
 function mustPropagate(error: unknown): boolean {
@@ -96,11 +116,18 @@ export class ContextManager {
     /** `light`: the task's own sources (issue, pages, frames) and files read again stay. */
     const keepLight = (content: string, m: Message) =>
       isSourceResult(content) || (m.toolCallId !== undefined && this.o.pinned?.(m.toolCallId) === true);
-    const trim = (keepRecent: number, minChars?: number, light = false) => {
+    const trim = (keepRecent: number, minChars?: number, light = false, saveChars?: number) => {
+      const names = saveChars === undefined ? undefined : toolNamesOf(transcript);
       const r = trimToolResults(transcript, {
         keepRecent,
         ...(minChars ? { minChars } : {}),
         ...(light ? { keep: keepLight } : {}),
+        ...(names && saveChars !== undefined
+          ? {
+              saveChars,
+              first: (m: Message) => CHEAP_TO_REDO.test(names.get(m.toolCallId ?? "") ?? ""),
+            }
+          : {}),
         store: this.o.store,
       });
       if (r.trimmed > 0) {
@@ -160,7 +187,13 @@ export class ContextManager {
     if (level === "watch") {
       // in batches: trimming one more result on every call would change the prompt's prefix on
       // every call and a prefix cache would never reuse past it (ADR-0013 §4)
-      if (trimmable(transcript, WATCH_KEEP, 600, keepLight) >= WATCH_BATCH) trim(WATCH_KEEP, undefined, true);
+      if (trimmable(transcript, WATCH_KEEP, 600, keepLight) >= WATCH_BATCH) {
+        // tokens to shed, in characters at this prompt's own ratio
+        const target = t.watch * WATCH_TARGET * this.o.effective;
+        const chars = charsOf(base) + charsOf(transcript);
+        const saveChars = Math.ceil(((tokens - target) * chars) / Math.max(1, tokens));
+        trim(WATCH_KEEP, undefined, true, saveChars);
+      }
     } else if (level === "compact") {
       trim(4, undefined, true);
       if (pressure >= t.compact) await compact("compact", 3, this.o.compactTarget);
