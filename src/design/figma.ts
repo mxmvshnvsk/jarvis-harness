@@ -17,7 +17,11 @@ export interface FigmaNode {
   readonly text?: string;
   readonly textStyle?: string | Record<string, unknown>;
   readonly fills?: string | unknown[];
-  readonly strokes?: string | unknown[];
+  /** A style key, or the stroke itself: `{ colors, strokeWeight, strokeDashes }` or a list of paints. */
+  readonly strokes?: string | unknown[] | Record<string, unknown>;
+  readonly strokeWeight?: string | number;
+  readonly strokeWeights?: string;
+  readonly strokeDashes?: readonly number[];
   readonly borderRadius?: string;
   readonly opacity?: number;
   readonly layout?: string | Record<string, unknown>;
@@ -88,6 +92,57 @@ export function describeFrame(design: FigmaDesign, options: DescribeOptions = {}
     if (first && typeof first === "object" && "type" in first)
       return String((first as { type: unknown }).type).toLowerCase();
     return undefined;
+  };
+  const paintOf = (p: unknown): string | undefined => {
+    if (typeof p === "string") return p;
+    if (p && typeof p === "object") {
+      const o = p as { hex?: unknown; opacity?: unknown; type?: unknown };
+      if (typeof o.hex === "string")
+        return typeof o.opacity === "number" && o.opacity < 1
+          ? `${o.hex} ${Math.round(o.opacity * 100)}%`
+          : o.hex;
+      if (o.type !== undefined) return String(o.type).toLowerCase();
+    }
+    return undefined;
+  };
+  /**
+   * A border or a divider line: weight per side, colour, dashes. The server keeps it as a style
+   * (`stroke_…`: colours, strokeWeight — `1px` or `0px 0px 1px 0px` per side — and strokeDashes) or
+   * on the node; pilot: the line under a modal's header read as a frame "?×0" without it.
+   */
+  const strokeOf = (n: FigmaNode): { text: string; color?: string } | undefined => {
+    const { value } = resolve<unknown>(n.strokes as string | undefined);
+    const v = (n.strokes !== undefined && typeof n.strokes !== "string" ? n.strokes : value) as unknown;
+    const obj = v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
+    const paints = Array.isArray(v) ? v : Array.isArray(obj.colors) ? (obj.colors as unknown[]) : [];
+    const color = paintOf(paints[0]);
+    if (!color) return undefined;
+    const rawWeight = obj.strokeWeights ?? obj.strokeWeight ?? n.strokeWeights ?? n.strokeWeight;
+    const weight =
+      typeof rawWeight === "number" ? `${rawWeight}px` : typeof rawWeight === "string" ? rawWeight : "1px";
+    const dashes = (obj.strokeDashes ?? n.strokeDashes) as unknown;
+    const dashed = Array.isArray(dashes) && dashes.length > 0 ? " dashed" : "";
+    // `top right bottom left` (or its CSS shorthands): name the sides that have a line
+    const parts = weight.trim().split(/\s+/);
+    const sides =
+      parts.length === 4
+        ? (parts as [string, string, string, string])
+        : parts.length === 3
+          ? ([parts[0], parts[1], parts[2], parts[1]] as [string, string, string, string])
+          : parts.length === 2
+            ? ([parts[0], parts[1], parts[0], parts[1]] as [string, string, string, string])
+            : undefined;
+    const zero = (w: string) => /^0(px)?$/.test(w);
+    if (sides && new Set(sides).size > 1) {
+      const named = (["top", "right", "bottom", "left"] as const)
+        .map((side, i) => (zero(sides[i] as string) ? "" : `${side} ${sides[i]}`))
+        .filter(Boolean);
+      if (named.length === 0) return undefined;
+      return { text: `border-${named.join(" ")}${dashed} ${color}`, color };
+    }
+    const w = sides ? sides[0] : weight;
+    if (zero(w)) return undefined;
+    return { text: `border ${w}${dashed} ${color}`, color };
   };
   const textStyleOf = (s: FigmaNode["textStyle"]): string | undefined => {
     const { value, name } = resolve<Record<string, unknown>>(s);
@@ -171,10 +226,17 @@ export function describeFrame(design: FigmaDesign, options: DescribeOptions = {}
       : isText
         ? `text «${(n.text ?? "").replace(/\s+/g, " ").trim().slice(0, 80)}»${textStyle ? ` · ${textStyle}` : ""}`
         : `${type.toLowerCase() || "node"}${n.name ? ` "${n.name}"` : ""}`;
-    const layout = isText ? "" : layoutOf(n);
+    const stroke = isText ? undefined : strokeOf(n);
+    if (stroke?.color) count(colors, `${stroke.color} (line)`);
+    let layout = isText ? "" : layoutOf(n);
+    // a frame with no height (or width) drawn by its stroke is a line: say so, not "?×0"
+    const flat = /(^|, )(\?|\d+)×0$|(^|, )0×(\?|\d+)$/.test(layout);
+    if (stroke && flat) layout = layout.replace(/(, )?(\?|\d+)×0$|(, )?0×(\?|\d+)$/, "");
     const extra = [
+      stroke && flat ? `divider: ${stroke.text.replace(/^border(-\w+)? /, "")}` : "",
       layout,
       !isText && color ? `bg ${color}` : "",
+      stroke && !flat ? stroke.text : "",
       n.borderRadius ? `radius ${n.borderRadius}` : "",
       n.opacity !== undefined && n.opacity < 1 ? `opacity ${n.opacity}` : "",
     ].filter(Boolean);

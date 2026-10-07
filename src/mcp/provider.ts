@@ -224,17 +224,20 @@ export class McpToolProvider implements ToolProvider {
         },
       };
     const key = McpResultStore.key([planned.name, sent, args.raw === true || args.raw === "true"]);
-    if (read && cap.cacheMs && args.fresh !== true && args.fresh !== "true") {
-      const kept = this.results?.get(serverId, key, cap.cacheMs);
-      if (kept) return { tool, sent, result: kept };
-    }
-    let result = await connection.callTool(tool, sent);
-    const wait = !result.ok ? cap.retryAfterSeconds?.(result) : undefined;
+    // the server's own answer is kept, not jarvis's reading of it: a better reading (a new parser)
+    // applies to what is in the cache without asking the server again
+    const kept =
+      read && cap.cacheMs && args.fresh !== true && args.fresh !== "true"
+        ? this.results?.get(serverId, key, cap.cacheMs)
+        : undefined;
+    let result = kept ?? (await connection.callTool(tool, sent));
+    const wait = !kept && !result.ok ? cap.retryAfterSeconds?.(result) : undefined;
     if (wait && this.results) {
       const reason = (result.text.split("\n")[0] ?? "").slice(0, 200);
       const until = this.results.block(serverId, wait, reason);
       result = { ...result, text: `${result.text}\n[jarvis: no calls to "${serverId}" before ${until}]` };
     }
+    if (!kept && read && cap.cacheMs && result.ok) this.results?.put(serverId, key, result);
     if (cap.enrich && read && result.ok) {
       const again = async (other: Record<string, unknown>) => {
         const next = await this.prepare(planned, other);
@@ -246,7 +249,6 @@ export class McpToolProvider implements ToolProvider {
         // the answer as it came: the addition is a help, not a condition
       }
     }
-    if (read && cap.cacheMs && result.ok) this.results?.put(serverId, key, result);
     return { tool, sent, result };
   }
 

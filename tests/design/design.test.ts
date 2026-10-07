@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Runtime } from "../../src/app/runtime.ts";
@@ -74,6 +74,55 @@ describe("a Figma frame described by code", () => {
     expect(t).toContain('  - image-svg "Cross" — 48×48');
     expect(t).toContain("Gaps: 12px · paddings: 20px 20px 0px");
     expect(t).toContain("Colours (for meaning, not to copy): #7A7A7F, rgba(3, 3, 6, 0.88)");
+  });
+
+  it("borders and divider lines: the stroke's weight per side, colour and dashes (pilot: a line read as ?×0)", () => {
+    const frame: FigmaDesign = {
+      name: "Order form '26",
+      nodes: [
+        {
+          id: "1:1",
+          name: "Card",
+          type: "FRAME",
+          layout: { mode: "column", padding: "16px" },
+          strokes: "stroke_AAA111",
+          borderRadius: "12px",
+          children: [
+            {
+              id: "1:2",
+              name: "Border",
+              type: "FRAME",
+              layout: { mode: "none", dimensions: { height: 0 } },
+              strokes: "stroke_BBB222",
+            },
+            {
+              id: "1:3",
+              name: "Row",
+              type: "FRAME",
+              layout: { mode: "row" },
+              strokes: {
+                colors: [{ hex: "#1F4FD1", opacity: 0.5 }],
+                strokeWeight: "0px 0px 2px 0px",
+                strokeDashes: [4, 2],
+              },
+            },
+            { id: "1:4", name: "Plain", type: "FRAME", strokes: ["#000000"], strokeWeight: 0 },
+          ],
+        },
+      ],
+      globalVars: {
+        styles: {
+          stroke_AAA111: { colors: ["#E3E1DB"], strokeWeight: "1px" },
+          stroke_BBB222: { colors: ["#DCDCDC"], strokeWeight: "0px 0px 1px 0px" },
+        },
+      },
+    };
+    const t = describeFrame(frame).text;
+    expect(t).toContain('- frame "Card" — column, padding 16px, border 1px #E3E1DB, radius 12px');
+    expect(t).toContain('  - frame "Border" — divider: 1px #DCDCDC');
+    expect(t).toContain('  - frame "Row" — row, border-bottom 2px dashed #1F4FD1 50%');
+    expect(t).toContain('  - frame "Plain"\n');
+    expect(t).toContain("#DCDCDC (line)");
   });
 
   it("reads the server's actual shape: the name and the dictionaries under metadata", () => {
@@ -199,6 +248,12 @@ ${withFigma ? 'egressExceptions:\n  - server: design\n    reason: "frames of the
     expect(again.result.ok).toBe(true);
     expect(again.result.text).toContain("### [D] UniversalModalHeader (Content=True)");
     expect(reads()).toEqual(["12-345", "66-77"]);
+    // the cache keeps the server's JSON, so a newer reading of it needs no new call
+    const cached = readdirSync(join(sb.home, ".jarvis", "cache", "mcp-results", "design"))
+      .filter((f) => f !== "blocked.json")
+      .map((f) => readFileSync(join(sb.home, ".jarvis", "cache", "mcp-results", "design", f), "utf8"));
+    expect(cached.some((c) => c.includes('\\"nodes\\"'))).toBe(true);
+    expect(cached.some((c) => c.includes("Texts, in order"))).toBe(false);
     await runtime.mcp.provider.invoke("figma.get", { url: link, fresh: true });
     expect(reads()).toEqual(["12-345", "66-77", "12-345"]);
     // the API says "not before": the next frames are not asked for until then
