@@ -81,6 +81,11 @@ Remaining commands of ADR-0001 §15:
   candidate), the candidate keeps the dropped claims and the note (`--note`); the review: confirmed / dropped / to
   check (every generalisation ticked before Accept), Replace with a diff for a document a person wrote
   (`candidates promote --replace`; a generated one is replaced), Research again with a note, Commit knowledge
+- Knowledge pages in `jarvis ui`: Overview ("would an agent find it?" with the glossary's expansions, documents,
+  may be stale, folders to research first), Documents/Architecture, Standards (with what the check found in recent
+  runs), Skills (overrides, did it reach the agent), Glossary (problems: a symbol not in the code, a synonym of two
+  terms; add a term after a check of its symbols against the code); use in runs from `agent.start` provenance and
+  `knowledge.read`; a wide document no longer counts as a folder's coverage
 - output styling: one palette for every command (`src/cli/style.ts`; headings bold, the subject bold cyan, metadata
   dim, commands cyan, ok/additions green, warnings yellow, errors/removals red), backticked spans render as commands,
   `jarvis diff` coloured like git, `candidates show` renders the markdown; errors are prefixed `error:`, notices go

@@ -47,6 +47,13 @@ export interface TreeNode {
   readonly children: readonly TreeNode[];
 }
 
+/** Folders that hold no code of their own to describe: tests, mocks, snapshots, scripts, stories. */
+export function isAuxFolder(name: string): boolean {
+  return /^(__\w+__|tests?|specs?|e2e|mocks?|fixtures?|snapshots?|scripts|stories|storybook|\.storybook|dist|build|coverage)$/i.test(
+    name,
+  );
+}
+
 export interface ModuleTree {
   readonly modules: readonly TreeNode[];
   /** Every folder of the tree, for the path field's suggestions. */

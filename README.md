@@ -113,7 +113,8 @@ jarvis spec ABC-42              # only research → requirements → spec, up to
 jarvis hooks install            # standards, checks and impact analysis before every git push
 jarvis explain src/foo.ts:42    # why this line exists: task → spec → sources → tool calls
 jarvis ui                       # the runs on a local page (127.0.0.1): what waits for you, documents, diffs;
-                                #   Knowledge → Modules: research a module from the page, review and accept it
+                                #   Knowledge: documents, standards, skills, glossary as agents get them;
+                                #   add a glossary term; research a module and accept what the check kept
 jarvis mcp serve                # Jarvis as a read-only MCP server for an IDE or another agent
 jarvis ci ABC-42 --bundle run.json.gz   # the same workflow in CI, handed over to a developer
 ```

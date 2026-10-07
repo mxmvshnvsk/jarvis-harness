@@ -261,6 +261,68 @@ tr:last-child td{border-bottom:0}
 .tail{margin:6px 0 0;padding:10px 12px;border-radius:8px;background:var(--sunken);border:1px solid var(--line);font-size:12px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere;max-height:240px;overflow:auto}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 .tabs a[aria-current=page]{color:var(--ink);font-weight:600;border-bottom:2px solid var(--ink)}
+/* Knowledge: overview, documents, standards, skills, glossary */
+.grow{flex:1 1 280px;min-width:0}
+.ksearch,.kbox{padding:18px 20px;display:flex;flex-direction:column;gap:12px}
+.ksearch{border-color:var(--ink)}
+.ksearch h2,.kbox h2{margin:0;font-size:16px}
+.ksearch input,.kfields input,.kfilter input{height:44px;padding:0 12px;border:1px solid var(--field-line);border-radius:8px;background:var(--panel);color:var(--ink);font-family:inherit;font-size:15px}
+.kexp{gap:6px}
+.khits{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:8px}
+.khits li{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:baseline;font-size:14px}
+.khits .meta{width:40px}
+.khead{padding:16px 20px;border-bottom:1px solid var(--line)}
+.khead h2{margin:0;font-size:16px}
+.kdocs{padding:0;gap:0;overflow:hidden}
+.ktable{display:flex;flex-direction:column;font-size:14px}
+.kr{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1.2fr) 80px 110px;gap:12px;padding:10px 20px;border-top:1px solid var(--line-soft);color:inherit;text-decoration:none;align-items:baseline}
+.kr.kh{border-top:0;color:var(--muted);font-size:12px;font-weight:500}
+a.kr:hover{background:var(--sunken)}
+.kr.warn{background:var(--focus-row)}
+.kr.current{background:var(--accent-soft);box-shadow:inset 3px 0 0 var(--accent)}
+.kr.kg{grid-template-columns:170px minmax(0,1fr) minmax(0,1.2fr) minmax(0,1.4fr)}
+.kr.kg>span:first-child{display:flex;flex-direction:column;gap:2px}
+.kprob{display:block;font-family:var(--sans);color:var(--bad);margin-top:4px}
+.kside{padding:0;gap:16px}
+.kbox p{margin:0;font-size:14px;line-height:21px}
+.kbox.warn{background:var(--focus-row)}
+.kres{justify-content:space-between}
+.kdoccols{display:grid;grid-template-columns:260px minmax(0,1fr) 300px;gap:20px;align-items:start}
+.kdoccols.kstd{grid-template-columns:minmax(0,1fr) minmax(0,1.5fr)}
+.ktree,.klist{padding:10px 8px;display:flex;flex-direction:column;gap:2px}
+.ktree h3,.klist h3{margin:10px 10px 4px;font-size:12px;font-weight:500;color:var(--muted)}
+.ktree ul{list-style:none;margin:0;padding:0}
+.ktree a,.kli{display:flex;justify-content:space-between;align-items:center;gap:8px;min-height:40px;padding:6px 10px;border-radius:6px;color:var(--ink-2);text-decoration:none;font-family:var(--mono);font-size:13px;overflow-wrap:anywhere}
+.kli{font-family:var(--sans);font-size:14px;min-height:48px}
+.kli>span:first-child{display:flex;flex-direction:column;gap:2px;min-width:0}
+.ktree a:hover,.kli:hover{background:var(--sunken)}
+.ktree a[aria-current=page],.kli[aria-current=page]{background:var(--accent-soft);color:var(--accent-dark);font-weight:600}
+.kli.off code{text-decoration:line-through;color:var(--faint)}
+.kmeta{display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0}
+.kmeta .pill{font-size:12px;padding:2px 8px}
+.kdoc{overflow:hidden}
+.kdochead{padding:16px 24px;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:10px}
+.kdochead h2{margin:0;font-size:17px}
+.kpath{font-weight:600;font-size:14px}
+.kchips{gap:6px}
+.klead{margin:0;font-size:16px;line-height:24px}
+.kaside{display:flex;flex-direction:column;gap:16px}
+.kunits{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px;font-size:13px}
+.kunits li{display:flex;justify-content:space-between;gap:10px}
+.kfound{padding:16px 24px;border-top:1px solid var(--line-soft);display:flex;flex-direction:column;gap:8px}
+.kfound h3{margin:0;font-size:14px}
+.kfound ul{margin:0;padding-left:18px;font-size:13px;line-height:20px}
+.kadd>summary{padding:14px 20px;cursor:pointer}
+.kadd form{padding:0 20px 18px;display:flex;flex-direction:column;gap:12px}
+.kfields{align-items:flex-start}
+.kfields .field{min-width:180px}
+.kfields input.mono{font-family:var(--mono);font-size:13px}
+.kchecks{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px;font-size:13px}
+.kchecks li.ok{color:var(--ok)}.kchecks li.warn{color:var(--wait)}
+.kgloss{padding:0;gap:0;overflow-x:auto}
+.kgloss .ktable{min-width:760px}
+@media (max-width:1100px){.kdoccols{grid-template-columns:minmax(0,1fr)}.kdoccols.kstd{grid-template-columns:minmax(0,1fr)}}
+@media (max-width:640px){.kr{grid-template-columns:minmax(0,1fr)}.kr.kh{display:none}}
 /* Knowledge → Modules */
 .mcols{gap:20px}
 .mleft{flex:1 1 400px;min-width:0;display:flex;flex-direction:column;gap:12px}

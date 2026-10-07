@@ -2,9 +2,10 @@ import { type Candidate, candidatesOf, existingAt, targetOf } from "../app/candi
 import type { Runtime } from "../app/runtime.ts";
 import type { Run } from "../core/domain/run.ts";
 import { moduleCheckOf, moduleOfRun } from "../onboarding/moduleRun.ts";
-import { findNode, type ModuleTree, TOO_BIG, type TreeNode } from "../onboarding/tree.ts";
+import { findNode, isAuxFolder, type ModuleTree, TOO_BIG, type TreeNode } from "../onboarding/tree.ts";
 import { shortRunId } from "../storage/runStore.ts";
 import { type DiffFile, type Html, html, markdownToHtml } from "./html.ts";
+import { type KnowledgeCounts, knowledgeTabs } from "./knowledge.ts";
 import type { Launch } from "./launcher.ts";
 import { type Actions, diffFileHtml } from "./pages.ts";
 
@@ -42,6 +43,7 @@ export interface ModulesPage {
   /** The candidate's target holds a document a person wrote: what replacing it changes. */
   readonly conflict?: { readonly file: string; readonly diff: readonly DiffFile[] };
   readonly root: string;
+  readonly counts?: KnowledgeCounts;
 }
 
 /** The latest research of every module: queued launches, then the newest run about it. */
@@ -133,8 +135,28 @@ function badge(node: TreeNode, r: Research | undefined): Html {
   return html`<span class="pill ok">documented</span>`;
 }
 
+/**
+ * The folders to research first: the highest ones that fit one pass and need it, biggest first —
+ * a big module is looked into, its tests and mocks are not.
+ */
+export function researchFirst(modules: readonly TreeNode[], limit = 6): TreeNode[] {
+  const out: TreeNode[] = [];
+  const walk = (n: TreeNode) => {
+    if (isAuxFolder(n.name)) return;
+    if (!n.tooBig) {
+      if (needsResearch(n)) out.push(n);
+      else n.children.forEach(walk);
+      return;
+    }
+    n.children.forEach(walk);
+  };
+  modules.forEach(walk);
+  return out.sort((a, b) => b.files - a.files).slice(0, limit);
+}
+
 /** Folders that need research: no document of their own, or a stale or generated one. */
 export function needsResearch(node: TreeNode): boolean {
+  if (isAuxFolder(node.name)) return false;
   const c = node.coverage;
   return !c || c.kind === "generated" || !!c.staleCommits || (c.kind === "via" && node.module);
 }
@@ -312,18 +334,18 @@ ${body}
 </section>`;
 }
 
-function draftsHtml(page: ModulesPage, actions?: Actions): Html {
-  if (page.drafts.length === 0) return html`<div data-live="drafts" hidden></div>`;
+/** Knowledge files not committed yet, on every Knowledge page, with one button to commit them. */
+export function draftsHtml(drafts: readonly Draft[], back: string, actions?: Actions): Html {
+  if (drafts.length === 0) return html`<div data-live="drafts" hidden></div>`;
   return html`<section class="panel mdrafts" aria-label="Knowledge not committed" data-live="drafts">
-<div><b>${page.drafts.length} knowledge file${page.drafts.length === 1 ? "" : "s"} not committed</b>
-<span class="hint">${page.drafts.map((d) => d.path.replace(/^\.jarvis\//, "")).join(", ")} · agents already see them</span></div>
-${actions ? form(actions, "/knowledge/commit", html`<input type="hidden" name="path" value="${page.path ?? ""}"><button type="submit" class="btn primary">Commit knowledge</button>`) : html`<code>git add .jarvis && git commit</code>`}
+<div><b>${drafts.length} knowledge file${drafts.length === 1 ? "" : "s"} not committed</b>
+<span class="hint">${drafts.map((d) => d.path.replace(/^\.jarvis\//, "")).join(", ")} · agents already see them</span></div>
+${actions ? form(actions, "/knowledge/commit", html`<input type="hidden" name="back" value="${back}"><button type="submit" class="btn primary">Commit knowledge</button>`) : html`<code>git add .jarvis && git commit</code>`}
 </section>`;
 }
 
 export function modulesContent(page: ModulesPage, actions?: Actions, notice?: Html): Html {
-  return html`<div class="lede"><h1>Knowledge</h1><span class="muted">what the agents know about this project</span></div>
-<nav class="tabs" aria-label="Knowledge"><a href="/knowledge/modules" aria-current="page">Modules</a></nav>
+  return html`${knowledgeTabs("modules", page.counts)}
 ${notice ?? ""}
 <p class="hint">An agent maps a module or a folder; every claim is checked against the code; what survives waits here. Nothing reaches <code>.jarvis/knowledge/</code> until you accept it.</p>
 <div class="cols mcols">
@@ -336,7 +358,7 @@ ${treeHtml(page)}
 ${researchHtml(page, actions)}
 </div>
 </div>
-${draftsHtml(page, actions)}`;
+${draftsHtml(page.drafts, page.path ? here(page.path) : "/knowledge/modules", actions)}`;
 }
 
 /** The page model for a path: the node it names, if any. */

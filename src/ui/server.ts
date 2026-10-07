@@ -1,5 +1,5 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -23,13 +23,31 @@ import {
   rerunRequested,
   waitingCard,
 } from "../app/decide.ts";
+import {
+  addGlossaryTerm,
+  checkSymbols,
+  docsOf,
+  GLOSSARY,
+  GlossaryTermTaken,
+  type GlossaryView,
+  glossaryOf,
+  skillsOf,
+  standardsOf,
+  usageOf,
+} from "../app/knowledgeView.ts";
 import { type McpProbe, mcpHealthOf } from "../app/mcpHealth.ts";
 import { modelsHealthOf } from "../app/modelHealth.ts";
 import type { Runtime } from "../app/runtime.ts";
 import { type OpenIn, reviewFiles } from "../cli/checkout.ts";
 import type { Actor } from "../core/domain/actor.ts";
 import type { Run } from "../core/domain/run.ts";
+import { loadKnowledgeDocs } from "../knowledge/resolver.ts";
+import { loadGlossary } from "../knowledge/retrieval/glossary.ts";
+import type { RetrievalResult } from "../knowledge/retrieval/retriever.ts";
+import { refreshIndex, search } from "../knowledge/retrieval/service.ts";
+import { loadSkills } from "../knowledge/skills.ts";
 import { knowledgeRootsOf } from "../knowledge/sources.ts";
+import { loadStandards } from "../knowledge/standards.ts";
 import { NOTE_MAX } from "../onboarding/deep.ts";
 import { findNode, type ModuleTree, moduleTree } from "../onboarding/tree.ts";
 import type { LocalWorkflowEngine } from "../orchestration/runtime.ts";
@@ -38,9 +56,26 @@ import { shortRunId } from "../storage/runStore.ts";
 import { git } from "../tools/local/exec.ts";
 import { SCRIPT, STYLE } from "./assets.ts";
 import { type DiffFile, type Html, html, parseDiff } from "./html.ts";
+import {
+  ARCHITECTURE,
+  docsContent,
+  glossaryContent,
+  type KnowledgeCounts,
+  knowledgeTabs,
+  overviewContent,
+  skillsContent,
+  standardsContent,
+} from "./knowledge.ts";
 import { type Launcher, WORKFLOWS } from "./launcher.ts";
 import { artifactPage, runPage, runsPage } from "./model.ts";
-import { type Draft, type ModulesPage, modulesContent, researchOf } from "./modules.ts";
+import {
+  type Draft,
+  draftsHtml,
+  type ModulesPage,
+  modulesContent,
+  researchFirst,
+  researchOf,
+} from "./modules.ts";
 import {
   type Actions,
   type ArtifactExtras,
@@ -494,6 +529,8 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
       started: html`<div class="banner ok">Research started — it shows up under Runs too; the bell tells you when its candidate is ready</div>`,
       queued: html`<div class="banner ok">${count || "1"} research${count && count !== "1" ? "es" : ""} queued — they run one after another</div>`,
       unqueued: html`<div class="banner ok">Taken out of the queue</div>`,
+      "term-added": html`<div class="banner ok">Added to the glossary as a draft — the next run's searches widen with it</div>`,
+      "no-file": html`<div class="banner bad">Not a knowledge file of this repository</div>`,
       "no-path": html`<div class="banner bad">Not a folder of a module here — pick one in the tree or from the path's suggestions</div>`,
       "no-parts": html`<div class="banner bad">Pick at least one part</div>`,
       "check-all": html`<div class="banner bad">Tick every statement under «Check these first» — or send it back with a note</div>`,
@@ -527,6 +564,7 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
       drafts: await draftsOf(),
       canStart: !!options.launcher && !!actions,
       root,
+      counts: countsOf(),
     };
     const conflict = await conflictOf(base);
     const running = [...research.values()].some((x) => ["starting", "running", "queued"].includes(x.kind));
@@ -551,6 +589,16 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
     if (!sent || !same(sent, token)) return send(r, 403, forbiddenPage());
     const pathOf = () => (form.get("path") ?? "").trim().replace(/\/+$/, "");
     const at = r.url.pathname;
+    // where a commit or an "open" goes back to: a Knowledge page of this server, nothing else
+    const backTo = (notice: string, extra = "") => {
+      const b = form.get("back") ?? "";
+      if (!/^\/knowledge(\/[a-z]+)?(\?[^#]*)?$/.test(b)) return back(pathOf(), notice, extra);
+      const u = new URL(b, "http://x");
+      u.searchParams.set("notice", notice);
+      for (const [k, v] of new URLSearchParams(extra.replace(/^&/, ""))) u.searchParams.set(k, v);
+      return `${u.pathname}${u.search}`;
+    };
+    if (at === "/knowledge/glossary") return glossaryPost(r, form);
     if (at === "/knowledge/modules/research") {
       if (!options.launcher) return notFound(r, "Starting research is off here.");
       const tree = await treeOf();
@@ -575,7 +623,7 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
     }
     if (at === "/knowledge/commit") {
       const drafts = await draftsOf();
-      if (drafts.length === 0) return redirect(r, back(pathOf(), "nothing-to-commit"));
+      if (drafts.length === 0) return redirect(r, backTo("nothing-to-commit"));
       const files = drafts.map((d) => d.path);
       const names = files.map((f) => f.replace(/^.*\//, "").replace(/\.md$/, "")).slice(0, 4);
       const message = `knowledge: ${names.join(", ")}${files.length > names.length ? ` and ${files.length - names.length} more` : ""}`;
@@ -584,19 +632,23 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
       const commit = add.code === 0 ? await git(["commit", "-q", "-m", message, "--", ...files], root) : add;
       if (commit.code !== 0) {
         runtime.log.error("ui.commit", { message: commit.stderr.slice(0, 2000) });
-        return redirect(r, back(pathOf(), "commit-failed"));
+        return redirect(r, backTo("commit-failed"));
       }
-      return redirect(r, back(pathOf(), "committed", `&file=${encodeURIComponent(files.join(", "))}`));
+      return redirect(r, backTo("committed", `&file=${encodeURIComponent(files.join(", "))}`));
     }
     if (at === "/knowledge/open") {
       const file = (form.get("file") ?? "").replace(/^\/+/, "");
-      if (!file.startsWith(".jarvis/") || file.includes("..")) return redirect(r, back(pathOf(), "no-path"));
+      // a knowledge file: under .jarvis/, or a document or skill of knowledge.sources
+      const known =
+        !file.includes("..") &&
+        (file.startsWith(".jarvis/") ||
+          (await docsOf(roots())).some((d) => d.path === file) ||
+          skillsOf(roots()).some((x) => x.path === file));
+      if (!known || !existsSync(joinPath(root, file))) return redirect(r, backTo("no-file"));
       const editor = options.open?.(root, [{ path: file }]);
       return redirect(
         r,
-        editor
-          ? back(pathOf(), "opened", `&editor=${encodeURIComponent(editor)}`)
-          : back(pathOf(), "no-editor"),
+        editor ? backTo("opened", `&editor=${encodeURIComponent(editor)}`) : backTo("no-editor"),
       );
     }
     const m = /^\/knowledge\/candidates\/([^/]+)\/(accept|reject)$/.exec(at);
@@ -646,6 +698,224 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
       return redirect(r, back(module, "again"));
     }
     return redirect(r, back(module, "rejected"));
+  };
+
+  /* ---- Knowledge: overview, documents, standards, skills, glossary (read-only, a glossary term added) ---- */
+  const countsOf = (): KnowledgeCounts => {
+    const r = roots();
+    const safe = (f: () => number) => {
+      try {
+        return f();
+      } catch {
+        return 0;
+      }
+    };
+    return {
+      docs: safe(() => loadKnowledgeDocs(r).length),
+      standards: safe(() => loadStandards(r).length),
+      skills: safe(() => loadSkills(r).length),
+      terms: safe(() => loadGlossary(root).length),
+    };
+  };
+  let glossaryCache: { key: string; view: Promise<GlossaryView> } | undefined;
+  const glossaryView = async (): Promise<GlossaryView> => {
+    const dir = root as string;
+    const file = joinPath(dir, GLOSSARY);
+    const head = (await git(["rev-parse", "HEAD"], dir)).stdout.trim();
+    const st = existsSync(file) ? statSync(file) : undefined;
+    const key = `${head}|${st?.mtimeMs ?? 0}|${st?.size ?? 0}`;
+    if (glossaryCache?.key !== key) glossaryCache = { key, view: glossaryOf(dir) };
+    return glossaryCache.view;
+  };
+  /** A knowledge page: its content, then the drafts strip (every page commits the same way). */
+  const knowledgePage = async (r: Request, title: string, content: Html, back: string) =>
+    page(
+      r,
+      200,
+      { title, page: "knowledge" },
+      html`${content}${draftsHtml(await draftsOf(), back, actions)}`,
+    );
+  /** Standards and skills are files people write: a broken one is said on the page, not a 500. */
+  const loadError = (error: unknown): Html =>
+    html`<div class="banner bad">${(error as Error)?.message ?? String(error)}</div>`;
+  const knowledgeGet = async (r: Request): Promise<void> => {
+    if (!root || !existsSync(root))
+      return notFound(r, "Knowledge needs a repository: start jarvis ui in one.");
+    const at = r.url.pathname.replace(/\/+$/, "") || "/knowledge";
+    const q = (name: string) => r.url.searchParams.get(name) ?? undefined;
+    const counts = countsOf();
+    const notice = knowledgeNotice(r);
+    const usage = usageOf(runtime);
+    if (at === "/knowledge") {
+      const query = q("q")?.trim().slice(0, 300);
+      let result: RetrievalResult | undefined;
+      let searchError: string | undefined;
+      if (query) {
+        try {
+          await refreshIndex(runtime, roots());
+          result = await search(runtime, roots(), query, { limit: 10 });
+        } catch (error) {
+          searchError = `The search failed: ${(error as Error)?.message ?? String(error)}`;
+        }
+      }
+      const tree = await treeOf();
+      const toResearch = researchFirst(tree.modules);
+      const candidates = candidatesOf(runtime, (run) => run.workflow === "onboard-module").filter(
+        (c) => !c.decision && c.doc.module,
+      ).length;
+      const glossary = await glossaryView();
+      const content = overviewContent(
+        {
+          counts,
+          docs: await docsOf(roots(), usage),
+          glossaryProblems: glossary.rows.filter((x) => x.problems.length > 0).length,
+          toResearch,
+          candidates,
+          ...(query ? { query } : {}),
+          ...(result ? { result } : {}),
+          ...(searchError ? { searchError } : {}),
+        },
+        notice,
+      );
+      return knowledgePage(r, query ? `Knowledge · ${query}` : "Knowledge", content, "/knowledge");
+    }
+    if (at === "/knowledge/docs") {
+      const docs = await docsOf(roots(), usage);
+      const want = q("doc");
+      const selected = want ? docs.find((d) => d.path === want) : docs[0];
+      const content = docsContent(
+        {
+          counts,
+          docs,
+          ...(selected ? { selected } : {}),
+          ...(want ? { path: want } : {}),
+          architecture: selected?.path === ARCHITECTURE,
+        },
+        actions,
+        notice,
+      );
+      return knowledgePage(
+        r,
+        selected ? `Knowledge · ${selected.path}` : "Knowledge · documents",
+        content,
+        r.url.pathname + r.url.search,
+      );
+    }
+    if (at === "/knowledge/standards") {
+      let content: Html;
+      try {
+        const standards = standardsOf(runtime, roots(), usage);
+        const severity = q("severity");
+        const sev = severity === "required" || severity === "recommended" ? severity : undefined;
+        const id = q("id");
+        const selected = id
+          ? standards.find((s) => s.id === id)
+          : standards.find((s) => !sev || s.severity === sev);
+        content = standardsContent(
+          { counts, standards, ...(selected ? { selected } : {}), ...(sev ? { severity: sev } : {}) },
+          actions,
+          notice,
+        );
+      } catch (error) {
+        content = html`${knowledgeTabs("standards", counts)}${loadError(error)}`;
+      }
+      return knowledgePage(r, "Knowledge · standards", content, r.url.pathname + r.url.search);
+    }
+    if (at === "/knowledge/skills") {
+      let content: Html;
+      try {
+        const skills = skillsOf(roots(), usage);
+        const id = q("id");
+        const selected = id
+          ? skills.find((s) => `${s.skill.id}${s.overridden ? "@builtin" : ""}` === id)
+          : skills[0];
+        content = skillsContent({ counts, skills, ...(selected ? { selected } : {}) }, actions, notice);
+      } catch (error) {
+        content = html`${knowledgeTabs("skills", counts)}${loadError(error)}`;
+      }
+      return knowledgePage(r, "Knowledge · skills", content, r.url.pathname + r.url.search);
+    }
+    if (at === "/knowledge/glossary") {
+      const glossary = await glossaryView();
+      const term = q("term");
+      const selected = term ? glossary.rows.find((x) => x.term === term) : undefined;
+      const where = selected ? [...(await checkSymbols(root, selected.symbols)).values()] : undefined;
+      const add = q("add");
+      const content = glossaryContent(
+        {
+          counts,
+          glossary,
+          ...(selected ? { selected } : {}),
+          ...(where ? { where } : {}),
+          problems: q("problems") === "1",
+          ...(q("q") ? { filter: q("q") as string } : {}),
+          ...(add
+            ? { form: { term: add.slice(0, 80), synonyms: "", symbols: "", sources: "", definition: "" } }
+            : {}),
+        },
+        actions,
+        notice,
+      );
+      return knowledgePage(
+        r,
+        term ? `Glossary · ${term}` : "Knowledge · glossary",
+        content,
+        r.url.pathname + r.url.search,
+      );
+    }
+    return notFound(r, `Nothing at ${r.url.pathname}.`);
+  };
+  /** Add a term: check its symbols first; one that is not in the code asks for «Add anyway». */
+  const glossaryPost = async (r: Request, form: URLSearchParams): Promise<void> => {
+    const dir = root as string;
+    const list = (name: string) =>
+      (form.get(name) ?? "")
+        .split(/[,;]/)
+        .map((x) => x.trim())
+        .filter(Boolean)
+        .slice(0, 30);
+    const values = {
+      term: (form.get("term") ?? "").trim().slice(0, 80),
+      synonyms: (form.get("synonyms") ?? "").trim().slice(0, 400),
+      symbols: (form.get("symbols") ?? "").trim().slice(0, 400),
+      sources: (form.get("sources") ?? "").trim().slice(0, 200),
+      definition: (form.get("definition") ?? "").trim().slice(0, 600),
+    };
+    const checks = [...(await checkSymbols(dir, list("symbols"))).values()];
+    const again = async (error?: string) =>
+      knowledgePage(
+        r,
+        "Knowledge · glossary",
+        glossaryContent(
+          {
+            counts: countsOf(),
+            glossary: await glossaryView(),
+            problems: false,
+            form: values,
+            checks,
+            ...(error ? { error } : {}),
+          },
+          actions,
+        ),
+        "/knowledge/glossary",
+      );
+    const doing = form.get("do");
+    if (!values.term) return again("Say the term");
+    if (doing === "check" || (doing === "add" && checks.some((c) => !c.found))) return again();
+    try {
+      addGlossaryTerm(dir, {
+        term: values.term,
+        synonyms: list("synonyms"),
+        symbols: list("symbols"),
+        sources: list("sources"),
+        ...(values.definition ? { definition: values.definition } : {}),
+      });
+    } catch (error) {
+      if (!(error instanceof GlossaryTermTaken)) throw error;
+      return again(error.message);
+    }
+    glossaryCache = undefined;
+    return redirect(r, `/knowledge/glossary?term=${encodeURIComponent(values.term)}&notice=term-added`);
   };
 
   /** "New task": the CLI started in the background, driven by the page (src/ui/launcher.ts). */
@@ -832,8 +1102,8 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
         ),
       );
     }
-    if (path === "/knowledge" || path === "/knowledge/") return redirect(r, "/knowledge/modules");
     if (path === "/knowledge/modules") return modulesPageOf(r);
+    if (path === "/knowledge" || path.startsWith("/knowledge/")) return knowledgeGet(r);
     const runMatch = /^\/runs\/([^/]+)$/.exec(path);
     if (runMatch) {
       const run = resolveRun(runMatch[1] as string);
