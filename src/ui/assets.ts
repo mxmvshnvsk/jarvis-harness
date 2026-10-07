@@ -64,6 +64,8 @@ input.amount{height:44px;width:11em;padding:0 10px;font-family:inherit;font-size
 .live[data-state=lost] .dot{background:var(--bad)}
 .theme{display:inline-flex;align-items:center;justify-content:center;min-height:36px;min-width:36px;padding:0 9px;border:1px solid var(--border-btn);border-radius:6px;background:var(--panel);color:var(--ink-2);font-family:inherit;font-size:13px;cursor:pointer}
 .theme:hover{border-color:var(--ink-2);color:var(--ink)}
+.notify[aria-pressed=true]{color:var(--accent);border-color:var(--accent)}
+.notify[data-state=blocked],.notify[data-state=unsupported]{opacity:.55}
 .theme svg{width:16px;height:16px}
 /* the switch shows where it goes: a moon on the light theme, a sun on the dark one */
 .theme .sun{display:none}
@@ -331,7 +333,7 @@ export const SCRIPT = `
       try { data = JSON.parse(e.data); } catch {}
       if (!runId || (data.runs || []).includes(runId)) refresh();
       clearTimeout(modelsSoon);
-      modelsSoon = setTimeout(() => refreshModels(), 1000);
+      modelsSoon = setTimeout(() => { refreshModels(); checkWaiting(); }, 1000);
     });
   }
   const tick = Number(body.dataset.tick || 0);
@@ -419,6 +421,74 @@ export const SCRIPT = `
       const meta = document.querySelector('meta[name=color-scheme]');
       if (meta) meta.setAttribute('content', document.documentElement.dataset.theme || 'light dark');
       labelTheme();
+    });
+  }
+
+  // system notifications: a run that starts waiting for you while this page is not in front says so
+  // through the system; the bell asks the browser once (a click), the choice stays in this browser.
+  // A run whose card waits in a terminal is left to the terminal, which notifies by itself.
+  const bell = document.querySelector('[data-notify]');
+  const canNotify = 'Notification' in window;
+  const stored = (key, fallback) => { try { return localStorage.getItem(key) ?? fallback; } catch { return fallback; } };
+  const store = (key, value) => { try { localStorage.setItem(key, value); } catch {} };
+  const notifyOn = () => canNotify && Notification.permission === 'granted' && stored('jarvis_notify', 'off') === 'on';
+  function labelBell() {
+    if (!bell) return;
+    const state = !canNotify ? 'unsupported' : Notification.permission === 'denied' ? 'blocked' : notifyOn() ? 'on' : 'off';
+    bell.dataset.state = state;
+    bell.setAttribute('aria-pressed', String(state === 'on'));
+    const title = {
+      on: 'Notifications on: a run that waits for you says so — click to turn off',
+      off: 'Notify me when a run waits for me',
+      blocked: 'Notifications are blocked for this page in the browser settings',
+      unsupported: 'This browser has no system notifications',
+    }[state];
+    bell.title = title;
+    bell.setAttribute('aria-label', title);
+  }
+  const seenOf = () => { try { return JSON.parse(stored('jarvis_notified', '{}')) || {}; } catch { return {}; } };
+  let baseline = true;
+  async function checkWaiting() {
+    if (!bell) return;
+    let data;
+    try {
+      const res = await fetch('/waiting.json', { credentials: 'same-origin', cache: 'no-store' });
+      if (!res.ok) return;
+      data = await res.json();
+    } catch {
+      return;
+    }
+    const seen = seenOf();
+    const now = Date.now();
+    for (const [key, at] of Object.entries(seen)) if (now - at > 7 * 86400000) delete seen[key];
+    for (const w of data.waiting || []) {
+      const key = w.id + ':' + w.parked;
+      if (seen[key]) continue;
+      seen[key] = now;
+      // what waits when the page opens is on the page; a terminal at the card notifies by itself
+      if (baseline || w.terminal || !notifyOn() || document.hasFocus()) continue;
+      try {
+        const n = new Notification('Jarvis: ' + w.what, { body: w.task + '\\n' + w.workflow + ' · run ' + w.id, tag: 'jarvis-' + key });
+        n.onclick = () => { window.focus(); location.href = '/runs/' + w.id; n.close(); };
+      } catch {
+        /* a browser that only notifies from a service worker: the page still shows it */
+      }
+    }
+    baseline = false;
+    store('jarvis_notified', JSON.stringify(seen));
+  }
+  if (bell) {
+    labelBell();
+    checkWaiting();
+    setInterval(checkWaiting, 20000);
+    bell.addEventListener('click', async () => {
+      if (!canNotify) return;
+      if (Notification.permission === 'granted') store('jarvis_notify', notifyOn() ? 'off' : 'on');
+      else if (Notification.permission === 'default') {
+        const answer = await Notification.requestPermission();
+        if (answer === 'granted') store('jarvis_notify', 'on');
+      }
+      labelBell();
     });
   }
 

@@ -6,9 +6,11 @@ import { budgetGranted, budgetStopOf, grantBudget } from "../app/budgetStop.ts";
 import {
   awaitedArtifact,
   DecisionTakenError,
+  parkedAt,
   recordDecision,
   requestRerun,
   rerunRequested,
+  waitingCard,
 } from "../app/decide.ts";
 import { type McpProbe, mcpHealthOf } from "../app/mcpHealth.ts";
 import { modelsHealthOf } from "../app/modelHealth.ts";
@@ -82,6 +84,30 @@ export interface UiServer {
 }
 
 const HOST = "127.0.0.1";
+
+/** What a waiting run needs from a person, for a system notification's title. */
+export function waitingWhat(run: Run): string {
+  const step = run.currentStep ?? "a step";
+  const w = run.waitingFor;
+  switch (w?.kind) {
+    case "approval":
+      return `approve the ${w.detail ?? "document"}`;
+    case "clarification":
+      return "answer the agent's questions";
+    case "loop":
+      return `${step} sent the work back too often`;
+    case "budget":
+      return `${step} stopped on a budget`;
+    case "effect":
+      return "check an external effect";
+    case "review":
+      return "review the change";
+    case "conflict":
+      return "resolve a conflict";
+    default:
+      return "a decision";
+  }
+}
 
 const SECURITY_HEADERS: Record<string, string> = {
   "Content-Security-Policy":
@@ -626,6 +652,20 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
       // the header's indicator: answered from the last computed state at once, never computed here
       if (!modelsJson) scheduleHealth(0);
       return send(r, 200, modelsJson ?? PENDING_MODELS, "application/json; charset=utf-8", {
+        "Cache-Control": "no-store",
+      });
+    }
+    if (path === "/waiting.json") {
+      // the page's system notifications: the runs that wait for a person, each stop with its own key
+      const waiting = runtime.runs.list({ state: ["WAITING_HUMAN"], limit: 200 }).map((run) => ({
+        id: shortRunId(run.id),
+        task: (run.task.split("\n")[0] ?? "").trim().slice(0, 140),
+        workflow: run.workflow,
+        what: waitingWhat(run),
+        parked: parkedAt(runtime, run.id),
+        terminal: waitingCard(runtime, run.id) !== undefined,
+      }));
+      return send(r, 200, JSON.stringify({ waiting }), "application/json; charset=utf-8", {
         "Cache-Control": "no-store",
       });
     }

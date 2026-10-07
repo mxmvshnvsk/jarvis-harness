@@ -181,6 +181,33 @@ describe("jarvis ui: pages", () => {
     expect(data.html).toContain("jarvis models stats");
   });
 
+  it("system notifications: a bell in the header, the waiting runs from /waiting.json", async () => {
+    const page = await get("/", authed());
+    expect(page.body).toContain('data-notify aria-pressed="false"');
+    expect((await get("/waiting.json")).status).toBe(403);
+    expect(JSON.parse((await get("/waiting.json", authed())).body)).toEqual({ waiting: [] });
+    const { run } = seedWaiting(
+      "Order form: phone number mask\nmore detail",
+      JSON.stringify({ title: "Mask" }),
+    );
+    rt.events.emit({ kind: "run.state", runId: run.id, payload: { state: "WAITING_HUMAN" } });
+    const data = JSON.parse((await get("/waiting.json", authed())).body) as {
+      waiting: Array<Record<string, unknown>>;
+    };
+    expect(data.waiting).toHaveLength(1);
+    expect(data.waiting[0]).toMatchObject({
+      id: run.id.replace(/^run_/, "").slice(0, 8),
+      task: "Order form: phone number mask",
+      workflow: "sdd",
+      what: "approve the spec",
+      terminal: false,
+    });
+    expect(data.waiting[0]?.parked).toBeGreaterThan(0);
+    const js = (await get("/assets/app.js")).body;
+    expect(js).toContain("new Notification('Jarvis: ' + w.what");
+    expect(js).toContain("Notification.requestPermission()");
+  });
+
   it("a finished run keeps an empty card slot, so the live refresh takes the spinner away", async () => {
     const { run } = seedWaiting("Order form: phone number mask", JSON.stringify({ title: "Mask" }));
     rt.runs.transition(run.id, "RUNNING");
