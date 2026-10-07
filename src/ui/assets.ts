@@ -413,6 +413,15 @@ export const SCRIPT = `
     if (label) label.textContent = text;
   };
 
+  // a spinner keeps its turn across refreshes: a replaced region is a new element whose animation
+  // would start again at 0° on every event (pilot: the loader jerked once a second or two). Every
+  // spinner takes its phase from the page's clock instead, so the new one goes on where the old one was.
+  const SPIN_MS = 1000;
+  const inPhase = (root) => {
+    for (const s of root.querySelectorAll('.spin')) s.style.animationDelay = -(performance.now() % SPIN_MS) + 'ms';
+  };
+  inPhase(document);
+
   // replace the live regions with the server's fresh rendering; forms being typed in stay
   let busy = false, again = false;
   async function refresh() {
@@ -435,6 +444,7 @@ export const SCRIPT = `
         if (el.contains(document.activeElement) && document.activeElement !== document.body) continue;
         // something typed and not sent yet (a comment, an amount) stays: the refresh waits for it
         if ([...el.querySelectorAll('textarea, input[type=number]')].some((t) => t.value)) continue;
+        inPhase(fresh);
         el.replaceWith(fresh);
       }
       const title = next.querySelector('title');
@@ -641,7 +651,10 @@ export const SCRIPT = `
         badge.hidden = !data.badge;
       }
       const body = pop.querySelector('[data-' + name + '-body]');
-      if (body) body.innerHTML = data.html;
+      if (body) {
+        body.innerHTML = data.html;
+        inPhase(body);
+      }
       // the server is still collecting or checking: ask again shortly; the popover says it waits
       if (data.state === 'pending' || data.checking) setTimeout(() => refresh(), 1500);
     }
