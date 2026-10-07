@@ -17,6 +17,7 @@ export {
   compactTranscript,
   HANDOFF_HEADING,
   isHandoff,
+  isSourceResult,
   renderForSummary,
   splitBlocks,
   summarizerMessages,

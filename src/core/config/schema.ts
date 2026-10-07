@@ -117,6 +117,8 @@ const McpServerCommonShape = {
   allow: z.array(z.string().min(1)).default([]),
   deny: z.array(z.string().min(1)).default([]),
   readOnly: z.boolean().default(false),
+  /** How long one tool call may take (ms); the MCP client's default is 60 s (a large design frame takes longer). */
+  timeoutMs: z.int().positive().optional(),
 };
 
 const McpStdioEnvSchema = z.record(z.string(), z.string()).superRefine((env, ctx) => {

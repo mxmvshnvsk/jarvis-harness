@@ -211,7 +211,12 @@ export class McpPool {
 
   async call(serverId: string, name: string, args: Record<string, unknown>): Promise<McpCallResult> {
     const entry = await this.entry(serverId);
-    const result = await entry.client.callTool({ name, arguments: args });
+    const timeout = this.options.servers[serverId]?.timeoutMs;
+    const result = await entry.client.callTool(
+      { name, arguments: args },
+      undefined,
+      timeout ? { timeout } : undefined,
+    );
     const content = (result.content ?? []) as Array<{ type: string; text?: string }>;
     const text = content
       .map((c) => (c.type === "text" ? (c.text ?? "") : `[${c.type}]`))

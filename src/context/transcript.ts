@@ -31,9 +31,19 @@ export function isHandoff(message: Message | undefined): boolean {
 
 /* ---- trimming ---- */
 
+/**
+ * Results of the task's own sources — the issue, its Confluence pages, its design frames (also as read
+ * back with knowledge.read): short, and what the step is about. Kept under light pressure; pilot: they
+ * were trimmed at 49% and the agent spent 12 of its tool calls reading them back.
+ */
+const SOURCE_RESULT = /^(?:\[knowledge\.read\] ok\n)?\[(?:jira|confluence|figma)\.[a-z.]+\]/;
+export const isSourceResult = (content: string): boolean => SOURCE_RESULT.test(content);
+
 export interface TrimOptions {
   /** Tool results among the newest N are left alone. */
   readonly keepRecent: number;
+  /** Results to leave alone whatever their age (the task's sources under light pressure). */
+  readonly keep?: (content: string) => boolean;
   /** Results shorter than this are not worth a pointer. */
   readonly minChars?: number;
   /** Stores the full text, returns a reference the agent can read back. */
@@ -49,11 +59,17 @@ export interface TrimResult {
 const HEAD_CHARS = 240;
 
 /** Tool results older than the `keepRecent` newest that a trim would shorten. */
-export function trimmable(transcript: readonly Message[], keepRecent: number, minChars = 600): number {
+export function trimmable(
+  transcript: readonly Message[],
+  keepRecent: number,
+  minChars = 600,
+  keep?: (content: string) => boolean,
+): number {
   const tools = transcript.filter((m) => m.role === "tool");
   return tools
     .slice(0, Math.max(0, tools.length - keepRecent))
-    .filter((m) => m.content.length >= minChars && !m.content.includes(TRIMMED_MARKER)).length;
+    .filter((m) => m.content.length >= minChars && !m.content.includes(TRIMMED_MARKER) && !keep?.(m.content))
+    .length;
 }
 
 export function trimToolResults(transcript: readonly Message[], options: TrimOptions): TrimResult {
@@ -65,6 +81,7 @@ export function trimToolResults(transcript: readonly Message[], options: TrimOpt
   const next = transcript.map((m, i) => {
     if (m.role !== "tool" || protectedIndexes.has(i)) return m;
     if (m.content.length < minChars || m.content.includes(TRIMMED_MARKER)) return m;
+    if (options.keep?.(m.content)) return m;
     const ref = options.store(m.content);
     const newline = m.content.indexOf("\n");
     const header = newline > 0 && newline < 200 ? m.content.slice(0, newline) : "";

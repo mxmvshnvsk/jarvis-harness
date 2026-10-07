@@ -25,7 +25,7 @@ export function figmaRef(link: string): { fileKey: string; nodeId?: string } | u
 const figmaGet: ProfileCapability = {
   tools: ["get_figma_data"],
   description:
-    "Read a Figma design frame by its link (figma.com/design/<key>/…?node-id=…): its layers, texts, sizes, colours and spacing as structured text. Pass the link as it is; depth limits how deep children go.",
+    "Read a Figma design frame by its link (figma.com/design/<key>/…?node-id=…): its layers, texts, sizes, colours and spacing as structured text. Pass the link as it is. A whole screen or page may take long or time out: then read it again with depth 3–4 (levels of children), or read its smaller frames.",
   access: "read",
   effect: false,
   parameters: params(

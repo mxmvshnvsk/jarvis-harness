@@ -1,7 +1,7 @@
 import { ModelError } from "../models/errors.ts";
 import type { Message } from "../models/types.ts";
 import { levelOf, type PressureLevel, pressureOf, type Thresholds } from "./pressure.ts";
-import { compactTranscript, trimmable, trimToolResults } from "./transcript.ts";
+import { compactTranscript, isSourceResult, trimmable, trimToolResults } from "./transcript.ts";
 
 /** At `watch`: keep the 3 newest tool results, and trim only once 4 older ones are untrimmed. */
 const WATCH_KEEP = 3;
@@ -88,10 +88,12 @@ export class ContextManager {
     const remeasure = () => {
       ({ tokens, pressure } = this.measure(base, transcript));
     };
-    const trim = (keepRecent: number, minChars?: number) => {
+    /** `sources`: the task's own sources (issue, pages, frames) stay — light pressure only. */
+    const trim = (keepRecent: number, minChars?: number, sources = false) => {
       const r = trimToolResults(transcript, {
         keepRecent,
         ...(minChars ? { minChars } : {}),
+        ...(sources ? { keep: isSourceResult } : {}),
         store: this.o.store,
       });
       if (r.trimmed > 0) {
@@ -148,9 +150,10 @@ export class ContextManager {
     if (level === "watch") {
       // in batches: trimming one more result on every call would change the prompt's prefix on
       // every call and a prefix cache would never reuse past it (ADR-0013 §4)
-      if (trimmable(transcript, WATCH_KEEP) >= WATCH_BATCH) trim(WATCH_KEEP);
+      if (trimmable(transcript, WATCH_KEEP, 600, isSourceResult) >= WATCH_BATCH)
+        trim(WATCH_KEEP, undefined, true);
     } else if (level === "compact") {
-      trim(4);
+      trim(4, undefined, true);
       if (pressure >= t.compact) await compact("compact", 3, this.o.compactTarget);
     } else if (level === "aggressive") {
       trim(2, 300);

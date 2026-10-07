@@ -10,6 +10,7 @@ import {
   compactTranscript,
   DEFAULT_THRESHOLDS,
   effectiveWindow,
+  isSourceResult,
   levelOf,
   resolveThresholds,
   splitBlocks,
@@ -106,6 +107,32 @@ describe("transcript trimming and compaction", () => {
     expect(tools[2]?.content).toContain("x".repeat(2000)); // the newest is untouched
     expect(r.savedChars).toBeGreaterThan(3000);
     expect(trimToolResults(r.transcript, { keepRecent: 1, store }).trimmed).toBe(0);
+  });
+
+  it("leaves the task's own sources — the issue, its pages, its frames — when asked to (light pressure)", () => {
+    const store = () => "ref";
+    const tool = (text: string, id: string): Message[] => [
+      { role: "assistant", content: "", toolCalls: [{ id, name: "x", arguments: "{}" }] },
+      { role: "tool", toolCallId: id, content: text },
+    ];
+    const big = "y".repeat(2000);
+    const transcript = [
+      ...tool(`[jira.get] ok\n${big}`, "a"),
+      ...tool(`[confluence.get] ok\n${big}`, "b"),
+      ...tool(`[knowledge.read] ok\n[figma.get] ok\n${big}`, "c"),
+      ...tool(`[repo.read] ok\n${big}`, "d"),
+      ...tool(`[repo.read] ok\n${big}`, "e"),
+    ];
+    expect(isSourceResult("[confluence.get] ok\n…")).toBe(true);
+    expect(isSourceResult("[repo.read] ok\n…")).toBe(false);
+    const kept = trimToolResults(transcript, { keepRecent: 1, store, keep: isSourceResult });
+    expect(kept.trimmed).toBe(1); // only the older repo.read
+    const contents = kept.transcript
+      .filter((m) => m.role === "tool")
+      .map((m) => m.content.includes(TRIMMED_MARKER));
+    expect(contents).toEqual([false, false, false, true, false]);
+    // under heavy pressure they go too
+    expect(trimToolResults(transcript, { keepRecent: 1, store }).trimmed).toBe(4);
   });
 
   it("compacts older blocks into one handoff, keeps the tail verbatim and the originals referenced", async () => {

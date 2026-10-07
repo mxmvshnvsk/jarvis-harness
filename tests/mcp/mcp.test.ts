@@ -563,6 +563,17 @@ describe("jarvis mcp call", () => {
   });
 });
 
+describe("a server's call timeout (timeoutMs)", () => {
+  it("a call that takes longer than the server's timeoutMs fails as timed out; without it the default holds", async () => {
+    await setup(
+      `${serverYaml("slow", "      readOnly: true\n      timeoutMs: 150")}\n${serverYaml("plain", "      readOnly: true")}`,
+    );
+    const pool = (rt as Runtime).mcp.pool;
+    await expect(pool.call("slow", "echo", { text: "x", delayMs: 600 })).rejects.toThrow(/timed out/i);
+    expect((await pool.call("plain", "echo", { text: "x", delayMs: 300 })).text).toBe("x");
+  });
+});
+
 describe("probe", () => {
   it("a connection of its own: the tools listed, the cache refreshed, a dead server or a silent one an error", async () => {
     await setup(

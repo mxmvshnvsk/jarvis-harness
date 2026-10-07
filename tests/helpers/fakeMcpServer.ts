@@ -90,8 +90,13 @@ server.registerTool(
   async () => ({ content: [{ type: "text", text: `token=${process.env.JIRA_TOKEN ?? "none"}` }] }),
 );
 
-server.registerTool("echo", { description: "echo", inputSchema: { text: z.string() } }, async ({ text }) => ({
-  content: [{ type: "text", text }],
-}));
+server.registerTool(
+  "echo",
+  { description: "echo", inputSchema: { text: z.string(), delayMs: z.number().optional() } },
+  async ({ text, delayMs }) => {
+    if (delayMs) await new Promise((r) => setTimeout(r, delayMs));
+    return { content: [{ type: "text", text }] };
+  },
+);
 
 await server.connect(new StdioServerTransport());
