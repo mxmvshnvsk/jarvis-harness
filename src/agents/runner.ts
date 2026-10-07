@@ -32,6 +32,11 @@ export const saidDone = (text: string): boolean => /^\s*\**DONE\b/i.test(text);
 /** Calls of one answer that run at once at most (reads without effects). */
 export const PARALLEL_TOOLS = 6;
 
+/** Tools that change the workspace: an agent with them that only reads is nudged, then stopped. */
+const WRITE_TOOLS = new Set(["repo.write", "repo.edit"]);
+/** Model calls without an edit before the first nudge (the second at twice, the stop at three times). */
+export const IDLE_CALLS = 12;
+
 /** Runs `work` over the items, at most `limit` at a time; settles when all have. */
 export async function inParallel<T>(
   items: readonly T[],
@@ -315,6 +320,11 @@ export class AgentRuntimeRunner implements AgentRunner {
     };
     /** The answer the loop ended with (no tool calls) — often the result document already. */
     let finalAnswer: string | undefined;
+    // an agent that changes the workspace and only reads: told to start, then stopped (pilot: an
+    // implementation read for 64 model calls and 268 tools, trimming and reading back, and edited nothing)
+    const writer =
+      toolDefs.some((t) => WRITE_TOOLS.has(t.name)) || def.capabilities.some((c) => WRITE_TOOLS.has(c));
+    let lastEdit = modelCalls;
     for (;;) {
       if (ctx.cancelRequested()) {
         checkpoint();
@@ -467,6 +477,32 @@ export class AgentRuntimeRunner implements AgentRunner {
       // after the whole answer: a checkpoint mid-way would keep tool calls without their results
       if (Math.floor(toolCalls / limits.checkpointEvery) > Math.floor(callsBefore / limits.checkpointEvery))
         checkpoint();
+      if (writer) {
+        if (planned.some((p, i) => WRITE_TOOLS.has(p.call.name) && results[i]?.ok === true))
+          lastEdit = modelCalls;
+        const idle = modelCalls - lastEdit;
+        if (idle >= IDLE_CALLS * 3) {
+          emit("agent.idle", { modelCalls: idle, stopped: true });
+          transcript = [
+            ...transcript,
+            {
+              role: "user",
+              content: `${idle} model calls without a single edit: stop reading. Produce the result document now; in notes, say what you did and what keeps you from editing.`,
+            },
+          ];
+          break;
+        }
+        if (idle === IDLE_CALLS || idle === IDLE_CALLS * 2) {
+          emit("agent.idle", { modelCalls: idle, nudged: true });
+          transcript = [
+            ...transcript,
+            {
+              role: "user",
+              content: `${idle} model calls and no edit yet. You have read enough: start the first open step of the plan now — read only that step's files, edit, verify, mark it with plan.step, then the next step.${idle >= IDLE_CALLS * 2 ? ` After ${IDLE_CALLS} more calls without an edit the step stops.` : ""}`,
+            },
+          ];
+        }
+      }
     }
 
     // Finalization: the structured result document (ADR-0007 §4). When the loop already ended with a

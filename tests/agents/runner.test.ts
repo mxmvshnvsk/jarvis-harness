@@ -912,6 +912,67 @@ context: { maxContext: 8000 }
     expect(text).toContain("open, for the analyst");
   });
 
+  it("an implementation that only reads is told to start, then stopped; it starts on the open plan step's files", async () => {
+    sb.write("project/.jarvis/project.yaml", "version: 1\nworkspace: { mode: cwd }\n");
+    sb.write("project/src/slots.ts", "export const slots = [];\n");
+    rt = await testRuntime(sb, { PATH: process.env.PATH ?? "" });
+    const wf = workflowOf({
+      name: "idle",
+      entry: "implementation",
+      steps: [
+        {
+          id: "implementation",
+          kind: "agentic",
+          agent: "implementation",
+          outputs: ["implementation"],
+          transitions: { onSuccess: "DONE" },
+        },
+      ],
+    });
+    const engine = engineWith(rt, wf);
+    const run = createRun(rt, "idle");
+    rt.artifacts.put({
+      runId: run.id,
+      type: "plan",
+      name: "plan.json",
+      content: JSON.stringify({
+        summary: "s",
+        steps: [
+          { id: "S1", description: "Slots from the API", files: ["src/slots.ts"], verification: "tsc" },
+        ],
+      }),
+      provenance: { kind: "agent", agentId: "plan" },
+    });
+    let n = 0;
+    server.respond((req) => {
+      const last = lastUserContent(req);
+      if (last.includes("Produce the result document"))
+        return completion(
+          JSON.stringify({
+            summary: "Nothing changed.",
+            changedFiles: [],
+            notes: ["read only"],
+            outcome: "ok",
+          }),
+        );
+      n += 1;
+      return toolCallCompletion("repo.search", { pattern: `slot${n}` });
+    });
+    await engine.execute(run.id, { owner: "cli:t" });
+    const first = JSON.stringify(server.requests[0]?.body.messages);
+    expect(first).toContain("## The plan step to work on now: S1 (1 of 1) — Slots from the API");
+    expect(first).toContain("export const slots = [];");
+    const idle = rt.events.list({ runId: run.id, kind: "agent.idle" }).map((e) => e.payload);
+    expect(idle).toEqual([
+      { agent: "implementation", modelCalls: 12, nudged: true },
+      { agent: "implementation", modelCalls: 24, nudged: true },
+      { agent: "implementation", modelCalls: 36, stopped: true },
+    ]);
+    const all = JSON.stringify(server.requests.at(-1)?.body.messages);
+    expect(all).toContain("12 model calls and no edit yet");
+    expect(all).toContain("36 model calls without a single edit: stop reading");
+  });
+
   it("gives the next agent the code earlier steps read, as it is now (pilot: the same file re-read by four agents)", async () => {
     sb.write("project/.jarvis/project.yaml", "version: 1\nworkspace: { mode: cwd }\n");
     rt = await testRuntime(sb, { PATH: process.env.PATH ?? "" });

@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { z } from "zod";
+import { planProgressOf } from "../app/planProgress.ts";
 import { stableJson } from "../context/serialize.ts";
 import type { KnowledgeConfig } from "../core/config/schema.ts";
 import type { ArtifactVersion } from "../core/domain/artifact.ts";
@@ -164,6 +165,12 @@ export function buildBaseMessages(input: BuildInput): Message[] {
   // bounded: every model call of the step re-sends it (no prefix cache on the pilot gateway)
   const read = codeReadInRun(ctx, Math.min(Math.floor(inputBudget * 0.25), 40_000));
   if (read) l3.push(read);
+  // an implementation starts on the plan step that is open, with its files as they are now
+  const step =
+    def.output.type === "implementation"
+      ? planStepNow(ctx, Math.min(Math.floor(inputBudget * 0.2), 30_000))
+      : undefined;
+  if (step) l3.push(step);
   // the version the human sent back comes first: the agent revises it rather than starting over
   if (review) l3.unshift(review.previous(perInput > 0 ? perInput : inputBudget));
 
@@ -281,6 +288,46 @@ export function codeReadInRun(ctx: StepContext, chars: number): string | undefin
     "These files are shown as they are now in the workspace. Do not read them again with repo.read: read other files, the part of a file cut off here (startLine), or a file here after you changed it.",
     ...sections,
   ].join("\n\n");
+}
+
+/**
+ * The plan step an implementation works on now (src/app/planProgress.ts) with the current text of its
+ * files, so it starts editing instead of reading the whole plan's code first (pilot: 64 model calls of
+ * reading, five trims, no edit).
+ */
+export function planStepNow(ctx: StepContext, chars: number): string | undefined {
+  const progress = planProgressOf(
+    ctx.runtime,
+    ctx.run,
+    ctx.runtime.events.list({ runId: ctx.run.id, limit: 100_000 }),
+  );
+  const at = progress?.current;
+  const step = at === undefined ? undefined : progress?.steps[at];
+  if (!progress || !step || at === undefined) return undefined;
+  const root = ctx.workspace.ref.path;
+  const lines = [
+    `## The plan step to work on now: ${step.id} (${at + 1} of ${progress.steps.length}) — ${step.description}`,
+    step.verification ? `Check: ${step.verification}` : "",
+    "Work one plan step at a time: this step's files below, edit, verify, plan.step done, then the next step.",
+  ].filter(Boolean);
+  let left = chars;
+  for (const path of step.files) {
+    if (left < 1_000 || ctx.runtime.pathPolicy.isDenied(path)) continue;
+    const full = resolve(root, path);
+    if (!full.startsWith(`${resolve(root)}/`)) continue;
+    if (!existsSync(full)) {
+      lines.push(`### ${path}\n(new file — not there yet)`);
+      continue;
+    }
+    const text = readFileSync(full, "utf8");
+    const shown =
+      text.length > left
+        ? `${text.slice(0, left)}\n…[cut: ${text.length - left} more chars — repo.read it]`
+        : text;
+    left -= shown.length;
+    lines.push(`### ${path} (as it is now)\n${shown}`);
+  }
+  return lines.join("\n\n");
 }
 
 /** Resolved clarification threads of the run (ADR-0019 §4): rules agents must follow. */

@@ -139,10 +139,12 @@ export function trimToolResults(transcript: readonly Message[], options: TrimOpt
     const header = newline > 0 && newline < 200 ? m.content.slice(0, newline) : "";
     const body = m.content.slice(header.length).trimStart();
     const head = body.slice(0, HEAD_CHARS).replace(/\s+/g, " ");
-    const content = `${header}${header ? "\n" : ""}${head}…\n${TRIMMED_MARKER} ${m.content.length} chars; original: blob:${ref} — read it with knowledge.read, or run the tool again]`;
+    // a file, a search, a listing: run it again (a re-read file is then kept); the rest by its original
+    const call = calls.get(m.toolCallId ?? "");
+    const again = call !== undefined && /^repo\.(read|search|list)\b/.test(call);
+    const content = `${header}${header ? "\n" : ""}${head}…\n${TRIMMED_MARKER} ${m.content.length} chars; original: blob:${ref} — ${again ? "run the tool again if you need it" : "read it with knowledge.read"}]`;
     trimmed += 1;
     savedChars += m.content.length - content.length;
-    const call = calls.get(m.toolCallId ?? "");
     if (call) originals.push({ ref, call });
     return { ...m, content };
   });

@@ -139,7 +139,7 @@ export const IMPLEMENTATION_AGENT: AgentDefinition = {
 Goal: implement the plan with the minimal sufficient changes to the workspace. Without a plan (the short \`fix\` workflow) the specification is the plan: implement its requirements one by one.
 Method:
 - Tests the acceptance criteria call for are part of the change: add or update them next to the code, following the project's test conventions, and run them.
-- Work step by step through the plan. Read a file before editing it; use repo.edit for precise changes and repo.write only for new files.
+- Work one plan step at a time: read that step's files (the open step comes with its files under Inputs), edit, verify, then the next step. Do not read ahead for later steps — what you need there you read when you get there. Read a file before editing it; use repo.edit for precise changes and repo.write only for new files.
 - Mark your place with plan.step: {step: <the step's id>, status: "start"} when you begin a plan step and status "done" after its verification — in the same batch as your other calls; the person follows the run by it.
 - Follow the project's conventions (see the knowledge documents). Do not refactor beyond the plan. Do not touch files the plan does not name unless a step requires it — and then say so in notes.
 - Run the project's commands (typecheck, tests) when available and fix what you broke.

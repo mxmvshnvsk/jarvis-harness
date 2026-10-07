@@ -574,6 +574,16 @@ export function feedItem(e: StoredEvent): FeedItem | undefined {
         "ok",
       );
     }
+    case "agent.idle":
+      return p.stopped === true
+        ? at(
+            `${step ?? "the step"} stopped: ${typeof p.modelCalls === "number" ? p.modelCalls : "many"} model calls without an edit`,
+            "bad",
+          )
+        : at(
+            `${step ?? "the step"}: ${typeof p.modelCalls === "number" ? p.modelCalls : "many"} model calls without an edit — told to start editing`,
+            "warn",
+          );
     case "answers.failed":
       return at(`no answers prepared for the open questions: ${str(p.error) ?? "the model failed"}`, "warn");
     case "step.finish": {
