@@ -643,7 +643,7 @@ export function feedItem(e: StoredEvent): FeedItem | undefined {
     }
     case "loop.rerun":
       return at(
-        `↻ run ${str(p.step) ?? "the step"} again${who ? ` — by ${who}` : ""}${from(p.channel)}`,
+        `↻ ${p.back === true ? `one more round of ${str(p.step) ?? "the step"}` : `run ${str(p.step) ?? "the step"} again`}${who ? ` — by ${who}` : ""}${from(p.channel)}`,
         "warn",
       );
     case "card.open":

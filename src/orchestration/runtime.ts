@@ -1,4 +1,5 @@
 import { reasonOf } from "../app/activity.ts";
+import { rerunBackTo } from "../app/decide.ts";
 import type { Runtime } from "../app/runtime.ts";
 import { BudgetExceededError, BudgetedGateway } from "../budget/runBudget.ts";
 import { EXIT } from "../cli/output.ts";
@@ -495,9 +496,13 @@ export class LocalWorkflowEngine {
     }
     if (run.state === "WAITING_HUMAN" && run.waitingFor?.kind === "loop" && run.currentStep) {
       // a used-up back edge (ADR-0004 §3): the person fixed the checkout, the step runs again as a
-      // fresh round — not the round that used the loop up, whose agents' state would be restored
-      const fresh = this.rt.history.list(run.id).filter((h) => h.stepId === run.currentStep).length + 1;
-      this.rt.runs.update(run.id, { currentIteration: fresh });
+      // fresh round — not the round that used the loop up, whose agents' state would be restored;
+      // or the person asked the step the loop went back to for one more round
+      const edge = run.waitingFor.detail ?? "";
+      const back = rerunBackTo(this.rt, run.id);
+      const to = back && edge.includes(`->${back}#`) ? back : run.currentStep;
+      const fresh = this.rt.history.list(run.id).filter((h) => h.stepId === to).length + 1;
+      this.rt.runs.update(run.id, { currentStep: to, currentIteration: fresh });
     }
     const resumed = this.rt.runs.transition(run.id, "RUNNING", { reason: `resumed from ${run.state}` });
     this.emit(resumed, "run.state", { state: resumed.state, reason: resumed.stateReason });

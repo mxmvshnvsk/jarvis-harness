@@ -1326,7 +1326,10 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
       if (!rerunRequested(runtime, run.id)) {
         const who = await actor();
         if (!who) return redirect(r, `/runs/${short}?notice=actor`);
-        requestRerun(runtime, run, who, "ui");
+        // «one more round» of the step the used-up edge went back to — that very step, nothing else
+        const back = form.get("back") ?? "";
+        const edge = run.waitingFor.detail ?? "";
+        requestRerun(runtime, run, who, "ui", back && edge.includes(`->${back}#`) ? back : undefined);
       }
       goOn(run);
       return redirect(r, `/runs/${short}`);

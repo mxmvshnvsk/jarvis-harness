@@ -378,6 +378,58 @@ describe("a used-up loop on the page", () => {
     expect(after).toContain("write runs again — asked by dev@example.com from the page");
     expect(after).toContain(`jarvis continue ${short}`);
   });
+  it("One more round sends the work back to the step the edge went to, with a note box for it", async () => {
+    const r = rt.runs.create({
+      task: "Delivery slots: the courier app sees closed zones",
+      workflow: "gated",
+      owner: DEV,
+      workspace: { mode: "cwd", repoRoot: sb.project, path: sb.project, baseRef: "HEAD" },
+      dataClass: "internal",
+    });
+    rt.runs.update(r.id, { currentStep: "verify", currentIteration: 3 });
+    rt.runs.transition(r.id, "RUNNING");
+    rt.runs.transition(r.id, "WAITING_HUMAN", {
+      reason: "back edge verify->write#defects_found exhausted",
+      waitingFor: { kind: "loop", detail: "verify->write#defects_found" },
+    });
+    rt.events.emit({ kind: "run.state", runId: r.id, payload: { state: "WAITING_HUMAN" } });
+    const short = r.id.slice(4, 12);
+    const page = await getPage(`/runs/${short}`);
+    expect(page).toContain('<input type="hidden" name="back" value="write">');
+    expect(page).toContain("One more round of write");
+    expect(page).toContain("Run verify again");
+    expect(page).toContain("✎ Add a note for write");
+
+    // a step the edge does not go back to is not taken: that is a plain run again
+    expect((await post(`/runs/${short}/rerun`, { t: ui.token, back: "spec" })).status).toBe(303);
+    expect(rt.events.list({ runId: r.id, kind: "loop.rerun" })[0]?.payload).toEqual({
+      step: "verify",
+      channel: "ui",
+    });
+  });
+
+  it("One more round is recorded with the step it goes back to", async () => {
+    const r = rt.runs.create({
+      task: "Delivery slots: the courier app sees closed zones",
+      workflow: "gated",
+      owner: DEV,
+      workspace: { mode: "cwd", repoRoot: sb.project, path: sb.project, baseRef: "HEAD" },
+      dataClass: "internal",
+    });
+    rt.runs.update(r.id, { currentStep: "verify", currentIteration: 3 });
+    rt.runs.transition(r.id, "RUNNING");
+    rt.runs.transition(r.id, "WAITING_HUMAN", {
+      reason: "back edge verify->write#defects_found exhausted",
+      waitingFor: { kind: "loop", detail: "verify->write#defects_found" },
+    });
+    rt.events.emit({ kind: "run.state", runId: r.id, payload: { state: "WAITING_HUMAN" } });
+    const short = r.id.slice(4, 12);
+    expect((await post(`/runs/${short}/rerun`, { t: ui.token, back: "write" })).status).toBe(303);
+    const asked = rt.events.list({ runId: r.id, kind: "loop.rerun" });
+    expect(asked).toHaveLength(1);
+    expect(asked[0]?.payload).toEqual({ step: "write", channel: "ui", back: true });
+    expect(await getPage(`/runs/${short}`)).toContain("↻ one more round of write, then verify");
+  });
 });
 
 describe("a stop on a budget, decided on the page", () => {

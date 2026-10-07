@@ -715,6 +715,8 @@ function stepRow(s: StepRow, now: number, plan?: PlanProgress): Html {
 
 function loopCardHtml(card: LoopCard, page: RunPage, actions?: Actions): Html {
   const route = card.from ? `${card.from} → ${card.to} · ${card.outcome} · ` : "";
+  // the step the used-up edge went back to, when it is another step than the one that stopped
+  const back = card.to && card.to !== card.step ? card.to : undefined;
   return html`<section class="panel decision" aria-labelledby="decision" data-live="card">
 <div class="row" style="flex-direction:column;align-items:flex-start;gap:4px">
 <span class="warn" style="font-size:13px;font-weight:500">Waits for you</span>
@@ -737,9 +739,18 @@ ${
 </div>
 ${
   card.rerun
-    ? html`<div class="banner info">↻ ${card.step} runs again — asked${card.rerun.actor ? ` by ${card.rerun.actor}` : ""}${card.rerun.channel === "ui" ? " from the page" : card.rerun.channel === "cli" ? " in the terminal" : ""}</div><div class="actions">${goesOn(page, actions)}</div>`
+    ? html`<div class="banner info">↻ ${card.rerun.step && card.rerun.step !== card.step ? `one more round of ${card.rerun.step}, then ${card.step}` : `${card.step} runs again`} — asked${card.rerun.actor ? ` by ${card.rerun.actor}` : ""}${card.rerun.channel === "ui" ? " from the page" : card.rerun.channel === "cli" ? " in the terminal" : ""}</div><div class="actions">${goesOn(page, actions)}</div>`
     : actions
-      ? html`<div class="actions">${form(actions, `${runHref(page.run)}/rerun`, html`<button type="submit" class="btn primary big">Run ${card.step} again</button>`)}<span class="hint">same as <code>r</code> on the terminal's card; ${page.terminal ? "the terminal waiting there goes on" : html`no terminal waits: <code>jarvis continue ${shortRunId(page.run.id)}</code> does it`}</span></div>`
+      ? html`<div class="actions">${
+          back
+            ? form(
+                actions,
+                `${runHref(page.run)}/rerun`,
+                html`<input type="hidden" name="back" value="${back}"><button type="submit" class="btn primary big">One more round of ${back}</button>`,
+              )
+            : ""
+        }${form(actions, `${runHref(page.run)}/rerun`, html`<button type="submit" class="btn${back ? "" : " primary"} big">Run ${card.step} again</button>`)}<span class="hint">${back ? html`one more round: ${back} with the reasons above and your notes, then ${card.step}; run again: only ${card.step}, after you fixed the checkout yourself (as <code>r</code>)` : html`same as <code>r</code> on the terminal's card`}; ${page.terminal ? "the terminal waiting there goes on" : html`no terminal waits: <code>jarvis continue ${shortRunId(page.run.id)}</code> does it`}</span></div>
+${notesBox(page, back ?? card.step, actions)}`
       : terminalHint(card, page.terminal, page.run)
 }
 </section>`;

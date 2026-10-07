@@ -119,26 +119,47 @@ export function parkedAt(runtime: Runtime, runId: string): number {
  * "Run <step> again" on a used-up loop (the card's `r`, the page's button): recorded in the journal
  * with the actor, so the card waiting in a terminal goes on, or `jarvis continue` does it next.
  */
-export function requestRerun(runtime: Runtime, run: Run, actor: Actor, channel: DecisionChannel): void {
+/**
+ * «Run again» on a used-up loop: the step that used it up runs again (the person fixed the checkout) —
+ * or, with `back`, the step the loop went back to gets one more round (pilot: the implementation needed
+ * another try with a person's note, and only verify could be run again).
+ */
+export function requestRerun(
+  runtime: Runtime,
+  run: Run,
+  actor: Actor,
+  channel: DecisionChannel,
+  back?: string,
+): void {
   runtime.events.emit({
     kind: "loop.rerun",
     runId: run.id,
     ...(run.currentStep ? { stepId: run.currentStep } : {}),
     actor: `${actor.kind}:${actor.id}`,
-    payload: { step: run.currentStep, channel },
+    payload: { step: back ?? run.currentStep, channel, ...(back ? { back: true } : {}) },
   });
+}
+
+/** The step a «one more round» asked for since the run stopped, if any. */
+export function rerunBackTo(runtime: Runtime, runId: string): string | undefined {
+  const asked = lastOf(runtime, runId, "loop.rerun");
+  if (!asked || asked.seq < parkedAt(runtime, runId)) return undefined;
+  const p = (asked.payload ?? {}) as { back?: unknown; step?: unknown };
+  return p.back === true && typeof p.step === "string" ? p.step : undefined;
 }
 
 /** A "run again" asked since the run last stopped for a person, if any. */
 export function rerunRequested(
   runtime: Runtime,
   runId: string,
-): { actor?: string; channel?: DecisionChannel; seq: number } | undefined {
+): { actor?: string; channel?: DecisionChannel; seq: number; step?: string } | undefined {
   const asked = lastOf(runtime, runId, "loop.rerun");
   if (!asked || asked.seq < parkedAt(runtime, runId)) return undefined;
   const channel = asked.payload?.channel;
+  const step = asked.payload?.step;
   return {
     seq: asked.seq,
+    ...(typeof step === "string" ? { step } : {}),
     ...(asked.actor ? { actor: asked.actor.replace(/^(user|service|ci):/, "") } : {}),
     ...(channel === "cli" || channel === "ui" ? { channel } : {}),
   };

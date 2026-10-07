@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { requestRerun } from "../../src/app/decide.ts";
 import { Journey } from "../../src/app/journey.ts";
 import type { Runtime } from "../../src/app/runtime.ts";
 import { formatStepReport } from "../../src/cli/progress.ts";
@@ -170,6 +171,47 @@ describe("LocalWorkflowEngine", () => {
     const resumed = await engine.execute(run.id, owner);
     expect(resumed.run.state).toBe("COMPLETED");
     expect(seen).toEqual(["1:fresh", "2:fresh", "3:fresh"]);
+  });
+
+  it("gives the step a used-up edge went back to one more round, then the step that stopped", async () => {
+    const wf = workflowOf({
+      name: "loop",
+      entry: "work",
+      steps: [
+        { id: "work", kind: "agentic", agent: "work", transitions: { onSuccess: "verify" } },
+        {
+          id: "verify",
+          kind: "agentic",
+          agent: "verify",
+          transitions: {
+            onSuccess: "DONE",
+            onOutcome: { defects_found: { to: "work", maxIterations: 1 } },
+          },
+        },
+      ],
+    });
+    const seen: string[] = [];
+    let rounds = 0;
+    const engine = engineFor(rt, [wf], {
+      work: async (ctx) => {
+        rounds++;
+        seen.push(`work ${ctx.iteration}`);
+        return { status: "success" };
+      },
+      verify: async (ctx) => {
+        seen.push(`verify ${ctx.iteration}`);
+        return rounds >= 3
+          ? { status: "success" }
+          : { status: "success", outcome: "defects_found", reason: "the route is not registered" };
+      },
+    });
+    const run = createRun(rt, "loop");
+    const parked = await engine.execute(run.id, owner);
+    expect(parked.run.waitingFor).toMatchObject({ kind: "loop", detail: "verify->work#defects_found" });
+    requestRerun(rt, parked.run, ACTOR, "ui", "work");
+    const resumed = await engine.execute(run.id, owner);
+    expect(resumed.run.state).toBe("COMPLETED");
+    expect(seen).toEqual(["work 1", "verify 1", "work 2", "verify 2", "work 3", "verify 3"]);
   });
 
   it("parks on the approval gate, resumes after approval, and re-parks after a human edit", async () => {
