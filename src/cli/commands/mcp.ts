@@ -1,3 +1,5 @@
+import { writeFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { createRuntime } from "../../app/runtime.ts";
 import type { ServerReport } from "../../mcp/provider.ts";
 import { serveStdio } from "../../mcp/server.ts";
@@ -65,6 +67,100 @@ export async function runMcpList(ctx: CliContext, options: { refresh?: boolean }
       }
     });
     if (rows.some((r) => r.live && !r.live.ok)) throw new CliExit(EXIT.error);
+  } finally {
+    await runtime.close();
+  }
+}
+
+/** `--arg key=value` as the capability's arguments: true/false become booleans, the rest stays text. */
+export function parseCallArgs(pairs: readonly string[]): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const pair of pairs) {
+    const at = pair.indexOf("=");
+    if (at <= 0) throw new Error(`--arg ${pair}: expected key=value`);
+    const value = pair.slice(at + 1);
+    out[pair.slice(0, at)] = value === "true" ? true : value === "false" ? false : value;
+  }
+  return out;
+}
+
+/**
+ * `jarvis mcp call <capability> [--arg k=v]… [--full] [--out file]` — one read capability called the
+ * way an agent's call goes: the same server, tool and arguments, the same policy (allow / deny, the
+ * network for the dataClass) and the same redaction; no run, no model. Pilot: "what does Confluence
+ * actually give the agent for this page?" took a research run with a debug log to answer.
+ */
+export async function runMcpCall(
+  ctx: CliContext,
+  capability: string,
+  options: { arg?: readonly string[]; full?: boolean; out?: string },
+): Promise<void> {
+  let args: Record<string, unknown>;
+  try {
+    args = parseCallArgs(options.arg ?? []);
+  } catch (error) {
+    ctx.out.error((error as Error).message);
+    throw new CliExit(EXIT.error);
+  }
+  const loaded = await loadForCli(ctx);
+  const runtime = createRuntime(loaded, { env: ctx.env });
+  try {
+    const cap = runtime.registry.get(capability);
+    if (cap) {
+      const decision = runtime.tools.policy(cap, ["*"]);
+      if (!decision.allowed) {
+        ctx.out.error(`${capability}: ${decision.reason ?? "denied"}`);
+        throw new CliExit(EXIT.policyDenied);
+      }
+    }
+    const started = Date.now();
+    let call: Awaited<ReturnType<typeof runtime.mcp.provider.invoke>>;
+    try {
+      call = await runtime.mcp.provider.invoke(capability, args);
+    } catch (error) {
+      ctx.out.error(error instanceof Error ? error.message : String(error));
+      throw new CliExit(EXIT.error);
+    }
+    const ms = Date.now() - started;
+    const redacted = runtime.redactor.redact(call.result.text);
+    const whole = redacted.text;
+    const bytes = Buffer.byteLength(whole, "utf8");
+    const max = loaded.config.tools.maxOutputBytes;
+    const cut = !options.full && bytes > max;
+    const shown = cut ? Buffer.from(whole, "utf8").subarray(0, max).toString("utf8") : whole;
+    if (options.out)
+      writeFileSync(resolve(ctx.cwd, options.out), whole.endsWith("\n") ? whole : `${whole}\n`);
+    ctx.out.result(
+      {
+        capability,
+        server: call.serverId,
+        tool: call.tool,
+        sent: call.sent,
+        ok: call.result.ok,
+        ms,
+        bytes,
+        redactions: redacted.count,
+        text: whole,
+        ...(call.result.structured !== undefined ? { structured: call.result.structured } : {}),
+      },
+      () => {
+        const st = ctx.out.style;
+        // the header on stderr: stdout is the answer alone, for grep and files
+        ctx.out.note(
+          `${call.result.ok ? st.ok("✓") : st.bad("✗")} ${capability} → ${call.serverId} · ${call.tool} · ${ms} ms · ${bytes.toLocaleString("en-US")} bytes${redacted.count > 0 ? ` · ${redacted.count} redacted` : ""}`,
+        );
+        ctx.out.note(st.muted(`  sent ${JSON.stringify(call.sent)}`));
+        ctx.out.line(shown);
+        if (cut)
+          ctx.out.note(
+            st.muted(
+              `  … an agent sees the first ${max.toLocaleString("en-US")} bytes (tools.maxOutputBytes); --full or --out <file> for all ${bytes.toLocaleString("en-US")}`,
+            ),
+          );
+        if (options.out) ctx.out.note(st.muted(`  written to ${options.out}`));
+      },
+    );
+    if (!call.result.ok) throw new CliExit(EXIT.error);
   } finally {
     await runtime.close();
   }

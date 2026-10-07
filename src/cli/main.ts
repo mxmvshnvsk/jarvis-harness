@@ -29,7 +29,7 @@ import {
   runKnowledgeUpdate,
 } from "./commands/knowledgeGraph.ts";
 import { runLogs } from "./commands/logs.ts";
-import { runMcpList, runMcpServe } from "./commands/mcp.ts";
+import { runMcpCall, runMcpList, runMcpServe } from "./commands/mcp.ts";
 import { runModelsList, runModelsProbe, runModelsStats } from "./commands/models.ts";
 import { runOnboard } from "./commands/onboard.ts";
 import {
@@ -484,6 +484,23 @@ export function buildProgram(options: RunOptions = {}): Command {
     .option("--refresh", "connect to every server and refresh the tools cache", false)
     .action(async (opts: { refresh: boolean }) => {
       await runMcpList(ctxFor(), opts);
+    });
+
+  mcp
+    .command("call <capability>")
+    .description(
+      "call one read capability as an agent would (jira.get, confluence.get, …) and print what it returns",
+    )
+    .option(
+      "--arg <key=value>",
+      "an argument of the capability; repeat for more (true/false become booleans)",
+      (value: string, previous: string[]) => [...previous, value],
+      [] as string[],
+    )
+    .option("--full", "the whole answer, not cut where an agent's is", false)
+    .option("--out <file>", "write the whole answer to a file")
+    .action(async (capability: string, opts: { arg: string[]; full: boolean; out?: string }) => {
+      await runMcpCall(ctxFor(), capability, opts);
     });
 
   mcp

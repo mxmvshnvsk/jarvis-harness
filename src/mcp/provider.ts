@@ -171,6 +171,82 @@ export class McpToolProvider implements ToolProvider {
     return { exposed, report };
   }
 
+  /** The server tool a capability resolves to and the arguments it goes out with. */
+  private async prepare(
+    planned: Planned,
+    args: Record<string, unknown>,
+    marker?: string,
+  ): Promise<{ tool: string; sent: Record<string, unknown> }> {
+    const { profileCap: cap, serverId } = planned;
+    const tools = this.pool.cachedTools(serverId) ?? (await this.pool.connection(serverId).listTools());
+    const tool = cap.tools.find((c) => tools.some((t) => t.name === c));
+    if (!tool)
+      throw new Error(
+        `MCP server "${serverId}" advertises none of ${cap.tools.join(", ")} (run \`jarvis mcp list --refresh\`)`,
+      );
+    let agentArgs = args;
+    if (marker && cap.markerArg) {
+      const current = agentArgs[cap.markerArg];
+      agentArgs = {
+        ...agentArgs,
+        [cap.markerArg]: `${current === undefined ? "" : `${String(current)}\n\n`}[${marker}]`,
+      };
+    }
+    const mapped = cap.args ? cap.args(agentArgs) : agentArgs;
+    const schema = tools.find((t) => t.name === tool)?.inputSchema;
+    return { tool, sent: filterBySchema(mapped, schema) };
+  }
+
+  /** A call as it goes out, then what the profile adds to a read's answer (`enrich`). */
+  private async callPlanned(
+    planned: Planned,
+    args: Record<string, unknown>,
+    marker?: string,
+  ): Promise<{ tool: string; sent: Record<string, unknown>; result: McpCallResult }> {
+    const connection = this.pool.connection(planned.serverId);
+    const { tool, sent } = await this.prepare(planned, args, marker);
+    const result = await connection.callTool(tool, sent);
+    const enrich = planned.profileCap.enrich;
+    if (!enrich || planned.profileCap.effect) return { tool, sent, result };
+    const again = async (other: Record<string, unknown>) => {
+      const next = await this.prepare(planned, other);
+      return connection.callTool(next.tool, next.sent);
+    };
+    try {
+      return { tool, sent, result: await enrich(result, args, again) };
+    } catch {
+      return { tool, sent, result }; // the answer as it came: the addition is a help, not a condition
+    }
+  }
+
+  /**
+   * One read capability called the way an agent's call goes (`jarvis mcp call`): the same server,
+   * tool and arguments, without a run. Effects are refused: they belong to runs, with their journal.
+   */
+  async invoke(
+    name: string,
+    args: Record<string, unknown>,
+  ): Promise<{ serverId: string; tool: string; sent: Record<string, unknown>; result: McpCallResult }> {
+    for (const serverId of this.pool.serverIds()) {
+      const planned = this.plan(serverId).exposed.find((p) => p.name === name);
+      if (!planned) continue;
+      if (planned.profileCap.effect || planned.profileCap.access !== "read")
+        throw new Error(
+          `${name} is an effect (${planned.profileCap.access}): only a run calls it, with its journal`,
+        );
+      return { serverId, ...(await this.callPlanned(planned, args)) };
+    }
+    const report = this.reports().find((r) => [...r.denied, ...r.unmapped, ...r.notAllowed].includes(name));
+    if (report?.denied.includes(name))
+      throw new Error(`${name} is denied on MCP server "${report.id}" (its allow / deny)`);
+    if (report?.unmapped.includes(name))
+      throw new Error(
+        `MCP server "${report.id}" has no tool for ${name} (run \`jarvis mcp list --refresh\`)`,
+      );
+    if (report) throw new Error(`${name} is discovered on "${report.id}" but not allowed (add it to allow)`);
+    throw new Error(`no MCP server exposes ${name} — \`jarvis mcp list\` shows what there is`);
+  }
+
   private capability(planned: Planned): Capability {
     const { profileCap: cap, serverId } = planned;
     const resolveTool = (candidates: readonly string[], tools: readonly McpToolInfo[]) =>
@@ -178,25 +254,8 @@ export class McpToolProvider implements ToolProvider {
     const connection = this.pool.connection(serverId);
     const toolsOf = async () => this.pool.cachedTools(serverId) ?? (await connection.listTools());
 
-    const call = async (args: Record<string, unknown>, marker?: string): Promise<McpCallResult> => {
-      const tools = await toolsOf();
-      const tool = resolveTool(cap.tools, tools);
-      if (!tool)
-        throw new Error(
-          `MCP server "${serverId}" advertises none of ${cap.tools.join(", ")} (run \`jarvis mcp list --refresh\`)`,
-        );
-      let agentArgs = args;
-      if (marker && cap.markerArg) {
-        const current = agentArgs[cap.markerArg];
-        agentArgs = {
-          ...agentArgs,
-          [cap.markerArg]: `${current === undefined ? "" : `${String(current)}\n\n`}[${marker}]`,
-        };
-      }
-      const mapped = cap.args ? cap.args(agentArgs) : agentArgs;
-      const schema = tools.find((t) => t.name === tool)?.inputSchema;
-      return connection.callTool(tool, filterBySchema(mapped, schema));
-    };
+    const call = async (args: Record<string, unknown>, marker?: string): Promise<McpCallResult> =>
+      (await this.callPlanned(planned, args, marker)).result;
 
     const toOutput = (r: McpCallResult): ToolOutput => ({
       ok: r.ok,

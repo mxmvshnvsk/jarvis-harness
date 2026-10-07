@@ -45,6 +45,15 @@ export interface ProfileCapability {
     args: Record<string, unknown>,
     marker: string,
   ) => Promise<McpCallResult | "not-found" | undefined>;
+  /**
+   * Reads only: adds to an answer what the server's answer leaves out, by calling the same capability
+   * again with other arguments (`again` goes through the same tool and argument mapping).
+   */
+  readonly enrich?: (
+    result: McpCallResult,
+    args: Record<string, unknown>,
+    again: (args: Record<string, unknown>) => Promise<McpCallResult>,
+  ) => Promise<McpCallResult>;
 }
 
 export interface McpProfile {

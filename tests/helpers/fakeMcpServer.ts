@@ -58,6 +58,32 @@ server.registerTool(
   },
 );
 
+// a Confluence page whose design is an embedded frame: the URL lives in a macro attribute, which the
+// markdown conversion of the community server drops (pilot)
+const PAGE_STORAGE =
+  '<h1>Order form</h1><p>The phone field gets a mask.</p><ac:structured-macro ac:name="widget"><ac:parameter ac:name="url"><ri:url ri:value="https://www.figma.com/design/AbC123xyz/Order-form?node-id=12-345&amp;t=x" /></ac:parameter></ac:structured-macro>';
+server.registerTool(
+  "confluence_get_page",
+  {
+    description: "page by id",
+    inputSchema: { page_id: z.string(), convert_to_markdown: z.boolean().optional() },
+  },
+  async ({ page_id, convert_to_markdown }) => ({
+    content: [
+      {
+        type: "text",
+        text:
+          convert_to_markdown === false
+            ? JSON.stringify({ metadata: { id: page_id }, content: { value: PAGE_STORAGE } })
+            : JSON.stringify({
+                metadata: { id: page_id },
+                content: { value: "Order form\n==========\n\nThe phone field gets a mask.\n" },
+              }),
+      },
+    ],
+  }),
+);
+
 server.registerTool(
   "whoami",
   { description: "returns the token the server was started with", inputSchema: {} },

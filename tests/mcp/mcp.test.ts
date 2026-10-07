@@ -1,8 +1,11 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { Writable } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { preflightMcp, workflowCapabilities } from "../../src/app/preflight.ts";
 import type { Runtime } from "../../src/app/runtime.ts";
+import { run } from "../../src/cli/main.ts";
+import { embeddedLinks } from "../../src/mcp/profiles/atlassian.ts";
 import { resolveProfile, UnknownProfileError } from "../../src/mcp/profiles/index.ts";
 import { filterBySchema, serversNeeded } from "../../src/mcp/provider.ts";
 import { HeldLease } from "../../src/orchestration/lease.ts";
@@ -61,6 +64,7 @@ beforeEach(() => {
 });
 afterEach(async () => {
   lease?.release();
+  lease = undefined;
   await rt?.close();
   rt = undefined;
   sb.cleanup();
@@ -259,9 +263,9 @@ describe("profiled server", () => {
     expect(entry.tools.map((t) => t.name)).toContain("getJiraIssue");
     expect(existsSync(join(sb.home, ".jarvis", "cache", "mcp", "jira.json"))).toBe(true);
     const after = (rt as Runtime).mcp.provider.report("jira");
-    expect(after.discovered?.count).toBe(5);
-    expect(after.exposed).toEqual(["jira.comment", "jira.get", "jira.search"]);
-    expect(after.unmapped).toEqual(["confluence.create", "confluence.get", "confluence.search"]);
+    expect(after.discovered?.count).toBe(6);
+    expect(after.exposed).toEqual(["confluence.get", "jira.comment", "jira.get", "jira.search"]);
+    expect(after.unmapped).toEqual(["confluence.create", "confluence.search"]);
   });
 
   it("routes a read through the policy and the normalized name", async () => {
@@ -331,6 +335,97 @@ describe("profiled server", () => {
     const third = await bind(["jira.*"]).invoke("jira.comment", args3);
     expect(third.source).toBe("executed");
     expect(readFileSync(state, "utf8").trim().split("\n")).toHaveLength(2);
+  });
+});
+
+describe("embeddedLinks", () => {
+  it("finds the addresses macros keep in attributes and parameters, plain or JSON-escaped", () => {
+    const storage = [
+      '<ac:structured-macro ac:name="widget"><ac:parameter ac:name="url"><ri:url ri:value="https://www.figma.com/design/K1/Form?node-id=1-2&amp;t=a" /></ac:parameter></ac:structured-macro>',
+      '<ac:structured-macro ac:name="figma"><ac:parameter ac:name="url">https://www.figma.com/file/K2/Old?node-id=3%3A4</ac:parameter></ac:structured-macro>',
+      '<iframe width="800" src="https://embed.example.com/frame/9"></iframe>',
+      '<a href="https://docs.example.com/plain">a plain link</a>',
+    ].join("");
+    const links = [
+      "https://www.figma.com/design/K1/Form?node-id=1-2&t=a",
+      "https://www.figma.com/file/K2/Old?node-id=3%3A4",
+      "https://embed.example.com/frame/9",
+    ];
+    expect(embeddedLinks(storage)).toEqual(links);
+    expect(embeddedLinks(JSON.stringify({ content: { value: storage + storage } }))).toEqual(links);
+    expect(embeddedLinks("<p>nothing embedded</p>")).toEqual([]);
+  });
+});
+
+describe("jarvis mcp call", () => {
+  async function cli(args: string[]) {
+    let out = "";
+    let err = "";
+    const sink = (f: (s: string) => void) =>
+      new Writable({
+        write(c, _e, cb) {
+          f(String(c));
+          cb();
+        },
+      });
+    const code = await run(["node", "jarvis", ...args], {
+      streams: {
+        out: sink((s) => {
+          out += s;
+        }),
+        err: sink((s) => {
+          err += s;
+        }),
+      },
+      context: { cwd: sb.project, homeDir: sb.home, env: ENV },
+    });
+    return { code, out, err };
+  }
+
+  it("calls one read capability as an agent would: the header on stderr, the answer alone on stdout", async () => {
+    await setup(serverYaml("jira", "      profile: atlassian\n      deny: [jira.transition]"));
+    const got = await cli(["mcp", "call", "jira.get", "--arg", "key=ABC-42"]);
+    expect(got.code).toBe(0);
+    expect(got.err).toMatch(/✓ jira\.get → jira · getJiraIssue · \d+ ms · \d+ bytes/);
+    expect(got.err).toContain('sent {"issueKey":"ABC-42"}');
+    expect(JSON.parse(got.out)).toMatchObject({ key: "ABC-42", summary: "Allow onboarding restart" });
+
+    // raw: the page with its macros, where an embedded design's address is
+    // the text loses the embedded frame; the profile adds its address from the page's macros
+    const text = await cli(["mcp", "call", "confluence.get", "--arg", "id=77"]);
+    expect(text.err).toContain('"convert_to_markdown":true');
+    expect(text.out).toContain("The phone field gets a mask.");
+    expect(text.out).toContain(
+      "Embedded on the page (frames and macros the text above leaves out):\n- https://www.figma.com/design/AbC123xyz/Order-form?node-id=12-345&t=x",
+    );
+    const raw = await cli([
+      "mcp",
+      "call",
+      "confluence.get",
+      "--arg",
+      "id=77",
+      "--arg",
+      "raw=true",
+      "--out",
+      "page.json",
+    ]);
+    expect(raw.err).toContain('"convert_to_markdown":false');
+    expect(raw.out).toContain("figma.com/design/AbC123xyz");
+    expect(readFileSync(join(sb.project, "page.json"), "utf8")).toContain("ri:url");
+  });
+
+  it("refuses effects, denied and unknown capabilities, with why", async () => {
+    await setup(serverYaml("jira", "      profile: atlassian\n      deny: [jira.transition]"));
+    const effect = await cli(["mcp", "call", "jira.comment", "--arg", "key=ABC-42", "--arg", "body=hi"]);
+    expect(effect.code).toBe(1);
+    expect(effect.err).toContain("jira.comment is an effect (write): only a run calls it");
+    expect((await cli(["mcp", "call", "jira.transition", "--arg", "key=A-1"])).err).toContain(
+      'jira.transition is denied on MCP server "jira"',
+    );
+    expect((await cli(["mcp", "call", "nope.get"])).err).toContain("no MCP server exposes nope.get");
+    expect((await cli(["mcp", "call", "jira.get", "--arg", "key"])).err).toContain(
+      "--arg key: expected key=value",
+    );
   });
 });
 
@@ -414,7 +509,7 @@ describe("preflight", () => {
     expect(caps).toContain("jira.get");
     expect(serversNeeded(runtime.loaded.config, caps)).toEqual(["jira"]);
     const result = await preflightMcp(runtime, sdd);
-    expect(result).toEqual({ ok: true, servers: [{ id: "jira", ok: true, tools: 5 }] });
+    expect(result).toEqual({ ok: true, servers: [{ id: "jira", ok: true, tools: 6 }] });
     expect(runtime.mcp.provider.report("jira").discovered).toBeDefined();
     expect(runtime.mcp.provider.report("bb").discovered).toBeUndefined();
   });

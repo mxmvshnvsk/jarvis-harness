@@ -78,18 +78,55 @@ const jiraTransition: ProfileCapability = {
 
 const confluenceGet: ProfileCapability = {
   tools: ["getConfluencePage", "confluence_get_page", "confluence_getContent", "get_page"],
-  description: "Read a Confluence page by id.",
+  description:
+    "Read a Confluence page by id. raw: true — the page's storage HTML with its macros (embedded designs, diagrams, includes), much longer than the text.",
   access: "read",
   effect: false,
-  parameters: params({ id: "page id" }, ["id"]),
-  args: (a) => ({
-    pageId: a.id ?? a.pageId,
-    page_id: a.id ?? a.pageId,
-    contentId: a.id ?? a.pageId,
-    // Data Center: the body as text, not storage-format XML the agent would have to read through
-    bodyMode: "text",
-  }),
+  parameters: params({ id: "page id", raw: "true — storage HTML with macros instead of text" }, ["id"]),
+  args: (a) => {
+    // what an embedded frame (Widget Connector, a design macro) points to lives in a macro attribute,
+    // which the text conversion drops (pilot: a design link on the requirements page never reached the agent)
+    const raw = a.raw === true || a.raw === "true";
+    return {
+      pageId: a.id ?? a.pageId,
+      page_id: a.id ?? a.pageId,
+      contentId: a.id ?? a.pageId,
+      // Data Center: the body as text, not storage-format XML the agent would have to read through
+      bodyMode: raw ? "storage" : "text",
+      convert_to_markdown: !raw,
+    };
+  },
+  // the text, then what it lost: the addresses of embedded frames, from the storage HTML
+  enrich: async (result, args, again) => {
+    if (!result.ok || args.raw === true || args.raw === "true") return result;
+    const raw = await again({ ...args, raw: true });
+    if (!raw.ok) return result;
+    const links = embeddedLinks(raw.text).filter((u) => !result.text.includes(u));
+    if (links.length === 0) return result;
+    return {
+      ...result,
+      text: `${result.text}\n\nEmbedded on the page (frames and macros the text above leaves out):\n${links.map((u) => `- ${u}`).join("\n")}`,
+    };
+  },
 };
+
+/**
+ * Addresses a page embeds through macros — a design frame (Widget Connector, a design app's macro),
+ * an iframe — from its storage HTML: the text conversion keeps a plain link but drops a macro's
+ * attributes. Pilot: the requirements page embedded the design frame; the agent never saw it.
+ */
+export function embeddedLinks(storage: string): string[] {
+  const text = storage
+    .replace(/\\"/g, '"')
+    .replace(/\\u0026/g, "&")
+    .replace(/&amp;/g, "&");
+  const found = [
+    ...text.matchAll(/<ri:url\s+ri:value="(https?:\/\/[^"]+)"/g),
+    ...text.matchAll(/<ac:parameter\s+ac:name="(?:url|link|src|href)"\s*>\s*(https?:\/\/[^<\s]+)\s*</g),
+    ...text.matchAll(/<iframe[^>]*\ssrc="(https?:\/\/[^"]+)"/g),
+  ].map((m) => m[1] as string);
+  return [...new Set(found)].slice(0, 20);
+}
 
 const confluenceSearch: ProfileCapability = {
   tools: ["searchConfluenceUsingCql", "confluence_search", "confluence_searchContent", "search"],

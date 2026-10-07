@@ -154,6 +154,22 @@ libsecret, Windows DPAPI, файл `0600` (fallback; `JARVIS_KEYCHAIN_BACKEND=fi
 Серверы из `mcp.servers` и их состояние: discovered / exposed / denied / unmapped / «discovered, not
 allowed». `--refresh` переподключается к каждому и обновляет кэш `~/.jarvis/cache/mcp/<server>.json`.
 
+### `jarvis mcp call <capability> [--arg key=value]… [--full] [--out <file>]`
+
+Одна возможность на чтение (`jira.get`, `jira.search`, `confluence.get`, `confluence.search`, `bitbucket.pr.*`)
+так, как её вызвал бы агент: тот же сервер по профилю, токены, преобразование аргументов, проверки `allow` /
+`deny` и сети по `dataClass` (запрет — с той же причиной, выход 12), тот же редактор секретов. Без прогона и
+модели; эффекты (`jira.comment`, `confluence.create`, …) не вызываются — только из прогона, с журналом. В stderr —
+шапка: сервер, выбранный инструмент, ушедшие аргументы, время, размер; в stdout — только ответ (для `grep` и
+файлов), обрезанный, как его видит агент (`tools.maxOutputBytes`), `--full` — целиком, `--out` — в файл.
+`--arg` повторяется; `true`/`false` становятся булевыми, остальное — текст. `--json` — всё структурой.
+
+```
+jarvis mcp call jira.get --arg key=ABC-123
+jarvis mcp call confluence.search --arg query="маска телефона"
+jarvis mcp call confluence.get --arg id=123456 --arg raw=true --full | grep -io 'https://[^"<]*figma[^"<]*'
+```
+
 ### `jarvis mcp serve`
 
 Jarvis как MCP-сервер на stdio (только чтение) для IDE и других агентов: `knowledge.search`,
