@@ -62,7 +62,7 @@ export interface Chrome {
   readonly theme?: "light" | "dark";
   /** A task can be started from the page (`jarvis ui` with a launcher, not read-only). */
   readonly canStart?: boolean;
-  /** Reload the page this often (seconds): a launch waiting for its run. */
+  /** Without scripts, reload the page this often (seconds); with them the live regions refresh (`tick`). */
   readonly refresh?: number;
 }
 
@@ -73,7 +73,7 @@ export function layout(chrome: Chrome, content: Html): string {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="${chrome.theme ?? "light dark"}">
-${chrome.refresh ? html`<meta http-equiv="refresh" content="${String(chrome.refresh)}">` : ""}
+${chrome.refresh ? html`<noscript><meta http-equiv="refresh" content="${String(chrome.refresh)}"></noscript>` : ""}
 <meta name="referrer" content="same-origin">
 <title>${chrome.title} · jarvis</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -870,7 +870,7 @@ export function modelsPending(): Html {
 export function launchContent(l: LaunchView & { readonly repo: string }, now: number, homeDir: string): Html {
   const failed = l.exitCode !== null;
   const age = clock(Math.max(0, now - Date.parse(l.startedAt)));
-  return html`<div class="lede-col" style="display:flex;flex-direction:column;gap:8px">
+  return html`<div data-live="launch" style="display:flex;flex-direction:column;gap:28px"><div class="lede-col" style="display:flex;flex-direction:column;gap:8px">
 <div class="row"><span class="pill ${failed ? "bad" : "info"}">${failed ? (l.exitCode === 0 ? "ended without a run" : `failed to start · exit ${l.exitCode}`) : "◌ starting"}</span><span class="meta">${l.workflow} · started ${age} ago · ${home(l.repo, homeDir)}</span></div>
 <h1>${firstLine(l.task)}</h1>
 </div>
@@ -882,5 +882,5 @@ ${
 }
 <section class="panel feed" aria-labelledby="output"><h2 id="output">Output</h2>
 ${l.tail ? html`<pre class="tail">${l.tail}</pre>` : html`<p class="muted">Nothing yet.</p>`}
-<span class="meta">log ${home(l.log, homeDir)}</span></section>`;
+<span class="meta">log ${home(l.log, homeDir)}</span></section></div>`;
 }

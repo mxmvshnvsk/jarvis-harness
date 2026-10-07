@@ -173,6 +173,11 @@ describe("New task on the page", () => {
     const launchPage = await page(started.location ?? "/");
     expect(launchPage).toContain("Compact form: the upload toggle hides attached files");
     expect(launchPage).toMatch(/Preparing the run's checkout|ended without a run/);
+    if (launchPage.includes("Preparing the run's checkout")) {
+      // refreshed in place, so the header's popover stays open; a full reload only without scripts
+      expect(launchPage).toContain('data-tick="2000"');
+      expect(launchPage).toContain('<noscript><meta http-equiv="refresh" content="2"></noscript>');
+    }
     const run = createRun("Compact form: the upload toggle hides attached files");
     const res = await fetch(`http://127.0.0.1:${ui.port}${started.location}`, {
       redirect: "manual",

@@ -284,6 +284,8 @@ export const SCRIPT = `
     try {
       const res = await fetch(location.href, { headers: { 'X-Jarvis-Refresh': '1' }, credentials: 'same-origin' });
       if (!res.ok) return;
+      // the page moved on (a launch whose run began): follow it
+      if (res.redirected && res.url !== location.href) { location.href = res.url; return; }
       const next = new DOMParser().parseFromString(await res.text(), 'text/html');
       for (const el of document.querySelectorAll('[data-live]')) {
         let fresh = next.querySelector('[data-live="' + el.dataset.live + '"]');
@@ -449,6 +451,8 @@ export const SCRIPT = `
       if (e.key === 'Escape' && modelsPop && !modelsPop.hidden) { setPop(false); modelsButton.focus(); }
     });
     document.addEventListener('click', (e) => {
+      // a click on something the refresh just replaced is no click outside
+      if (!e.target.isConnected) return;
       if (modelsPop && !modelsPop.hidden && !e.target.closest('.models-wrap')) setPop(false);
     });
   }

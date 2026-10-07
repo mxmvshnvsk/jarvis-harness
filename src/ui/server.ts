@@ -553,7 +553,8 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
           title: `Starting · ${launch.task.slice(0, 60)}`,
           page: "run",
           back: { href: "/", label: "Runs" },
-          ...(launch.exitCode === null ? { refresh: 2 } : {}),
+          // refreshed in place (the header and its popover stay); the run's page once the run begins
+          ...(launch.exitCode === null ? { refresh: 2, tick: 2000 } : {}),
         },
         launchContent(
           {
