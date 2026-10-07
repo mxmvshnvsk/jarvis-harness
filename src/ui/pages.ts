@@ -831,16 +831,28 @@ ${last ? html`<span class="meta">${last}</span>` : ""}
 </section>`;
 }
 
+/** Lines of Activity shown open; the rest of the run's feed is one click away. */
+export const FEED_SHOWN = 5;
+
+function feedLine(f: FeedItem): Html {
+  return f.sub
+    ? html`<li><time datetime="${f.ts}">${wallClock(f.ts)}</time><div class="grp"><span>${f.text}</span>${f.sub.map((c) => html`<span class="sub${c.tone ? ` ${c.tone}` : ""}">${c.text}</span>`)}</div></li>`
+    : html`<li><time datetime="${f.ts}">${wallClock(f.ts)}</time><span${f.tone ? html` class="${f.tone}"` : ""}>${f.text}</span></li>`;
+}
+
+/** The newest few lines, and above them everything earlier, folded (it stays open across live refreshes). */
 function feedHtml(feed: readonly FeedItem[]): Html {
+  const earlier = feed.slice(0, Math.max(0, feed.length - FEED_SHOWN));
+  const recent = feed.slice(-FEED_SHOWN);
   return html`<section class="panel feed" aria-labelledby="activity" data-live="feed">
 <h2 id="activity">Activity</h2>
 ${
   feed.length > 0
-    ? html`<ol>${feed.map((f) =>
-        f.sub
-          ? html`<li><time datetime="${f.ts}">${wallClock(f.ts)}</time><div class="grp"><span>${f.text}</span>${f.sub.map((c) => html`<span class="sub${c.tone ? ` ${c.tone}` : ""}">${c.text}</span>`)}</div></li>`
-          : html`<li><time datetime="${f.ts}">${wallClock(f.ts)}</time><span${f.tone ? html` class="${f.tone}"` : ""}>${f.text}</span></li>`,
-      )}</ol>`
+    ? html`${
+        earlier.length > 0
+          ? html`<details class="earlier" data-keep="feed-earlier"><summary>${earlier.length} earlier</summary><ol>${earlier.map(feedLine)}</ol></details>`
+          : ""
+      }<ol>${recent.map(feedLine)}</ol>`
     : html`<p class="muted">Nothing yet.</p>`
 }
 </section>`;

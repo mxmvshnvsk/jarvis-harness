@@ -199,6 +199,12 @@ tr:last-child td{border-bottom:0}
 @media (prefers-reduced-motion:reduce){.spin{animation:none}}
 .feed{padding:18px 20px;display:flex;flex-direction:column;gap:8px}
 .feed ol{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:8px}
+.feed .earlier>summary{list-style:none;cursor:pointer;width:max-content;font-size:13px;color:var(--accent);padding:2px 0}
+.feed .earlier>summary::-webkit-details-marker{display:none}
+.feed .earlier>summary::before{content:'▸ ';color:var(--muted)}
+.feed .earlier[open]>summary::before{content:'▾ '}
+.feed .earlier[open]>summary{margin-bottom:8px}
+.feed .earlier>ol{padding-bottom:8px;border-bottom:1px dashed var(--line);margin-bottom:8px}
 .feed li{display:flex;gap:14px;font-size:13px;line-height:19px;align-items:baseline}
 .feed time{font-family:var(--mono);color:var(--muted);width:64px;flex-shrink:0}
 .feed li span{flex:1;min-width:0;overflow-wrap:anywhere}
@@ -533,6 +539,11 @@ export const SCRIPT = `
         // ticked boxes (pilot: a refresh while reviewing a module's claims cleared the ticks), a choice
         if (edited(el)) continue;
         inPhase(fresh);
+        // a fold a person opened (or closed) stays so: the fresh rendering comes folded
+        for (const d of el.querySelectorAll('details[data-keep]')) {
+          const same = fresh.querySelector('details[data-keep="' + d.dataset.keep + '"]');
+          if (same) same.open = d.open;
+        }
         el.replaceWith(fresh);
       }
       const title = next.querySelector('title');

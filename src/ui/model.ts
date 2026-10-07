@@ -685,7 +685,8 @@ export async function runPage(
     ...(activity && run.state === "RUNNING" ? { activity } : {}),
     ...(run.state === "WAITING_HUMAN" ? { card: await waitCardOf(runtime, run, options.homeDir) } : {}),
     terminal: waitingCard(runtime, run.id) !== undefined,
-    feed: feed.slice(-15),
+    // all of it: the page shows the newest few and the rest under «earlier»
+    feed,
     artifacts: artifactStates(runtime, run),
     leaseLive,
     ...(() => {

@@ -300,7 +300,29 @@ describe("jarvis ui: pages", () => {
     expect(js).toContain("inPhase(fresh)");
   });
 
-  it("recent: every finished run, a page of 25 at a time, and a search over all their fields", async () => {
+  it("activity: the newest 5 lines open, everything earlier folded above them, kept open across refreshes", async () => {
+    const run = rt.runs.create({
+      task: "Order form: phone number mask",
+      workflow: "research",
+      owner: DEV,
+      workspace: { mode: "cwd", repoRoot: sb.project, path: sb.project, baseRef: "HEAD" },
+      dataClass: "internal",
+    });
+    for (const step of ["discover", "sources", "research", "requirements", "spec", "plan", "review"])
+      rt.events.emit({
+        kind: "step.finish",
+        runId: run.id,
+        payload: { stepId: step, iteration: 1, status: "success" },
+      });
+    const page = await get(`/runs/${run.id.replace(/^run_/, "").slice(0, 8)}`, authed());
+    const feed = page.body.slice(page.body.indexOf('data-live="feed"'));
+    expect(feed).toContain('<details class="earlier" data-keep="feed-earlier"><summary>2 earlier</summary>');
+    expect(feed.indexOf("discover done")).toBeLessThan(feed.indexOf("</details>"));
+    expect(feed.indexOf("requirements done")).toBeGreaterThan(feed.indexOf("</details>"));
+    expect((await get("/assets/app.js")).body).toContain("details[data-keep]");
+  });
+
+  it("recent: every finished run, a page at a time, and a search over all their fields", async () => {
     const make = (task: string, workflow: string, end: "COMPLETED" | "FAILED") => {
       const run = rt.runs.create({
         task,
