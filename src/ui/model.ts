@@ -106,6 +106,53 @@ export interface WaitingCandidate {
   readonly review: number;
 }
 
+/** The finished runs as a list to search and page through (Runs → Recent). */
+export interface RecentList {
+  readonly runs: readonly RecentRun[];
+  /** What was asked: free text, every word in some field of a run (id, task, workflow, state, …). */
+  readonly query: string;
+  readonly terms: readonly string[];
+  readonly page: number;
+  readonly pageSize: number;
+  /** Runs that match the query, all pages. */
+  readonly total: number;
+}
+
+export const RECENT_PAGE = 25;
+
+/** `foo "two words" bar` → its terms, lower case; a quoted phrase is one term. */
+export function termsOf(query: string): string[] {
+  return [...query.matchAll(/"([^"]+)"|(\S+)/g)]
+    .map((m) => (m[1] ?? m[2] ?? "").trim().toLowerCase())
+    .filter((t) => t.length > 0);
+}
+
+/** Every field of a run a person might remember it by, as one text to search. */
+export function searchTextOf(run: Run, homeDir: string): string {
+  const created = new Date(run.createdAt);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return [
+    run.id,
+    shortRunId(run.id),
+    run.task,
+    run.workflow,
+    run.state,
+    run.stateReason ?? "",
+    run.owner.id,
+    run.workspace.repoRoot,
+    homeDir && run.workspace.repoRoot.startsWith(homeDir)
+      ? `~${run.workspace.repoRoot.slice(homeDir.length)}`
+      : "",
+    run.workspace.branch ?? "",
+    run.profile ?? "",
+    run.currentStep ?? "",
+    run.createdAt.slice(0, 10),
+    `${pad(created.getDate())}.${pad(created.getMonth() + 1)}.${created.getFullYear()}`,
+  ]
+    .join("\n")
+    .toLowerCase();
+}
+
 export interface RunsPage {
   readonly repos: readonly Repo[];
   /** The repository shown, or undefined for all. */
@@ -114,7 +161,7 @@ export interface RunsPage {
   /** Module research waiting for a review: a person decides, as for a run. */
   readonly candidates: readonly WaitingCandidate[];
   readonly running: readonly RunningRun[];
-  readonly recent: readonly RecentRun[];
+  readonly recent: RecentList;
   readonly today: { readonly runs: number; readonly modelCalls: number };
 }
 
@@ -199,15 +246,16 @@ export async function waitCardOf(runtime: Runtime, run: Run, homeDir: string): P
 export async function runsPage(
   runtime: Runtime,
   engine: LocalWorkflowEngine,
-  options: { repo?: string; current?: string; homeDir: string; now?: Date },
+  options: { repo?: string; current?: string; homeDir: string; now?: Date; q?: string; page?: number },
 ): Promise<RunsPage> {
   const now = (options.now ?? new Date()).getTime();
-  const all = runtime.runs.list({ includeTerminal: true, limit: 500 });
+  // every run: Recent pages through all of them and searches all of them
+  const all = runtime.runs.list({ includeTerminal: true, limit: 1_000_000 });
   const repos = reposOf(all, options.current);
   const runs = options.repo ? all.filter((r) => r.workspace.repoRoot === options.repo) : all;
   const waiting: WaitingRun[] = [];
   const running: RunningRun[] = [];
-  const recent: RecentRun[] = [];
+  const finished: Run[] = [];
   for (const run of runs) {
     if (run.state === "WAITING_HUMAN") {
       waiting.push({
@@ -230,14 +278,32 @@ export async function runsPage(
         ...(activity ? { activity } : {}),
         ...(at >= 0 ? { position: { index: at + 1, total: plan.length } } : {}),
       });
-    } else if (recent.length < 25) {
-      recent.push({
-        run,
-        modelCalls: runtime.events.list({ runId: run.id, kind: "model.call", limit: 1_000_000 }).length,
-        tookMs: Math.max(0, Date.parse(run.updatedAt) - Date.parse(run.createdAt)),
-      });
-    }
+    } else finished.push(run);
   }
+  const query = (options.q ?? "").trim();
+  const terms = termsOf(query);
+  const matching =
+    terms.length === 0
+      ? finished
+      : finished.filter((run) => {
+          const text = searchTextOf(run, options.homeDir);
+          return terms.every((t) => text.includes(t));
+        });
+  const pages = Math.max(1, Math.ceil(matching.length / RECENT_PAGE));
+  const pageNo = Math.min(Math.max(1, Math.floor(options.page ?? 1)), pages);
+  const recent: RecentList = {
+    // the model calls of the rows shown only: counting them is a query per run
+    runs: matching.slice((pageNo - 1) * RECENT_PAGE, pageNo * RECENT_PAGE).map((run) => ({
+      run,
+      modelCalls: runtime.events.list({ runId: run.id, kind: "model.call", limit: 1_000_000 }).length,
+      tookMs: Math.max(0, Date.parse(run.updatedAt) - Date.parse(run.createdAt)),
+    })),
+    query,
+    terms,
+    page: pageNo,
+    pageSize: RECENT_PAGE,
+    total: matching.length,
+  };
   const midnight = new Date(now);
   midnight.setHours(0, 0, 0, 0);
   const since = midnight.toISOString();

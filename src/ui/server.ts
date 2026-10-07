@@ -1115,8 +1115,12 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
       const all = runtime.runs.list({ includeTerminal: true, limit: 500 });
       const here = options.projectRoot && all.some((x) => x.workspace.repoRoot === options.projectRoot);
       const repo = repoParam === null ? (here ? options.projectRoot : undefined) : repoParam || undefined;
+      const q = (r.url.searchParams.get("q") ?? "").slice(0, 200);
+      const pageNo = Number(r.url.searchParams.get("page") ?? "1");
       const listed = await runsPage(runtime, engine, {
         ...(repo ? { repo } : {}),
+        ...(q ? { q } : {}),
+        ...(Number.isFinite(pageNo) && pageNo > 1 ? { page: pageNo } : {}),
         ...(options.projectRoot ? { current: options.projectRoot } : {}),
         homeDir: options.homeDir,
       });

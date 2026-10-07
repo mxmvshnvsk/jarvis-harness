@@ -456,19 +456,70 @@ ${
     : html`<div class="panel empty">Nothing runs now.</div>`
 }
 </section>
-<section class="group" aria-labelledby="recent" data-live="recent">
-<h2 id="recent">Recent</h2>
-${
-  page.recent.length > 0
-    ? html`<div class="panel scroll recent"><table>
-<thead><tr><th scope="col">Run</th><th scope="col">Task</th><th scope="col">Workflow</th><th scope="col">State</th><th scope="col">Took</th><th scope="col">Model</th></tr></thead>
-<tbody>${page.recent.map(
-        (r) =>
-          html`<tr><td class="mono"><a href="${runHref(r.run)}">${shortRunId(r.run.id)}</a></td><td>${firstLine(r.run.task, 90)}</td><td>${r.run.workflow}</td><td>${recentState(r.run)}</td><td>${duration(r.tookMs)}</td><td class="muted">${r.modelCalls} call${r.modelCalls === 1 ? "" : "s"}</td></tr>`,
-      )}</tbody></table></div>`
-    : html`<div class="panel empty">No runs yet.</div>`
-}
+<section class="group" aria-labelledby="recent">
+<div class="group-head"><h2 id="recent">Recent</h2>
+<form class="search" role="search" method="get" action="/">
+<input type="search" name="q" value="${page.recent.query}" placeholder="Search: id, task, workflow, state, repository, date…" aria-label="Search runs" autocomplete="off" data-search>
+<input type="hidden" name="repo" value="${page.repo ?? ""}"><button type="submit" class="btn sr">Search</button>
+</form></div>
+${recentHtml(page)}
 </section>`;
+}
+
+/** Recent: one page of the finished runs (all of them, or those matching the search), and the way on. */
+function recentHtml(page: RunsPage): Html {
+  const list = page.recent;
+  const href = (n: number) => {
+    const q = new URLSearchParams();
+    if (list.query) q.set("q", list.query);
+    q.set("repo", page.repo ?? "");
+    if (n > 1) q.set("page", String(n));
+    return `/?${q.toString()}#recent`;
+  };
+  const from = (list.page - 1) * list.pageSize + 1;
+  const to = from + list.runs.length - 1;
+  const last = Math.max(1, Math.ceil(list.total / list.pageSize));
+  const pager =
+    list.total > list.pageSize
+      ? html`<nav class="pager" aria-label="Recent runs, pages">${list.page > 1 ? html`<a href="${href(list.page - 1)}" rel="prev">← Newer</a>` : html`<span class="muted">← Newer</span>`}<span class="muted">${from}–${to} of ${list.total}</span>${list.page < last ? html`<a href="${href(list.page + 1)}" rel="next">Older →</a>` : html`<span class="muted">Older →</span>`}</nav>`
+      : list.query && list.total > 0
+        ? html`<nav class="pager"><span class="muted">${list.total} found</span></nav>`
+        : html``;
+  const body =
+    list.runs.length > 0
+      ? html`<div class="panel scroll recent"><table>
+<thead><tr><th scope="col">Run</th><th scope="col">Task</th><th scope="col">Workflow</th><th scope="col">State</th><th scope="col">Took</th><th scope="col">Model</th></tr></thead>
+<tbody>${list.runs.map(
+          (r) =>
+            html`<tr><td class="mono"><a href="${runHref(r.run)}">${marked(shortRunId(r.run.id), list.terms)}</a></td><td>${marked(firstLine(r.run.task, 90), list.terms)}</td><td>${marked(r.run.workflow, list.terms)}</td><td>${recentState(r.run)}</td><td>${duration(r.tookMs)}</td><td class="muted">${r.modelCalls} call${r.modelCalls === 1 ? "" : "s"}</td></tr>`,
+        )}</tbody></table></div>`
+      : list.query
+        ? html`<div class="panel empty">No runs match «${list.query}».</div>`
+        : html`<div class="panel empty">No runs yet.</div>`;
+  return html`<div data-live="recent">${body}${pager}</div>`;
+}
+
+/** The text with what the search matched marked, every match of every term (case aside). */
+export function marked(text: string, terms: readonly string[]): Html {
+  const wanted = terms.filter((t) => t.length > 0);
+  if (wanted.length === 0) return html`${text}`;
+  const lower = text.toLowerCase();
+  const hits: Array<[number, number]> = [];
+  for (const t of wanted)
+    for (let at = lower.indexOf(t); at >= 0; at = lower.indexOf(t, at + t.length))
+      hits.push([at, at + t.length]);
+  if (hits.length === 0) return html`${text}`;
+  hits.sort((a, b) => a[0] - b[0]);
+  const parts: Html[] = [];
+  let pos = 0;
+  for (const [a, b] of hits) {
+    if (b <= pos) continue;
+    const start = Math.max(a, pos);
+    parts.push(html`${text.slice(pos, start)}<mark>${text.slice(start, b)}</mark>`);
+    pos = b;
+  }
+  parts.push(html`${text.slice(pos)}`);
+  return join(parts);
 }
 
 /* ---- one run ---- */

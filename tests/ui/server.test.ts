@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createEngine } from "../../src/app/engine.ts";
 import { createRuntime, type Runtime } from "../../src/app/runtime.ts";
 import { loadConfig } from "../../src/core/config/load.ts";
+import { shortRunId } from "../../src/storage/runStore.ts";
 import { escapeHtml, markdownToHtml, parseDiff } from "../../src/ui/html.ts";
 import { startUiServer, type UiServer } from "../../src/ui/server.ts";
 import { type Sandbox, sandbox } from "../helpers/tmp.ts";
@@ -242,6 +243,50 @@ describe("jarvis ui: pages", () => {
     const js = (await get("/assets/app.js")).body;
     expect(js).toContain("setInterval(countOn, 1000)");
     expect(js).toContain("inPhase(fresh)");
+  });
+
+  it("recent: every finished run, a page of 25 at a time, and a search over all their fields", async () => {
+    const make = (task: string, workflow: string, end: "COMPLETED" | "FAILED") => {
+      const run = rt.runs.create({
+        task,
+        workflow,
+        owner: DEV,
+        workspace: { mode: "cwd", repoRoot: sb.project, path: sb.project, baseRef: "HEAD" },
+        dataClass: "internal",
+      });
+      rt.runs.transition(run.id, "RUNNING");
+      rt.runs.transition(run.id, end, end === "FAILED" ? { reason: "model timed out" } : {});
+      return run;
+    };
+    for (let i = 0; i < 28; i++) make(`ABC-${100 + i}: billing rounding ${i}`, "fix", "COMPLETED");
+    const slots = make("ABC-7: delivery slots on the order form", "research", "FAILED");
+    make("CONF-12: order card shows the delivery date", "sdd", "COMPLETED");
+    const rows = (body: string) => body.match(/<tr><td class="mono">/g)?.length ?? 0;
+
+    const first = await get("/?repo=", authed());
+    expect(rows(first.body)).toBe(25);
+    expect(first.body).toContain("1–25 of 30");
+    expect(first.body).toContain('href="/?repo=&amp;page=2#recent" rel="next"');
+    const second = await get("/?repo=&page=2", authed());
+    expect(rows(second.body)).toBe(5);
+    expect(second.body).toContain("26–30 of 30");
+
+    // every word in some field: the task's words, the workflow, the state and its reason
+    const found = await get(`/?repo=&q=${encodeURIComponent("delivery research failed")}`, authed());
+    expect(rows(found.body)).toBe(1);
+    expect(found.body).toContain("<mark>delivery</mark> slots");
+    expect(found.body).toContain("<mark>research</mark>");
+    const phrase = await get(`/?repo=&q=${encodeURIComponent('"delivery date"')}`, authed());
+    expect(rows(phrase.body)).toBe(1);
+    expect(phrase.body).toContain("<mark>delivery date</mark>");
+    const byId = await get(`/?repo=&q=${shortRunId(slots.id).slice(0, 6)}`, authed());
+    expect(rows(byId.body)).toBe(1);
+    expect((await get("/?repo=&q=timed%20out", authed())).body).toContain("ABC-7");
+    const none = await get("/?repo=&q=nothing-like-this", authed());
+    expect(none.body).toContain("No runs match «nothing-like-this».");
+    // the search field keeps what was asked; the page searches as one types
+    expect(found.body).toContain('value="delivery research failed"');
+    expect((await get("/assets/app.js")).body).toContain("document.querySelector('[data-search]')");
   });
 
   it("runs: what waits for you first, with what it waits for and a link", async () => {
