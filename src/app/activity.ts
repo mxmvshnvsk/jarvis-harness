@@ -48,6 +48,16 @@ export interface Activity {
   readonly retrying?: { readonly attempt: number; readonly reason: string };
   /** A streamed answer on its way: characters of the answer and of the reasoning so far. */
   readonly receiving?: { readonly outputChars: number; readonly reasoningChars: number };
+  /**
+   * The conversation is being compacted now: a summary of its older part is asked for (a model call of
+   * its own; pilot: 49 s that looked like the agent thinking).
+   */
+  readonly compacting?: {
+    readonly kind: string;
+    readonly tokens: number;
+    readonly blocks: number;
+    readonly ms: number;
+  };
 }
 
 const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
@@ -80,6 +90,7 @@ export function activityOf(events: readonly StoredEvent[], now: Date = new Date(
     recent: Array<NonNullable<Activity["lastTool"]>>;
     retrying?: { attempt: number; reason: string } | undefined;
     receiving?: { outputChars: number; reasoningChars: number } | undefined;
+    compacting?: { kind: string; tokens: number; blocks: number; since: string } | undefined;
   }
   const open = new Map<string, Live>();
   let last: Live | undefined;
@@ -124,6 +135,7 @@ export function activityOf(events: readonly StoredEvent[], now: Date = new Date(
         if (live) {
           live.agentActive = false;
           live.waitingSince = undefined;
+          live.compacting = undefined;
           open.delete(live.step.id);
         }
         break;
@@ -161,6 +173,20 @@ export function activityOf(events: readonly StoredEvent[], now: Date = new Date(
           live.receiving = undefined;
         }
         break;
+      case "context.compacting":
+        if (live)
+          live.compacting = {
+            kind: str(p.kind) ?? "compact",
+            tokens: num(p.tokens),
+            blocks: num(p.blocks),
+            since: e.ts,
+          };
+        break;
+      case "context.compacted":
+      case "context.reset":
+      case "context.compaction_failed":
+        if (live) live.compacting = undefined;
+        break;
       case "model.progress":
         if (live) live.receiving = { outputChars: num(p.outputChars), reasoningChars: num(p.reasoningChars) };
         break;
@@ -196,6 +222,7 @@ export function activityOf(events: readonly StoredEvent[], now: Date = new Date(
           for (const l of open.values()) {
             l.agentActive = false;
             l.waitingSince = undefined;
+            l.compacting = undefined;
           }
         if (state === "COMPLETED" || state === "FAILED" || state === "CANCELLED") finished = true;
         break;
@@ -232,7 +259,23 @@ export function activityOf(events: readonly StoredEvent[], now: Date = new Date(
     ...(lastRetry ? { lastRetry } : {}),
     ...(current?.retrying && waitingMs !== undefined ? { retrying: current.retrying } : {}),
     ...(current?.receiving && waitingMs !== undefined ? { receiving: current.receiving } : {}),
+    ...(current?.compacting && !finished
+      ? {
+          compacting: {
+            kind: current.compacting.kind,
+            tokens: current.compacting.tokens,
+            blocks: current.compacting.blocks,
+            ms: Math.max(0, now.getTime() - Date.parse(current.compacting.since)),
+          },
+        }
+      : {}),
   };
+}
+
+/** `compacting the conversation (57k tok, 6 blocks into a summary)`. */
+export function compactingText(c: NonNullable<Activity["compacting"]>): string {
+  const what = c.kind === "reset" ? "resetting the conversation" : "compacting the conversation";
+  return `${what} (${kilo(c.tokens)} tok, ${c.blocks} block${c.blocks === 1 ? "" : "s"} into a summary)`;
 }
 
 /** "receiving ~1.2k tok" while the answer streams in; "thinking ~3k tok" while only reasoning does. */
@@ -345,9 +388,11 @@ export function formatActivity(a: Activity, options: FormatOptions = {}): string
     }
     // while waiting, name the call in flight: "0 calls, waiting 2:02" read as if nothing was asked (pilot)
     parts.push(
-      a.waitingMs !== undefined
-        ? `model call ${a.step.modelCalls + 1}${avg}${wait}`
-        : `model ${a.step.modelCalls} call${a.step.modelCalls === 1 ? "" : "s"}${avg}`,
+      a.compacting
+        ? st.warn(`${compactingText(a.compacting)}${wait}`)
+        : a.waitingMs !== undefined
+          ? `model call ${a.step.modelCalls + 1}${avg}${wait}`
+          : `model ${a.step.modelCalls} call${a.step.modelCalls === 1 ? "" : "s"}${avg}`,
     );
     parts.push(
       a.step.maxToolCalls
@@ -403,6 +448,18 @@ export function noticeOf(event: StoredEvent): string | undefined {
     const delay = num(p.delayMs) > 0 ? ` in ${(num(p.delayMs) / 1000).toFixed(1)}s` : "";
     return `⚠ ${wallClock(event.ts)} ${model}: ${reason}${took} — retry ${num(p.attempt)}${of}${delay}${traceText}`;
   }
+  if (event.kind === "context.compacted" || event.kind === "context.reset") {
+    const fallback = str(p.fallback);
+    const how =
+      fallback === "empty"
+        ? " — the summary came back empty: the record of the calls and the sources were kept instead"
+        : fallback === "truncated"
+          ? " — the summary was cut off: the record of the calls was added"
+          : "";
+    return `⇣ ${wallClock(event.ts)} ${event.kind === "context.reset" ? "conversation reset" : "conversation compacted"}: ${kilo(num(p.before))} → ${kilo(num(p.after))} tok, ${num(p.blocks)} block${num(p.blocks) === 1 ? "" : "s"} into a summary${how}`;
+  }
+  if (event.kind === "context.compaction_failed")
+    return `⚠ ${wallClock(event.ts)} compaction failed: ${str(p.reason) ?? str(p.message) ?? "the summarizer"} — older results were trimmed harder instead`;
   if (event.kind === "model.failover") {
     const pool = /pool "([^"]+)"/.exec(str(p.reason) ?? "")?.[1] ?? str(p.pool);
     return `↪ ${wallClock(event.ts)} ${str(p.from) ?? "model"} → ${str(p.to) ?? "?"}: the quota window${pool ? ` of pool ${pool}` : ""} is full — calls go to ${str(p.to) ?? "the next model"} until it frees`;

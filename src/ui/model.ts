@@ -1,5 +1,5 @@
 import { basename } from "node:path";
-import { type Activity, activityOf, noticeOf } from "../app/activity.ts";
+import { type Activity, activityOf, compactingText, noticeOf } from "../app/activity.ts";
 import { type BudgetGrant, type BudgetStop, budgetGranted, budgetStopOf } from "../app/budgetStop.ts";
 import { type BudgetWait, budgetWaitOf } from "../app/budgetWait.ts";
 import { candidatesOf } from "../app/candidates.ts";
@@ -378,6 +378,18 @@ export function feedItem(e: StoredEvent): FeedItem | undefined {
       return at("⏸ interrupted (Ctrl-C)", "warn");
     case "run.applied":
       return at(`applied${who ? ` by ${who}` : ""}`, "ok");
+    case "context.compacting": {
+      const c = {
+        kind: str(p.kind) ?? "compact",
+        tokens: Number(p.tokens) || 0,
+        blocks: Number(p.blocks) || 0,
+        ms: 0,
+      };
+      return at(`⇣ ${compactingText(c)}…`, "warn");
+    }
+    case "context.compacted":
+    case "context.reset":
+    case "context.compaction_failed":
     case "model.retry":
     case "model.failover":
     case "model.error": {

@@ -192,6 +192,18 @@ export async function reshapeContext(
     store: options.dryRun ? () => "dry-run" : store,
     summarize: options.dryRun ? async () => "(dry run)" : summarizeVia,
     kind: options.kind === "reset" ? "reset" : "compact",
+    ...(options.dryRun
+      ? {}
+      : {
+          onSummarize: (blocks: number) =>
+            rt.events.emit({
+              kind: "context.compacting",
+              runId: run.id,
+              stepId: t.stepId,
+              iteration: t.iteration,
+              payload: { manual: true, kind: options.kind, tokens: tokensBefore, blocks },
+            }),
+        }),
   });
   const next = compacted?.transcript ?? trimmed.transcript;
   const report: ReshapeReport = {

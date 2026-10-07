@@ -109,6 +109,8 @@ export interface CompactOptions {
   /** Produces the structured summary of the rendered head. */
   readonly summarize: (rendered: string, previousHandoff?: string) => Promise<Summary>;
   readonly kind: "compact" | "reset";
+  /** Right before the summary is asked for: how many blocks go into it (a slow model call to show). */
+  readonly onSummarize?: (blocks: number) => void;
 }
 
 /** What the summarizer gave: its text, and whether the model stopped at its output limit. */
@@ -194,6 +196,7 @@ export async function compactTranscript(
   const toSummarize = previous ? head.slice(1) : head;
   const original = options.store(JSON.stringify(head));
   const originals = [...earlierOriginals(previous), original];
+  options.onSummarize?.(headBlocks.length);
   const got = await options.summarize(renderForSummary(toSummarize), previous);
   const text = (typeof got === "string" ? got : got.text).trim();
   const fallback =

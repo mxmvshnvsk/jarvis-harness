@@ -1,4 +1,4 @@
-import { type Activity, clock, kilo } from "../app/activity.ts";
+import { type Activity, clock, compactingText, kilo } from "../app/activity.ts";
 import { type BudgetStop, sourceOf, unitOf } from "../app/budgetStop.ts";
 import { type BudgetWait, whenText } from "../app/budgetWait.ts";
 import { duration } from "../app/journey.ts";
@@ -295,6 +295,7 @@ function callText(a: Activity): string {
       : `, thinking ~${kilo(Math.round(a.receiving.reasoningChars / 4))} tok`
     : "";
   const retry = a.retrying ? `, retry ${a.retrying.attempt} after ${a.retrying.reason}` : "";
+  if (a.compacting) return `${compactingText(a.compacting)}, ${clock(a.compacting.ms)}${coming}${retry}`;
   return `model call ${step.modelCalls + 1}, waiting ${clock(a.waitingMs)}${coming}${retry}`;
 }
 

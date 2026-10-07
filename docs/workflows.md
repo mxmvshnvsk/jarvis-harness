@@ -236,7 +236,8 @@ steps:
   `interaction.opened|turn|resolved|rejected`, `review.submitted|classified|resolved|markersRemoved`,
   `workspace.humanEdit|scratchRemoved`;
 - знание и контекст: `knowledge.promoted`, `standards.checked`, `retrieval.knowledge`,
-  `graph.update|update_failed`, `context.pressure|trimmed|compacted|reset|tightened|compaction_failed|overflow|prefixChanged`;
+  `graph.update|update_failed`, `context.pressure|trimmed|compacting|compacted|reset|tightened|compaction_failed|overflow|prefixChanged`
+  (`compacting` — началась сводка старой части разговора: отдельный вызов модели);
 - прочее: `security.redaction|pathDenied`, `prepush.checked`, `mcp.discovered|unavailable`, `daemon.tick`.
 
 `jarvis status <run> --events n` показывает последние.

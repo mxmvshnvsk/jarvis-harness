@@ -124,6 +124,8 @@ export class ContextManager {
           store: this.o.store,
           summarize: this.o.summarize,
           kind,
+          // the summary is a model call of its own (pilot: 49 s that looked like the agent thinking)
+          onSummarize: (blocks) => this.o.emit("context.compacting", { kind, tokens: before, blocks }),
         });
         if (!r) return;
         transcript = r.transcript;
