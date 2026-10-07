@@ -863,9 +863,17 @@ export async function runGc(
         kept.push(run.id);
         continue;
       }
+      // what it is doing, one run at a time (pilot: a silent minute looked like a hang)
+      const started = Date.now();
+      ctx.out.note(
+        `◌ ${shortRunId(run.id)} ${run.state.toLowerCase()} · removing its checkout${options.pruneBranches ? " and branch" : ""}`,
+      );
       await new WorktreeWorkspace(run.workspace, ctx.env).remove({
         pruneBranch: options.pruneBranches === true,
       });
+      ctx.out.note(
+        `✓ ${shortRunId(run.id)} removed (${duration(Date.now() - started)}; the files go in the background)`,
+      );
       runtime.events.emit({
         kind: "run.gc",
         runId: run.id,

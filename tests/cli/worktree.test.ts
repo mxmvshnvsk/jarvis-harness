@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { Writable } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createRuntime } from "../../src/app/runtime.ts";
@@ -115,7 +115,13 @@ describe("worktree workspace end to end (ADR-0003)", () => {
     const gcNow = await jarvis(["--json", "gc", "--days", "0", "--prune-branches"]);
     expect(JSON.parse(gcNow.out)).toMatchObject({ removed: [detail.run.id] });
     expect(existsSync(ws.path)).toBe(false);
+    expect(gcNow.err).toContain("removing its checkout and branch");
     expect(sh(sb.project, ["branch", "--list", "jarvis/*"]).trim()).toBe("");
+    // the files go in the background: the folder set aside disappears too
+    for (let i = 0; i < 100 && readdirSync(dirname(ws.path)).some((n) => n.includes(".removing-")); i++)
+      await new Promise((r) => setTimeout(r, 50));
+    expect(readdirSync(dirname(ws.path)).filter((n) => n.includes(".removing-"))).toEqual([]);
+    expect(sh(sb.project, ["worktree", "list"]).trim().split("\n")).toHaveLength(1);
   });
 
   it("refuses to apply onto a dirty main checkout and reports conflicts", async () => {

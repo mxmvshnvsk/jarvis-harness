@@ -1,5 +1,6 @@
+import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import type { WorkspaceRef } from "../core/domain/run.ts";
@@ -327,9 +328,26 @@ export class WorktreeWorkspace implements Workspace {
     return { commit, files };
   }
 
+  /**
+   * Removes the checkout and, with `pruneBranch`, its branch. The folder is first renamed aside (one
+   * call, the same disk) and git forgets the worktree; the files — a monorepo's `node_modules` are
+   * hundreds of thousands — are deleted by a detached `rm -rf` that outlives the command. Pilot:
+   * `git worktree remove` deleted them one by one, silently, past its two-minute timeout.
+   */
   async remove(options: { pruneBranch?: boolean } = {}): Promise<void> {
-    await git(["worktree", "remove", "--force", this.ref.path], this.ref.repoRoot);
+    const path = this.ref.path;
+    const aside = `${path}.removing-${Date.now()}`;
+    let moved = false;
+    try {
+      renameSync(path, aside);
+      moved = true;
+    } catch {
+      // another disk or no permission: let git remove it, without the usual timeout
+    }
+    if (!moved)
+      await git(["worktree", "remove", "--force", path], this.ref.repoRoot, { timeoutMs: 3_600_000 });
     await git(["worktree", "prune"], this.ref.repoRoot);
+    if (moved) deleteInBackground(aside);
     if (options.pruneBranch && this.ref.branch)
       await git(["branch", "-D", this.ref.branch], this.ref.repoRoot);
   }
@@ -341,4 +359,19 @@ export function workspaceFactory(env?: NodeJS.ProcessEnv): WorkspaceFactory {
       return ref.mode === "worktree" ? WorktreeWorkspace.open(ref, env) : new CwdWorkspace(ref);
     },
   };
+}
+
+/** `rm -rf` detached from this process (it may take minutes); in-process where there is no `rm`. */
+function deleteInBackground(path: string): void {
+  if (process.platform === "win32") {
+    rmSync(path, { recursive: true, force: true });
+    return;
+  }
+  try {
+    const child = spawn("rm", ["-rf", path], { detached: true, stdio: "ignore" });
+    child.on("error", () => rmSync(path, { recursive: true, force: true }));
+    child.unref();
+  } catch {
+    rmSync(path, { recursive: true, force: true });
+  }
 }
