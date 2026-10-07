@@ -133,7 +133,12 @@ export class ContextManager {
       if (r.trimmed > 0) {
         transcript = r.transcript;
         this.stats.trims += 1;
-        this.o.emit("context.trimmed", { messages: r.trimmed, savedChars: r.savedChars });
+        this.o.emit("context.trimmed", {
+          messages: r.trimmed,
+          savedChars: r.savedChars,
+          // the page names a re-read original by the call it answered, not by its hash
+          originals: r.originals.slice(0, 60),
+        });
         remeasure();
       }
     };

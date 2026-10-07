@@ -181,6 +181,12 @@ export function activityOf(events: readonly StoredEvent[], now: Date = new Date(
   let latency = 0;
   let lastTool: Activity["lastTool"];
   let lastRetry: string | undefined;
+  /** Trimmed results by their blob: a re-read of one is named by the call it answered. */
+  const originals = new Map<string, string>();
+  const named = (detail: string | undefined): string | undefined => {
+    const call = detail?.startsWith("blob:") ? originals.get(detail.slice(5)) : undefined;
+    return call ? `original of ${call}` : detail;
+  };
   /** The step an event belongs to: by the payload's step, the event's, or the one started last. */
   const at = (e: StoredEvent, p: Record<string, unknown>): Live | undefined =>
     open.get(str(p.stepId) ?? "") ?? open.get(e.stepId ?? "") ?? [...open.values()].at(-1);
@@ -251,6 +257,13 @@ export function activityOf(events: readonly StoredEvent[], now: Date = new Date(
           live.receiving = undefined;
         }
         break;
+      case "context.trimmed":
+        for (const o of Array.isArray(p.originals) ? (p.originals as Array<Record<string, unknown>>) : []) {
+          const ref = str(o.ref);
+          const call = str(o.call);
+          if (ref && call) originals.set(ref, call);
+        }
+        break;
       case "context.compacting":
         if (live)
           live.compacting = {
@@ -287,7 +300,7 @@ export function activityOf(events: readonly StoredEvent[], now: Date = new Date(
             parallel: p.parallel === true,
             startedAt: e.ts,
             calls: (p.calls as Array<Record<string, unknown>>).map((c) => {
-              const detail = detailOf(c.args);
+              const detail = named(detailOf(c.args));
               return { capability: str(c.capability) ?? "?", ...(detail ? { detail } : {}) };
             }),
           };
@@ -303,7 +316,7 @@ export function activityOf(events: readonly StoredEvent[], now: Date = new Date(
         }
         toolCalls += 1;
         const capability = str(p.capability) ?? "?";
-        const detail = detailOf(p.args);
+        const detail = named(detailOf(p.args));
         lastTool = { capability, ok: p.ok !== false, ...(detail ? { detail } : {}) };
         if (live) {
           live.step.toolCalls += 1;

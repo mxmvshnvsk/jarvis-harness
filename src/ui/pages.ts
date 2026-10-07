@@ -619,8 +619,13 @@ function perCall(tools: number, calls: number, label: string): Html {
 }
 
 /** `repo.read` → `read`, `confluence.get` → `confluence`: what a lane did, short. */
+/** A short label that fits the lane: `read`, `search`, `knowledge`, `jira`. */
 function verbOf(capability: string): string {
-  return capability.replace(/^repo\./, "").replace(/\.get$/, "");
+  return capability
+    .replace(/^repo\./, "")
+    .replace(/^knowledge\.read$/, "knowledge")
+    .replace(/^knowledge\./, "k.")
+    .replace(/\.get$/, "");
 }
 
 /** `12ms`, `0.4s`, `3.1s`. */
@@ -647,7 +652,7 @@ ${b.calls.slice(0, 12).map((c) => {
       : c.ok
         ? html`<span class="ok">✓</span>`
         : html`<span class="bad">✗</span>`;
-  return html`<div class="lane">${mark}<span class="k">${verbOf(c.capability)}</span><span class="p">${c.detail ?? ""}</span><span class="track"><span${c.ok === undefined ? html` class="run"` : ""} style="left:${left.toFixed(1)}%;width:${width.toFixed(1)}%"></span></span><span class="t">${quick(c.ms)}${c.ok === undefined ? "…" : ""}</span></div>`;
+  return html`<div class="lane">${mark}<span class="k" title="${c.capability}">${verbOf(c.capability)}</span><span class="p">${c.detail ?? ""}</span><span class="track"><span${c.ok === undefined ? html` class="run"` : ""} style="left:${left.toFixed(1)}%;width:${width.toFixed(1)}%"></span></span><span class="t">${quick(c.ms)}${c.ok === undefined ? "…" : ""}</span></div>`;
 })}
 </div>`;
 }

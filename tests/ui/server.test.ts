@@ -268,10 +268,10 @@ describe("jarvis ui: pages", () => {
     const page = await get(`/runs/${short}`, authed());
     expect(page.body).toContain("<b>⇉ 2 in parallel</b>");
     expect(page.body).toMatch(
-      /class="lane"><span class="ok">✓<\/span><span class="k">read<\/span><span class="p">src\/orders\/card.tsx<\/span>/,
+      /class="lane"><span class="ok">✓<\/span><span class="k" title="repo.read">read<\/span><span class="p">src\/orders\/card.tsx<\/span>/,
     );
     expect(page.body).toMatch(
-      /class="lane"><span class="spin" aria-label="running"><\/span><span class="k">search<\/span>/,
+      /class="lane"><span class="spin" aria-label="running"><\/span><span class="k" title="repo.search">search<\/span>/,
     );
     // while its tools run, the model is not asked yet
     expect(page.body).toContain("model call 1 asked for 2 tools · running them");

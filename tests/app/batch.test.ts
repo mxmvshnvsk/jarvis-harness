@@ -87,3 +87,40 @@ describe("the tools of one answer, shown as one batch", () => {
     ]);
   });
 });
+
+describe("a re-read of a trimmed result", () => {
+  it("is named by the call it answered, not by its hash", () => {
+    const events = [
+      ev("step.start", "2026-10-07T11:00:00.000Z", { stepId: "research", iteration: 1 }),
+      ev("agent.start", "2026-10-07T11:00:01.000Z", { agent: "research" }),
+      ev("context.trimmed", "2026-10-07T11:00:02.000Z", {
+        messages: 1,
+        savedChars: 9000,
+        originals: [{ ref: "52e04ec9f91e", call: "repo.read src/orders/card.tsx" }],
+      }),
+      ev("tool.batch", "2026-10-07T11:00:03.000Z", {
+        modelCall: 2,
+        size: 2,
+        parallel: true,
+        calls: [
+          { capability: "knowledge.read", args: '{"ref":"blob:52e04ec9f91e"}' },
+          { capability: "knowledge.read", args: '{"ref":"blob:ffff0000"}' },
+        ],
+      }),
+      ev("tool.call", "2026-10-07T11:00:03.010Z", {
+        capability: "knowledge.read",
+        ok: true,
+        durationMs: 3,
+        batch: 2,
+        slot: 0,
+        args: '{"ref":"blob:52e04ec9f91e"}',
+      }),
+    ];
+    const a = activityOf(events, new Date("2026-10-07T11:00:04.000Z"));
+    expect(a?.batch?.calls.map((c) => c.detail)).toEqual([
+      "original of repo.read src/orders/card.tsx",
+      "blob:ffff0000",
+    ]);
+    expect(a?.lastTool?.detail).toBe("original of repo.read src/orders/card.tsx");
+  });
+});

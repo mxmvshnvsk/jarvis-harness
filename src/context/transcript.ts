@@ -61,6 +61,21 @@ export interface TrimResult {
   readonly transcript: Message[];
   readonly trimmed: number;
   readonly savedChars: number;
+  /** Each trimmed result's blob and the call it answered (`repo.read src/a.ts`), for the page. */
+  readonly originals: ReadonlyArray<{ readonly ref: string; readonly call: string }>;
+}
+
+/** `repo.read src/a.ts`: a call by its name and its telling argument. */
+function callLabel(name: string, args: string): string {
+  try {
+    const a = JSON.parse(args) as Record<string, unknown>;
+    const pick = [a.path, a.file, a.pattern, a.query, a.ref, a.key, a.id, a.url].find(
+      (v) => typeof v === "string" || typeof v === "number",
+    );
+    return pick === undefined ? name : `${name} ${String(pick)}`.slice(0, 200);
+  } catch {
+    return name;
+  }
 }
 
 const HEAD_CHARS = 240;
@@ -96,6 +111,10 @@ export function trimToolResults(transcript: readonly Message[], options: TrimOpt
   const protectedIndexes = new Set(toolIndexes.slice(Math.max(0, toolIndexes.length - options.keepRecent)));
   let trimmed = 0;
   let savedChars = 0;
+  const originals: Array<{ ref: string; call: string }> = [];
+  const calls = new Map<string, string>();
+  for (const m of transcript)
+    for (const c of m.toolCalls ?? []) calls.set(c.id, callLabel(c.name, c.arguments));
   const candidates = toolIndexes.filter((i) => {
     const m = transcript[i] as Message;
     if (protectedIndexes.has(i)) return false;
@@ -123,9 +142,11 @@ export function trimToolResults(transcript: readonly Message[], options: TrimOpt
     const content = `${header}${header ? "\n" : ""}${head}…\n${TRIMMED_MARKER} ${m.content.length} chars; original: blob:${ref} — read it with knowledge.read, or run the tool again]`;
     trimmed += 1;
     savedChars += m.content.length - content.length;
+    const call = calls.get(m.toolCallId ?? "");
+    if (call) originals.push({ ref, call });
     return { ...m, content };
   });
-  return { transcript: next, trimmed, savedChars };
+  return { transcript: next, trimmed, savedChars, originals };
 }
 
 /* ---- compaction ---- */

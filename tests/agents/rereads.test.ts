@@ -33,11 +33,14 @@ describe("a file read again in the same step (pilot: one file read 62 times)", (
     transcript = [...transcript, result("c2", again.content)];
 
     // the first read trimmed away: the text comes back and is kept from now on
-    const trimmed = trimToolResults(transcript, {
+    const trim = trimToolResults(transcript, {
       keepRecent: 0,
       minChars: 10,
       store: () => "ref",
-    }).transcript;
+    });
+    const trimmed = trim.transcript;
+    // each trimmed result says which call it answered: the page names a re-read of it so
+    expect(trim.originals[0]?.call).toMatch(/^repo\.read /);
     const back = ledger.answer(key, "c3", file, [...trimmed, call("c3")]);
     expect(back.kind).toBe("again");
     expect(back.content.startsWith(file)).toBe(true);
