@@ -319,6 +319,8 @@ describe("Knowledge → Modules", () => {
     const short = run.id.replace(/^run_/, "").slice(0, 8);
     const runPage = await page(`/runs/${short}`);
     expect(runPage).toContain("paused, not failed");
+    expect(runPage).toContain("paused · waits for the quota window"); // the step, not "waits for you"
+    expect(runPage).toContain('class="btn small danger">Cancel run…');
     expect(runPage).toContain("Waits for the quota window of pool <code>corp</code>");
     expect(runPage).toContain("the run waits"); // the feed says it waits, not "gave up"
     expect(runPage).not.toContain("gave up");

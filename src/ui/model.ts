@@ -269,6 +269,8 @@ export interface StepRow {
   /** A child of a composite step (verify's tests, standards…). */
   readonly child: boolean;
   readonly status: "done" | "failed" | "skipped" | "running" | "waiting" | "pending";
+  /** Waiting for a quota window or a model, not for a person. */
+  readonly paused?: boolean;
   /** The last finished round of the step. */
   readonly last?: StepReport;
   readonly rounds: number;
@@ -463,6 +465,7 @@ export async function runPage(
       child: children.has(id),
       status,
       ...(last ? { last } : {}),
+      ...(run.currentStep === id && run.state === "WAITING_BUDGET" ? { paused: true } : {}),
       rounds: all.filter((r) => r.status !== "skipped").length,
       loops: loops.get(id) ?? [],
       ...(at ? { startedAt: at } : {}),

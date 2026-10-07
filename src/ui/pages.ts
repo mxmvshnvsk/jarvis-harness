@@ -479,7 +479,7 @@ function stepRow(s: StepRow, now: number): Html {
     notes.push(
       `sent the work back to ${loop.to} ${loop.iteration}${loop.max ? `/${loop.max}` : ""} — ${loop.outcome}`,
     );
-  if (s.status === "waiting") notes.push("waits for you");
+  if (s.status === "waiting") notes.push(s.paused ? "paused · waits for the quota window" : "waits for you");
   if (s.status === "running") notes.push("running now");
   const took =
     s.status === "running" && s.startedAt
@@ -627,8 +627,17 @@ ${card.decision ? "" : terminalHint(card, page.terminal, page.run)}
 /** Cancel, in two clicks (no dialogs): as `jarvis cancel` — at once when idle, else at the next safe point. */
 function cancelHtml(run: Run, actions: Actions): Html {
   const short = shortRunId(run.id);
-  return html`<details class="cancel"><summary class="btn small">Cancel run…</summary>
-<div class="row">${form(actions, `/runs/${encodeURIComponent(short)}/cancel`, html`<button type="submit" class="btn small danger">Yes, cancel ${short}</button>`)}<span class="hint">${run.lease && Date.parse(run.lease.until) >= Date.now() ? "a process runs it: it stops after its current model or tool call" : "nothing runs it now: it is cancelled at once"}; the checkout and the artifacts stay.</span></div>
+  const busy = run.lease !== undefined && Date.parse(run.lease.until) >= Date.now();
+  return html`<details class="cancel" data-dismiss><summary class="btn small danger">Cancel run…</summary>
+<div class="cancel-pop" role="dialog" aria-label="Cancel run ${short}">
+<p><b>Cancel run ${short}?</b></p>
+<p class="hint">${busy ? "A process runs it: it stops after its current model or tool call." : "Nothing runs it now: it is cancelled at once."} The checkout and the artifacts stay; it cannot be resumed.</p>
+${form(
+  actions,
+  `/runs/${encodeURIComponent(short)}/cancel`,
+  html`<div class="row"><button type="submit" class="btn small danger-fill">Cancel the run</button><button type="button" class="btn small" data-close>Keep it</button></div>`,
+)}
+</div>
 </details>`;
 }
 
@@ -702,10 +711,14 @@ export function runContent(page: RunPage, now: number, actions?: Actions, notice
   const rest = r.task.split("\n").slice(1).join("\n").trim();
   return html`<div class="lede-col" style="display:flex;flex-direction:column;gap:8px" data-live="head">
 <div class="row">${statePill(r, extra)}<span class="meta" style="font-size:13px">${meta}</span></div>
+<div class="runtitle">
+<div class="runtext">
 <h1>${firstLine(r.task, 300)}</h1>
 ${rest ? html`<p class="muted" style="white-space:pre-wrap">${cut(rest, 600)}</p>` : ""}
 ${r.stateReason && r.state !== "RUNNING" && r.state !== "WAITING_BUDGET" ? html`<p class="muted">${r.stateReason}</p>` : ""}
+</div>
 ${actions && !isTerminal(r.state) ? cancelHtml(r, actions) : ""}
+</div>
 </div>
 ${notice ?? ""}
 <div class="cols">

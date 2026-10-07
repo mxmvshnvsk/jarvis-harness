@@ -15,7 +15,7 @@ const LIGHT = `:root{
   --accent:#1F4FD1;--accent-dark:#163A9C;--accent-soft:#EEF1FB;--accent-fill:#1F4FD1;--accent-fill-hover:#163A9C;
   --on-fill:#FFFFFF;--info-bg:#E6ECFB;--wait-bg:#FBEFD9;--wait:#7A4100;
   --ok:#1E7A3E;--ok-bg:#E7F4EA;--ok-ink:#14552B;--ok-fill:#1E7A3E;
-  --bad:#B3261E;--bad-bg:#FBECEA;--chip:#F3F1EC;--focus-row:#FBF3E4;--track:#ECEAE4;--border-btn:#C9C6BE;
+  --bad:#B3261E;--bad-fill:#B3261E;--bad-bg:#FBECEA;--chip:#F3F1EC;--focus-row:#FBF3E4;--track:#ECEAE4;--border-btn:#C9C6BE;
   --spin-track:#C9D5F5;--code-on-banner:rgba(255,255,255,.6);--warn-dot:#C27A12;--shadow:rgba(20,20,18,.14);
   --sans:'IBM Plex Sans',system-ui,-apple-system,'Segoe UI',sans-serif;
   --mono:'IBM Plex Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
@@ -28,7 +28,7 @@ const DARK = `
   --accent:#8AADFF;--accent-dark:#B3CAFF;--accent-soft:#1E2740;--accent-fill:#3559C9;--accent-fill-hover:#2A49AD;
   --on-fill:#FFFFFF;--info-bg:#1E2740;--wait-bg:#36270F;--wait:#F2B861;
   --ok:#6CCB88;--ok-bg:#16301E;--ok-ink:#9BE0AF;--ok-fill:#23793F;
-  --bad:#FF948A;--bad-bg:#3A1B18;--chip:#272824;--focus-row:#2E2512;--track:#2C2D29;--border-btn:#4A4B44;
+  --bad:#FF948A;--bad-fill:#C2362C;--bad-bg:#3A1B18;--chip:#272824;--focus-row:#2E2512;--track:#2C2D29;--border-btn:#4A4B44;
   --spin-track:#2E3A5C;--code-on-banner:rgba(0,0,0,.25);--warn-dot:#F2B861;--shadow:rgba(0,0,0,.5);
 `;
 
@@ -261,13 +261,19 @@ tr:last-child td{border-bottom:0}
 .tail{margin:6px 0 0;padding:10px 12px;border-radius:8px;background:var(--sunken);border:1px solid var(--line);font-size:12px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere;max-height:240px;overflow:auto}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 .tabs a[aria-current=page]{color:var(--ink);font-weight:600;border-bottom:2px solid var(--ink)}
-.cancel{align-self:flex-start}
+.runtitle{display:flex;align-items:flex-start;justify-content:space-between;gap:16px 24px}
+.runtext{flex:1;min-width:0;display:flex;flex-direction:column;gap:8px}
+.runtext p{margin:0}
+.cancel{position:relative;flex-shrink:0}
 .cancel>summary{list-style:none;width:max-content}
 .cancel>summary::-webkit-details-marker{display:none}
-.cancel[open]>summary{border-color:var(--ink-2)}
-.cancel .row{margin-top:8px}
+.cancel-pop{position:absolute;right:0;top:calc(100% + 8px);z-index:20;width:320px;max-width:calc(100vw - 32px);padding:16px;border-radius:10px;border:1px solid var(--line);background:var(--panel);box-shadow:0 12px 32px var(--shadow);display:flex;flex-direction:column;gap:10px}
+.cancel-pop p{margin:0;font-size:14px;line-height:20px}
 .btn.danger{color:var(--bad);border-color:var(--bad)}
-.btn.danger:hover{background:var(--bad-bg);color:var(--bad)}
+.btn.danger:hover{background:var(--bad-bg);color:var(--bad);border-color:var(--bad)}
+.btn.danger-fill{background:var(--bad-fill);border-color:var(--bad-fill);color:var(--on-fill);font-weight:500}
+.btn.danger-fill:hover{filter:brightness(1.1);color:var(--on-fill)}
+@media (max-width:640px){.runtitle{flex-direction:column}.cancel-pop{left:0;right:auto}}
 /* Knowledge: overview, documents, standards, skills, glossary */
 .row>.grow,.mpath>.grow{flex:1 1 280px;min-width:0}
 .ksearch,.kbox{padding:18px 20px;display:flex;flex-direction:column;gap:12px}
@@ -455,7 +461,14 @@ export const SCRIPT = `
   const tick = Number(body.dataset.tick || 0);
   if (tick > 0) setInterval(refresh, tick);
 
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    for (const d of document.querySelectorAll('details[data-dismiss][open]')) { d.open = false; d.querySelector('summary')?.focus(); }
+  });
   document.addEventListener('click', async (e) => {
+    const close = e.target.closest('[data-close]');
+    if (close) { const d = close.closest('details'); if (d) d.open = false; return; }
+    for (const d of document.querySelectorAll('details[data-dismiss][open]')) if (!d.contains(e.target)) d.open = false;
     const copy = e.target.closest('[data-copy]');
     if (copy) {
       try {
