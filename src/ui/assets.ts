@@ -72,6 +72,12 @@ select{height:36px;padding:0 8px;max-width:60vw}
 .dot[data-state=busy]{background:var(--warn-dot)}
 .dot[data-state=down]{background:var(--bad)}
 .dot[data-state=idle]{background:var(--faint)}
+.dot[data-state=pending]{background:var(--faint);animation:pulse 1.2s ease-in-out infinite}
+@keyframes pulse{50%{opacity:.35}}
+@media (prefers-reduced-motion:reduce){.dot[data-state=pending]{animation:none}}
+.pop-head .spin{width:12px;height:12px}
+.launch-link{display:block;color:inherit;text-decoration:none}
+.launch-link:hover .panel{border-color:var(--ink-2)}
 .models-wrap{position:relative}
 .models{display:inline-flex;align-items:center;gap:8px;min-height:36px;padding:0 10px;border:1px solid var(--border-btn);border-radius:6px;background:var(--panel);color:var(--ink-2);font-family:var(--mono);font-size:12px;cursor:pointer}
 .models:hover,.models[aria-expanded=true]{border-color:var(--ink-2);color:var(--ink)}
@@ -402,6 +408,55 @@ export const SCRIPT = `
       labelTheme();
     });
   }
+
+  // the models indicator: a dot that says how the models are doing; details in a popover on click
+  const modelsButton = document.querySelector('[data-models]');
+  const modelsPop = document.getElementById('models-pop');
+  let modelsBusy = false;
+  async function refreshModels() {
+    if (!modelsButton || modelsBusy) return;
+    modelsBusy = true;
+    try {
+      const res = await fetch('/models.json', { credentials: 'same-origin', cache: 'no-store' });
+      if (!res.ok) return;
+      const data = await res.json();
+      // the server is still collecting: ask again shortly; the popover says it waits for data
+      if (data.state === 'pending') setTimeout(() => refreshModels(), 1500);
+      modelsButton.querySelector('.dot').dataset.state = data.state;
+      modelsButton.title = data.title;
+      modelsButton.setAttribute('aria-label', data.title);
+      const body = modelsPop && modelsPop.querySelector('[data-models-body]');
+      if (body) body.innerHTML = data.html;
+    } catch {
+      /* the next tick tries again */
+    } finally {
+      modelsBusy = false;
+    }
+  }
+  const setPop = (open) => {
+    if (!modelsButton || !modelsPop) return;
+    modelsPop.hidden = !open;
+    modelsButton.setAttribute('aria-expanded', String(open));
+    // on a phone the popover is fixed to the window's width, right under the button (the header wraps)
+    modelsPop.style.top = open && window.innerWidth <= 640 ? modelsButton.getBoundingClientRect().bottom + 8 + 'px' : '';
+    if (open) refreshModels();
+  };
+  if (modelsButton) {
+    refreshModels();
+    setInterval(refreshModels, 10000);
+    modelsButton.addEventListener('click', () => setPop(modelsPop.hidden));
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && modelsPop && !modelsPop.hidden) { setPop(false); modelsButton.focus(); }
+    });
+    document.addEventListener('click', (e) => {
+      if (modelsPop && !modelsPop.hidden && !e.target.closest('.models-wrap')) setPop(false);
+    });
+  }
+
+  // "New task" from the header: straight into the text box
+  const focusNew = () => { if (location.hash === '#new') document.querySelector('#new textarea')?.focus(); };
+  window.addEventListener('hashchange', focusNew);
+  focusNew();
 
   document.addEventListener('change', (e) => {
     if (e.target.matches('select[data-autosubmit]')) e.target.form.submit();

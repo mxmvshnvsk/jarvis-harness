@@ -28,7 +28,9 @@ import {
   type Chrome,
   errorContent,
   forbiddenPage,
+  launchContent,
   layout,
+  modelsPending,
   modelsPopover,
   modelsSummary,
   repoPicker,
@@ -122,6 +124,7 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
       if (batch.length > 0) {
         seq = batch.at(-1)?.seq ?? seq;
         const runs = [...new Set(batch.map((e) => e.runId).filter((r): r is string => !!r))];
+        if (batch.some((e) => e.kind.startsWith("model."))) scheduleHealth(1000);
         const data = JSON.stringify({ seq, runs });
         for (const c of clients) c.write(`event: journal\ndata: ${data}\n\n`);
       } else if (++beat % 15 === 0) for (const c of clients) c.write(": still here\n\n");
@@ -142,6 +145,40 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
       poller = undefined;
     }
   };
+
+  /*
+   * The models indicator: computed in the background every 10 s and soon after model events, kept as
+   * the JSON the page asks for — a request never waits for the journal (pilot: the popover stayed
+   * shut while the numbers were being collected).
+   */
+  const PENDING_MODELS = JSON.stringify({
+    state: "pending",
+    title: "Models: collecting the stats…",
+    html: modelsPending().value,
+  });
+  let modelsJson: string | undefined;
+  let healthSoon: ReturnType<typeof setTimeout> | undefined;
+  const computeHealth = () => {
+    healthSoon = undefined;
+    try {
+      const health = modelsHealthOf(runtime);
+      modelsJson = JSON.stringify({
+        state: health.state,
+        title: modelsSummary(health),
+        html: modelsPopover(health).value,
+      });
+    } catch {
+      // a busy database: the next round tries again
+    }
+  };
+  const scheduleHealth = (ms: number) => {
+    if (healthSoon) return;
+    healthSoon = setTimeout(computeHealth, ms);
+    healthSoon.unref?.();
+  };
+  const healthTimer = setInterval(() => scheduleHealth(0), 10_000);
+  healthTimer.unref?.();
+  scheduleHealth(0);
 
   // runs the page started: match them to their launches, go on after a wait (src/ui/launcher.ts)
   const tender = options.launcher
@@ -295,8 +332,9 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
     const repo = form.get("repo") ?? options.projectRoot ?? "";
     if (!task || !workflow) return redirect(r, "/?notice=no-task#new");
     if (!knownRepos().includes(repo) || !existsSync(repo)) return redirect(r, "/?notice=no-repo#new");
-    launcher.start({ task, workflow, repoRoot: repo });
-    return redirect(r, `/?repo=${encodeURIComponent(repo)}&notice=started`);
+    const launch = launcher.start({ task, workflow, repoRoot: repo });
+    // straight to the launch: it becomes the run's page as soon as the run begins
+    return redirect(r, `/launches/${launch.id}`);
   };
 
   /** Accept / Send back / Run again / Open in editor: the same functions as the terminal's keys. */
@@ -495,18 +533,42 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
       );
     }
     if (path === "/models.json") {
-      // the header's indicator: polled by the page and on every event of the journal
-      const health = modelsHealthOf(runtime);
-      return send(
+      // the header's indicator: answered from the last computed state at once, never computed here
+      if (!modelsJson) scheduleHealth(0);
+      return send(r, 200, modelsJson ?? PENDING_MODELS, "application/json; charset=utf-8", {
+        "Cache-Control": "no-store",
+      });
+    }
+    const launchAt = /^\/launches\/([0-9a-f]+)$/.exec(path);
+    if (launchAt) {
+      const launch = options.launcher?.get(launchAt[1] as string);
+      if (!launch) return notFound(r, "No such launch (they live as long as this jarvis ui).");
+      options.launcher?.tend();
+      // the run began: this is its page now
+      if (launch.runId) return redirect(r, `/runs/${shortRunId(launch.runId)}`);
+      return page(
         r,
         200,
-        JSON.stringify({
-          state: health.state,
-          title: modelsSummary(health),
-          html: modelsPopover(health).value,
-        }),
-        "application/json; charset=utf-8",
-        { "Cache-Control": "no-store" },
+        {
+          title: `Starting · ${launch.task.slice(0, 60)}`,
+          page: "run",
+          back: { href: "/", label: "Runs" },
+          ...(launch.exitCode === null ? { refresh: 2 } : {}),
+        },
+        launchContent(
+          {
+            id: launch.id,
+            task: launch.task,
+            workflow: launch.workflow,
+            startedAt: launch.startedAt,
+            exitCode: launch.exitCode,
+            log: launch.log,
+            tail: options.launcher?.tail(launch, 40) ?? "",
+            repo: launch.repoRoot,
+          },
+          now,
+          options.homeDir,
+        ),
       );
     }
     if (path === "/live") {
@@ -592,6 +654,8 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
       new Promise<void>((resolve) => {
         if (poller) clearInterval(poller);
         if (tender) clearInterval(tender);
+        clearInterval(healthTimer);
+        if (healthSoon) clearTimeout(healthSoon);
         for (const c of clients) c.end();
         clients.clear();
         server.close(() => resolve());

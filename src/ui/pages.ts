@@ -62,6 +62,8 @@ export interface Chrome {
   readonly theme?: "light" | "dark";
   /** A task can be started from the page (`jarvis ui` with a launcher, not read-only). */
   readonly canStart?: boolean;
+  /** Reload the page this often (seconds): a launch waiting for its run. */
+  readonly refresh?: number;
 }
 
 export function layout(chrome: Chrome, content: Html): string {
@@ -71,6 +73,7 @@ export function layout(chrome: Chrome, content: Html): string {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="${chrome.theme ?? "light dark"}">
+${chrome.refresh ? html`<meta http-equiv="refresh" content="${String(chrome.refresh)}">` : ""}
 <meta name="referrer" content="same-origin">
 <title>${chrome.title} · jarvis</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -87,8 +90,8 @@ ${chrome.repos ?? ""}
 ${chrome.page === "runs" ? html`<nav aria-label="Pages"><a href="/" aria-current="page">Runs</a></nav>` : ""}
 ${chrome.canStart ? html`<a class="btn primary small" href="/#new">New task</a>` : ""}
 <div class="status">
-<div class="models-wrap"><button type="button" class="models" data-models aria-expanded="false" aria-controls="models-pop" title="Models: checking…"><span class="dot" data-state="idle" aria-hidden="true"></span><span>models</span></button>
-<div id="models-pop" class="pop" role="dialog" aria-label="Models" hidden><div data-models-body><p class="muted">Checking the models…</p></div></div></div>
+<div class="models-wrap"><button type="button" class="models" data-models aria-expanded="false" aria-controls="models-pop" title="Models: collecting the stats…"><span class="dot" data-state="pending" aria-hidden="true"></span><span>models</span></button>
+<div id="models-pop" class="pop" role="dialog" aria-label="Models" hidden><div data-models-body>${modelsPending()}</div></div></div>
 <span class="live" data-state="connecting" role="status"><span class="dot" aria-hidden="true"></span><span class="label">connecting…</span><span aria-hidden="true">·</span><span>${chrome.address}</span></span>
 <button type="button" class="theme" data-theme-switch aria-label="Switch the theme" title="Switch the theme"><svg class="moon" viewBox="0 0 16 16" aria-hidden="true"><path d="M13.5 9.6A5.75 5.75 0 0 1 6.4 2.5a5.75 5.75 0 1 0 7.1 7.1z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"></path></svg><svg class="sun" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="3" fill="none" stroke="currentColor" stroke-width="1.5"></circle><path d="M8 1v1.75M8 13.25V15M1 8h1.75M13.25 8H15M3.05 3.05l1.24 1.24M11.71 11.71l1.24 1.24M3.05 12.95l1.24-1.24M11.71 4.29l1.24-1.24" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path></svg></button>
 </div>
@@ -329,6 +332,10 @@ ${repoField}
 }
 
 function launchHtml(l: LaunchView, now: number, homeDir: string): Html {
+  return html`<a class="launch-link" href="/launches/${l.id}">${launchRow(l, now, homeDir)}</a>`;
+}
+
+function launchRow(l: LaunchView, now: number, homeDir: string): Html {
   const age = clock(Math.max(0, now - Date.parse(l.startedAt)));
   if (l.exitCode !== null)
     return html`<div class="panel running launch failed">
@@ -847,4 +854,33 @@ ${
     : html`<p class="muted">No models configured — add one to ~/.jarvis/config.yaml.</p>`
 }
 <p class="hint">In the terminal: <code>jarvis models stats</code> (latency, failures, tokens) · <code>jarvis models list</code> (pools, probes)</p>`;
+}
+
+/** The popover before the first numbers: open at once, saying what it waits for. */
+export function modelsPending(): Html {
+  return html`<div class="pop-head"><b>Models</b><span class="spin" aria-hidden="true"></span><span class="meta">waiting for data</span></div>
+<p class="muted">Collecting the models' stats — each pool's quota window and the last half hour of calls. It shows up here in a moment.</p>`;
+}
+
+/**
+ * A task started on the page, before its run exists (src/ui/launcher.ts): the run's checkout is being
+ * prepared (a worktree, the workspace setup — minutes for a monorepo). The page reloads itself and
+ * becomes the run's page as soon as the run begins; a launch that failed shows its output.
+ */
+export function launchContent(l: LaunchView & { readonly repo: string }, now: number, homeDir: string): Html {
+  const failed = l.exitCode !== null;
+  const age = clock(Math.max(0, now - Date.parse(l.startedAt)));
+  return html`<div class="lede-col" style="display:flex;flex-direction:column;gap:8px">
+<div class="row"><span class="pill ${failed ? "bad" : "info"}">${failed ? (l.exitCode === 0 ? "ended without a run" : `failed to start · exit ${l.exitCode}`) : "◌ starting"}</span><span class="meta">${l.workflow} · started ${age} ago · ${home(l.repo, homeDir)}</span></div>
+<h1>${firstLine(l.task)}</h1>
+</div>
+${
+  failed
+    ? html`<section class="panel now"><p>The task did not become a run. Its output is below; fix the cause and start it again.</p><div class="actions"><a class="btn primary" href="/#new">New task</a></div></section>`
+    : html`<section class="panel now" aria-live="polite"><div class="row"><span class="spin" aria-hidden="true"></span><b>Preparing the run's checkout</b></div>
+<p class="muted">A worktree of the repository and its workspace setup (installing, building) — for a monorepo that takes a few minutes. This page turns into the run's page by itself as soon as the run begins.</p></section>`
+}
+<section class="panel feed" aria-labelledby="output"><h2 id="output">Output</h2>
+${l.tail ? html`<pre class="tail">${l.tail}</pre>` : html`<p class="muted">Nothing yet.</p>`}
+<span class="meta">log ${home(l.log, homeDir)}</span></section>`;
 }

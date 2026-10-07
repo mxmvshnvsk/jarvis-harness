@@ -165,12 +165,20 @@ describe("New task on the page", () => {
       repo: sb.project,
     });
     expect(started.status).toBe(303);
-    expect(started.location).toContain("notice=started");
+    expect(started.location).toMatch(/^\/launches\/[0-9a-f]{12}$/);
     expect((await calls(1))[0]).toBe(
       `${sb.project}|off|fix Compact form: the upload toggle hides attached files`,
     );
-    const after = await page(started.location ?? "/");
-    expect(after).toContain("Started — it prepares its checkout");
-    expect(after).toContain("Compact form: the upload toggle hides attached files");
+    // the browser lands on the launch: it prepares, reloads itself, and becomes the run's page
+    const launchPage = await page(started.location ?? "/");
+    expect(launchPage).toContain("Compact form: the upload toggle hides attached files");
+    expect(launchPage).toMatch(/Preparing the run's checkout|ended without a run/);
+    const run = createRun("Compact form: the upload toggle hides attached files");
+    const res = await fetch(`http://127.0.0.1:${ui.port}${started.location}`, {
+      redirect: "manual",
+      headers: { cookie: `jarvis_ui_${ui.port}=${encodeURIComponent(ui.token)}` },
+    });
+    expect(res.status).toBe(303);
+    expect(res.headers.get("location")).toBe(`/runs/${run.id.replace(/^run_/, "").slice(0, 8)}`);
   });
 });

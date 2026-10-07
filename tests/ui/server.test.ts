@@ -160,12 +160,23 @@ describe("jarvis ui: pages", () => {
     const page = await get("/", authed());
     expect(page.body).toContain('aria-controls="models-pop"');
     expect(page.body).toContain('<div id="models-pop" class="pop" role="dialog" aria-label="Models" hidden>');
+    expect(page.body).toContain('<span class="dot" data-state="pending" aria-hidden="true">');
+    expect(page.body).toContain("waiting for data");
     expect((await get("/models.json")).status).toBe(403);
-    const res = await get("/models.json", authed());
+    // answered at once: "pending" until the background round has the numbers
+    let res = await get("/models.json", authed());
+    for (let i = 0; i < 50 && JSON.parse(res.body).state === "pending"; i++) {
+      await new Promise((r) => setTimeout(r, 20));
+      res = await get("/models.json", authed());
+    }
     expect(res.status).toBe(200);
     expect(String(res.headers["content-type"])).toContain("application/json");
     const data = JSON.parse(res.body) as { state: string; title: string; html: string };
     expect(["ok", "busy", "down", "idle"]).toContain(data.state);
+    // the page's script opens the popover and asks for the numbers (pilot: a lost block left it shut)
+    const js = (await get("/assets/app.js")).body;
+    expect(js).toContain("async function refreshModels()");
+    expect(js).toContain("modelsButton.addEventListener('click'");
     expect(data.title).toMatch(/^Models: /);
     expect(data.html).toContain("jarvis models stats");
   });
@@ -177,7 +188,7 @@ describe("jarvis ui: pages", () => {
     const page = await get(`/runs/${run.id.replace(/^run_/, "").slice(0, 8)}`, authed());
     expect(page.status).toBe(200);
     expect(page.body).toContain('<div data-live="card" hidden></div>');
-    expect(page.body).not.toContain('class="spin"');
+    expect(page.body).not.toContain('class="panel now"');
   });
 
   it("runs: what waits for you first, with what it waits for and a link", async () => {

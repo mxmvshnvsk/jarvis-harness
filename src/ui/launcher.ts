@@ -49,6 +49,7 @@ export interface Launcher {
   start(input: { task: string; workflow: Workflow; repoRoot: string }): Launch;
   /** Launches of this server, newest first. */
   list(): readonly Launch[];
+  get(id: string): Launch | undefined;
   /** The page drives this run: it was started here (also by an earlier `jarvis ui`). */
   drives(runId: string): boolean;
   /** Go on with a run the page drives (after a decision, a wait): `jarvis resume <run>` in the background. */
@@ -138,6 +139,7 @@ export function createLauncher(options: LauncherOptions): Launcher {
       return launch;
     },
     list: () => launches,
+    get: (id) => launches.find((l) => l.id === id),
     drives,
     resume,
     tend(now = new Date()) {
@@ -164,7 +166,11 @@ export function createLauncher(options: LauncherOptions): Launcher {
     },
     tail(launch, lines = 20) {
       if (!existsSync(launch.log) || statSync(launch.log).size === 0) return "";
-      const text = readFileSync(launch.log, "utf8");
+      // colour codes, should a command print them anyway
+      const text = readFileSync(launch.log, "utf8").replace(
+        new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*[A-Za-z]`, "g"),
+        "",
+      );
       return text
         .split("\n")
         .slice(-lines - 1)
