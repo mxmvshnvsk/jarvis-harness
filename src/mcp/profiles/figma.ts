@@ -34,6 +34,7 @@ const figmaGet: ProfileCapability = {
       url: "the frame's figma.com link, with node-id",
       depth: "levels of children to include (optional)",
       raw: "true — the server's JSON instead of the description",
+      fresh: "true — read it again even if Jarvis read it within a day",
     },
     ["url"],
   ),
@@ -48,6 +49,13 @@ const figmaGet: ProfileCapability = {
         `figma.get needs a frame link with node-id (figma.com/design/<key>/…?node-id=…); got ${typeof a.url === "string" ? a.url : "no url"}`,
       );
     return { fileKey, nodeId, depth: a.depth };
+  },
+  // a frame changes rarely and a seat may have 20 reads a month: one read a day is enough
+  cacheMs: 24 * 3_600_000,
+  // "Figma API rate limit hit (429). Retry after 396759 seconds" — not asked again until then
+  retryAfterSeconds: (r) => {
+    const m = /rate limit[^\n]*?retry after (\d+) ?s/i.exec(r.text);
+    return m ? Number(m[1]) : undefined;
   },
   // the JSON (OUTPUT_FORMAT=json) described by code; the tree or YAML formats pass as they are
   enrich: async (result, args) => {

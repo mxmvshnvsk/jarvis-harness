@@ -2,6 +2,7 @@ import type { McpServerConfig, Network, ResolvedConfig } from "../core/config/sc
 import { capabilityMatches, matchesAny } from "../tools/registry.ts";
 import type { Capability, ToolContext, ToolOutput, ToolProvider } from "../tools/types.ts";
 import type { McpPool } from "./client/pool.ts";
+import { McpResultStore } from "./client/results.ts";
 import { BUILTIN_PROFILES, resolveProfile } from "./profiles/index.ts";
 import type { McpCallResult, McpProfile, McpToolInfo, ProfileCapability } from "./types.ts";
 
@@ -57,9 +58,12 @@ export class McpToolProvider implements ToolProvider {
   private readonly config: ResolvedConfig;
   private readonly pool: McpPool;
 
-  constructor(config: ResolvedConfig, pool: McpPool) {
+  private readonly results: McpResultStore | undefined;
+
+  constructor(config: ResolvedConfig, pool: McpPool, results?: McpResultStore) {
     this.config = config;
     this.pool = pool;
+    this.results = results;
   }
 
   capabilities(): readonly Capability[] {
@@ -203,20 +207,47 @@ export class McpToolProvider implements ToolProvider {
     args: Record<string, unknown>,
     marker?: string,
   ): Promise<{ tool: string; sent: Record<string, unknown>; result: McpCallResult }> {
-    const connection = this.pool.connection(planned.serverId);
+    const cap = planned.profileCap;
+    const serverId = planned.serverId;
+    const connection = this.pool.connection(serverId);
     const { tool, sent } = await this.prepare(planned, args, marker);
-    const result = await connection.callTool(tool, sent);
-    const enrich = planned.profileCap.enrich;
-    if (!enrich || planned.profileCap.effect) return { tool, sent, result };
-    const again = async (other: Record<string, unknown>) => {
-      const next = await this.prepare(planned, other);
-      return connection.callTool(next.tool, next.sent);
-    };
-    try {
-      return { tool, sent, result: await enrich(result, args, again) };
-    } catch {
-      return { tool, sent, result }; // the answer as it came: the addition is a help, not a condition
+    const read = !cap.effect && cap.access === "read";
+    // a server that said "not before": not asked again until then (its limit is spent, not broken)
+    const blocked = read ? this.results?.blockedUntil(serverId) : undefined;
+    if (blocked)
+      return {
+        tool,
+        sent,
+        result: {
+          ok: false,
+          text: `rate limit of MCP server "${serverId}": not called before ${blocked.until} (${blocked.reason})`,
+        },
+      };
+    const key = McpResultStore.key([planned.name, sent, args.raw === true || args.raw === "true"]);
+    if (read && cap.cacheMs && args.fresh !== true && args.fresh !== "true") {
+      const kept = this.results?.get(serverId, key, cap.cacheMs);
+      if (kept) return { tool, sent, result: kept };
     }
+    let result = await connection.callTool(tool, sent);
+    const wait = !result.ok ? cap.retryAfterSeconds?.(result) : undefined;
+    if (wait && this.results) {
+      const reason = (result.text.split("\n")[0] ?? "").slice(0, 200);
+      const until = this.results.block(serverId, wait, reason);
+      result = { ...result, text: `${result.text}\n[jarvis: no calls to "${serverId}" before ${until}]` };
+    }
+    if (cap.enrich && read && result.ok) {
+      const again = async (other: Record<string, unknown>) => {
+        const next = await this.prepare(planned, other);
+        return connection.callTool(next.tool, next.sent);
+      };
+      try {
+        result = await cap.enrich(result, args, again);
+      } catch {
+        // the answer as it came: the addition is a help, not a condition
+      }
+    }
+    if (read && cap.cacheMs && result.ok) this.results?.put(serverId, key, result);
+    return { tool, sent, result };
   }
 
   /**

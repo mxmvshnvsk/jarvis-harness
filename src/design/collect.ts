@@ -60,13 +60,27 @@ export const collectDesign: DeterministicTool = async (ctx, args) => {
 
   const read: Array<{ link: string; from: string; text: string }> = [];
   const missed: Array<{ link: string; from: string; why: string }> = [];
+  let limited: string | undefined;
   for (const f of found.slice(0, limits.frames)) {
+    // the API said "not before": the frames left are not asked for (each ask would be refused too)
+    if (limited) {
+      missed.push({ ...f, why: limited });
+      continue;
+    }
     let r = await ctx.tools.invoke("figma.get", { url: f.link });
     // a whole screen may not fit the time: its upper levels still tell the structure and the texts
     if (!r.ok && /time(d)? ?out/i.test(r.error ?? r.text))
       r = await ctx.tools.invoke("figma.get", { url: f.link, depth: 4 });
-    if (r.ok) read.push({ ...f, text: r.text.replace(/^\[figma\.get\] ok\n/, "") });
-    else missed.push({ ...f, why: (r.denied ?? r.error ?? "failed").split("\n")[0] ?? "failed" });
+    if (r.ok) {
+      read.push({ ...f, text: r.text.replace(/^\[figma\.get\] ok\n/, "") });
+      continue;
+    }
+    const message = r.error ?? r.text;
+    if (/rate limit/i.test(message)) {
+      const until = /before (\d{4}-\d\d-\d\dT[\d:.]+Z)/.exec(message)?.[1];
+      limited = `the Figma API's rate limit${until ? ` until ${until}` : ""}`;
+      missed.push({ ...f, why: limited });
+    } else missed.push({ ...f, why: (r.denied ?? message ?? "failed").split("\n")[0] ?? "failed" });
   }
   for (const f of found.slice(limits.frames))
     missed.push({ ...f, why: `over the limit of ${limits.frames} frames` });

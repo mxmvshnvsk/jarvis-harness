@@ -14,6 +14,7 @@ import { repoIdOf } from "../knowledge/graph/update.ts";
 import { type Embedder, OpenAiCompatibleEmbedder } from "../knowledge/retrieval/embedder.ts";
 import { KnowledgeIndex } from "../knowledge/retrieval/index.ts";
 import { McpPool, ToolsCache } from "../mcp/client/pool.ts";
+import { McpResultStore } from "../mcp/client/results.ts";
 import { McpToolProvider } from "../mcp/provider.ts";
 import { type CassetteMode, FileCassetteStore } from "../models/cassette.ts";
 import { ModelGateway } from "../models/gateway.ts";
@@ -162,7 +163,11 @@ export function createRuntime(loaded: LoadedConfig, options: RuntimeOptions = {}
     cache: new ToolsCache(join(loaded.home.cacheDir, "mcp")),
     env,
   });
-  const mcpProvider = new McpToolProvider(loaded.config, pool);
+  const mcpProvider = new McpToolProvider(
+    loaded.config,
+    pool,
+    new McpResultStore(join(loaded.home.cacheDir, "mcp-results")),
+  );
   registry.register(mcpProvider);
   const partial = {
     loaded,

@@ -54,6 +54,10 @@ export interface ProfileCapability {
     args: Record<string, unknown>,
     again: (args: Record<string, unknown>) => Promise<McpCallResult>,
   ) => Promise<McpCallResult>;
+  /** Reads only: answers kept this long and reused for the same arguments (`fresh: true` skips it). */
+  readonly cacheMs?: number;
+  /** A failed answer that says "not before N seconds" (a 429 with Retry-After): N, else undefined. */
+  readonly retryAfterSeconds?: (result: McpCallResult) => number | undefined;
 }
 
 export interface McpProfile {

@@ -124,10 +124,22 @@ server.registerTool(
     description: "a frame",
     inputSchema: { fileKey: z.string(), nodeId: z.string().optional(), depth: z.number().optional() },
   },
-  async ({ nodeId }) =>
-    nodeId === "66-77"
-      ? { isError: true, content: [{ type: "text", text: "Request too large" }] }
-      : { content: [{ type: "text", text: JSON.stringify(FRAME) }] },
+  async ({ nodeId }) => {
+    // every read the server is asked for, for tests counting what a cache saves
+    if (process.env.FAKE_MCP_FIGMA_LOG) appendFileSync(process.env.FAKE_MCP_FIGMA_LOG, `${nodeId}\n`);
+    if (nodeId === "66-77") return { isError: true, content: [{ type: "text", text: "Request too large" }] };
+    if (nodeId === "88-99")
+      return {
+        isError: true,
+        content: [
+          {
+            type: "text",
+            text: "Error fetching file: Figma API rate limit hit (429). Retry after 3600 seconds. Your Figma seat type (Viewer or Collaborator) has a lower API rate limit.",
+          },
+        ],
+      };
+    return { content: [{ type: "text", text: JSON.stringify(FRAME) }] };
+  },
 );
 server.registerTool(
   "confluence_get_page",

@@ -1,7 +1,9 @@
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Runtime } from "../../src/app/runtime.ts";
 import { describeFrame, type FigmaDesign, figmaLinksIn, parseFigmaDesign } from "../../src/design/figma.ts";
+import { McpResultStore } from "../../src/mcp/client/results.ts";
 import { createRun, engineFor, testRuntime, workflowOf } from "../helpers/engine.ts";
 import { type Sandbox, sandbox } from "../helpers/tmp.ts";
 
@@ -121,7 +123,11 @@ describe("the design step", () => {
       command: node
       args: ["${FIXTURE}"]
 ${extra}`;
-  async function setup(withFigma: boolean) {
+  const reads = () =>
+    existsSync(join(sb.root, "figma.log"))
+      ? readFileSync(join(sb.root, "figma.log"), "utf8").split("\n").filter(Boolean)
+      : [];
+  async function setup(withFigma: boolean, before?: () => void) {
     sb.write("home/.jarvis/config.yaml", "version: 1\nactor: { id: me@corp }\n");
     sb.write(
       "project/.jarvis/project.yaml",
@@ -131,11 +137,15 @@ workspace: { mode: cwd }
 mcp:
   servers:
 ${server("atl", "      profile: atlassian")}
-${withFigma ? server("design", "      profile: figma\n      network: internet") : ""}
+${withFigma ? server("design", `      profile: figma\n      network: internet\n      env: { FAKE_MCP_FIGMA_LOG: "${join(sb.root, "figma.log")}" }`) : ""}
 ${withFigma ? 'egressExceptions:\n  - server: design\n    reason: "frames of the team\'s designs"' : ""}
 `,
     );
-    rt = await testRuntime(sb, { PATH: process.env.PATH ?? "" });
+    rt = await testRuntime(sb, {
+      PATH: process.env.PATH ?? "",
+      FAKE_MCP_FIGMA_LOG: join(sb.root, "figma.log"),
+    });
+    before?.();
     const wf = workflowOf({
       name: "d",
       entry: "design",
@@ -177,6 +187,38 @@ ${withFigma ? 'egressExceptions:\n  - server: design\n    reason: "frames of the
     expect(runtime.events.list({ runId: run.run.id, kind: "tool.call" })[2]?.payload).toMatchObject({
       egressException: "frames of the team's designs",
     });
+  });
+
+  it("a frame read today is not read again; fresh reads it; a 429 stops calls to the server until its Retry-After", async () => {
+    await setup(true);
+    const runtime = rt as Runtime;
+    expect(reads()).toEqual(["12-345", "66-77"]); // the step read the page's two frames
+    const link = "https://www.figma.com/design/AbC123xyz/Order-form?node-id=12-345";
+    // the same frame again: from the cache, the server not asked
+    const again = await runtime.mcp.provider.invoke("figma.get", { url: link });
+    expect(again.result.ok).toBe(true);
+    expect(again.result.text).toContain("### [D] UniversalModalHeader (Content=True)");
+    expect(reads()).toEqual(["12-345", "66-77"]);
+    await runtime.mcp.provider.invoke("figma.get", { url: link, fresh: true });
+    expect(reads()).toEqual(["12-345", "66-77", "12-345"]);
+    // the API says "not before": the next frames are not asked for until then
+    const limited = await runtime.mcp.provider.invoke("figma.get", { url: link.replace("12-345", "88-99") });
+    expect(limited.result.ok).toBe(false);
+    expect(limited.result.text).toMatch(/\[jarvis: no calls to "design" before \d{4}-\d\d-\d\dT/);
+    const blocked = await runtime.mcp.provider.invoke("figma.get", { url: link, fresh: true });
+    expect(blocked.result.text).toMatch(/^rate limit of MCP server "design": not called before /);
+    expect(reads()).toEqual(["12-345", "66-77", "12-345", "88-99"]);
+  });
+
+  it("the step under a rate limit: nothing asked, every frame listed with until when", async () => {
+    const { run } = await setup(true, () =>
+      new McpResultStore(join(sb.home, ".jarvis", "cache", "mcp-results")).block("design", 3600, "429"),
+    );
+    const runtime = rt as Runtime;
+    expect(reads()).toEqual([]);
+    const text = runtime.artifacts.text(runtime.artifacts.listLatest(run.run.id, "design")[0] as never);
+    expect(text).toContain("0 frames read, 2 not");
+    expect(text.match(/— the Figma API's rate limit until \d{4}-/g)).toHaveLength(2);
   });
 
   it("without figma.get the step reads nothing and leaves no artifact", async () => {
