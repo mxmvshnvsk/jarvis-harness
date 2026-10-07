@@ -390,6 +390,23 @@ describe("LocalWorkflowEngine", () => {
     expect(result.run.state).toBe("CANCELLED");
     expect(rt.history.list(run.id).map((h) => h.stepId)).toEqual(["a"]);
 
+    // an agent that stops between its calls on the cancel: the run is cancelled, not failed
+    const mid = workflowOf({
+      name: "mid",
+      entry: "a",
+      steps: [{ id: "a", kind: "agentic", agent: "a", transitions: { onSuccess: "DONE" } }],
+    });
+    const engine3 = engineFor(rt, [mid], {
+      a: async (ctx) => {
+        rt.runs.requestCancel(ctx.run.id);
+        return { status: "failure", reason: "cancel requested" };
+      },
+    });
+    const run3 = createRun(rt, "mid");
+    const r3 = await engine3.execute(run3.id, owner);
+    expect(r3.run.state).toBe("CANCELLED");
+    expect(r3.run.stateReason).toBe("cancelled at a safe point");
+
     const wild = workflowOf({
       name: "wild",
       entry: "a",

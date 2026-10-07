@@ -28,7 +28,10 @@ export function continuedBy(runtime: Runtime, from: Run): string | undefined {
     if (p.continuedFrom !== from.id || !e.runId) continue;
     // a continuation that was cancelled does not count: the approved spec can go on again
     // (pilot: an implementation cancelled while the gateway was down left its spec stranded)
-    if (runtime.runs.get(e.runId)?.state === "CANCELLED") continue;
+    const by = runtime.runs.get(e.runId);
+    if (by?.state === "CANCELLED") continue;
+    // cancelled before the engine said so (a step stopped on the cancel ended FAILED until it did)
+    if (by?.state === "FAILED" && by.stateReason === "cancel requested") continue;
     found = e.runId;
   }
   return found;

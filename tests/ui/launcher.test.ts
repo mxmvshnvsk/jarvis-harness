@@ -521,4 +521,21 @@ describe("New task on the page", () => {
     expect(rt.runs.get(run.id)?.waitingFor).toBeUndefined();
     expect((await calls(1))[0]).toBe(`${sb.project}|off|resume ${run.id}`);
   });
+
+  it("Cancel pressed on a run a process drives: the page says it is cancelling until it stops", async () => {
+    await serve();
+    const run = createRun("Order form: phone number mask");
+    rt.runs.transition(run.id, "RUNNING");
+    rt.runs.acquireLease(run.id, "cli:elsewhere", 90_000);
+    const short = run.id.replace(/^run_/, "").slice(0, 8);
+    expect(await page(`/runs/${short}`)).toContain("Cancel run…");
+    rt.runs.requestCancel(run.id);
+    const cancelling = await page(`/runs/${short}`);
+    expect(cancelling).toContain(
+      '<span class="pill bad"><span class="spin" aria-hidden="true"></span> CANCELLING</span>',
+    );
+    expect(cancelling).toContain("Cancelling — the run stops after its current model or tool call");
+    expect(cancelling).toContain('aria-disabled="true">Cancelling…</span>');
+    expect(cancelling).not.toContain("Cancel run…");
+  });
 });

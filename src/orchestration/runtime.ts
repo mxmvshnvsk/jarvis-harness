@@ -203,6 +203,14 @@ export class LocalWorkflowEngine {
           break;
         }
 
+        // a step that stopped on the cancel (an agent between its calls): the run is cancelled, not
+        // failed — pilot: «Cancel» on the page left it FAILED, and its research could not go on again
+        if (outcome.status === "failure" && this.rt.runs.require(run.id).cancelRequested) {
+          this.emit(run, "step.finish", { stepId: step.id, iteration, status: "cancelled" });
+          run = this.rt.runs.transition(run.id, "CANCELLED", { reason: "cancelled at a safe point" });
+          this.emit(run, "run.state", { state: run.state });
+          break;
+        }
         const next = await this.advance(run, step, iteration, outcome, workspace);
         run = next.run;
         if (next.stop) break;

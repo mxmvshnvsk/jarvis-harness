@@ -94,6 +94,18 @@ describe("going on from a research", () => {
     expect(continuedFromOf(rt, to)).toBe(run.id);
   });
 
+  it("a continuation stopped by a cancel lets the research go on again", () => {
+    const engine = createEngine(rt);
+    const run = research("ABC-42");
+    const to = rt.runs.create({ ...run, id: undefined, workflow: "sdd" } as never);
+    rt.events.emit({ kind: "run.created", runId: to.id, payload: { continuedFrom: run.id } });
+    rt.runs.transition(to.id, "RUNNING");
+    expect(continuationOf(rt, engine, run)).toBeUndefined();
+    // ended FAILED on the cancel before the engine said CANCELLED: still a cancel
+    rt.runs.transition(to.id, "FAILED", { reason: "cancel requested" });
+    expect(continuationOf(rt, engine, run)?.workflow).toBe("sdd");
+  });
+
   it("offers the research of the same issue in the repository, ticked while the code it read stands", async () => {
     const engine = createEngine(rt);
     const run = research("ABC-42: Delivery slots on the order form", ["src/orders/slots.ts"]);

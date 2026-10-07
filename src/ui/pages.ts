@@ -177,7 +177,12 @@ export function artifactHref(
 }
 
 /** The state of a run as a pill: `⏸ WAITING_HUMAN · loop`, `◌ RUNNING · verify#4`, `✓ COMPLETED`. */
+/** «Cancel» pressed and the run not stopped yet: it finishes its current model or tool call first. */
+const cancelling = (run: Run): boolean => run.cancelRequested && !isTerminal(run.state);
+
 function statePill(run: Run, extra?: string): Html {
+  if (cancelling(run))
+    return html`<span class="pill bad"><span class="spin" aria-hidden="true"></span> CANCELLING</span>`;
   const s = run.state;
   const tone =
     s === "COMPLETED"
@@ -519,7 +524,7 @@ ${
 <a href="${runHref(r.run)}">Open</a>
 </div>`
           : html`<div class="panel running">
-<div class="what"><a href="${runHref(r.run)}">${firstLine(r.run.task)}</a><span class="meta">${r.run.workflow} · ${shortRunId(r.run.id)} · ${activityText(r.activity, r.position)}</span></div>
+<div class="what"><a href="${runHref(r.run)}">${firstLine(r.run.task)}</a><span class="meta">${cancelling(r.run) ? html`<span class="bad">cancelling…</span> · ` : ""}${r.run.workflow} · ${shortRunId(r.run.id)} · ${activityText(r.activity, r.position)}</span></div>
 <div class="budget">${toolBudget(r.activity, now)}</div>
 <a href="${runHref(r.run)}">Follow</a>
 </div>`,
@@ -953,10 +958,11 @@ ${rest ? html`<p class="muted" style="white-space:pre-wrap">${cut(rest, 600)}</p
 ${r.stateReason && r.state !== "RUNNING" && r.state !== "WAITING_BUDGET" ? html`<p class="muted">${r.stateReason}</p>` : ""}
 ${page.continuedFrom ? continuedFromHtml(page.continuedFrom) : ""}
 </div>
-${actions && !isTerminal(r.state) ? cancelHtml(r, actions) : ""}
+${actions && !isTerminal(r.state) ? (cancelling(r) ? html`<span class="btn small danger" aria-disabled="true">Cancelling…</span>` : cancelHtml(r, actions)) : ""}
 </div>
 </div>
 ${notice ?? ""}
+${cancelling(r) ? html`<div class="banner bad" data-live="cancelling" role="status"><span class="spin" aria-hidden="true"></span> Cancelling — the run stops after its current model or tool call (a model call can take a minute or two); then it is CANCELLED, its checkout and artifacts stay</div>` : html`<div data-live="cancelling" hidden></div>`}
 <div class="cols">
 <section class="panel side steps" aria-labelledby="steps" data-live="steps">
 <h2 id="steps">Steps</h2>
