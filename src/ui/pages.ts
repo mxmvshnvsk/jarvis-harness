@@ -459,7 +459,7 @@ ${
 <section class="group" aria-labelledby="recent">
 <div class="group-head"><h2 id="recent">Recent</h2>
 <form class="search" role="search" method="get" action="/">
-<input type="search" name="q" value="${page.recent.query}" placeholder="Search: id, task, workflow, state, repository, date…" aria-label="Search runs" autocomplete="off" data-search>
+<input type="search" name="q" value="${page.recent.query}" placeholder="Search runs: id, task, state…" title="Every word in some field: id, task, workflow, state and its reason, author, repository, branch, step, date; a quoted phrase as a whole" aria-label="Search runs" autocomplete="off" data-search>
 <input type="hidden" name="repo" value="${page.repo ?? ""}"><button type="submit" class="btn sr">Search</button>
 </form></div>
 ${recentHtml(page)}
