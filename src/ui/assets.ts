@@ -262,7 +262,7 @@ tr:last-child td{border-bottom:0}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 .tabs a[aria-current=page]{color:var(--ink);font-weight:600;border-bottom:2px solid var(--ink)}
 /* Knowledge: overview, documents, standards, skills, glossary */
-.grow{flex:1 1 280px;min-width:0}
+.row>.grow,.mpath>.grow{flex:1 1 280px;min-width:0}
 .ksearch,.kbox{padding:18px 20px;display:flex;flex-direction:column;gap:12px}
 .ksearch{border-color:var(--ink)}
 .ksearch h2,.kbox h2{margin:0;font-size:16px}

@@ -2,6 +2,7 @@ import { basename } from "node:path";
 import { type Activity, activityOf, noticeOf } from "../app/activity.ts";
 import { type BudgetGrant, type BudgetStop, budgetGranted, budgetStopOf } from "../app/budgetStop.ts";
 import { type BudgetWait, budgetWaitOf } from "../app/budgetWait.ts";
+import { candidatesOf } from "../app/candidates.ts";
 import { awaitedArtifact, type Decision, decisionOn, rerunRequested, waitingCard } from "../app/decide.ts";
 import { Journey, type LoopReport, type StepReport } from "../app/journey.ts";
 import type { Runtime } from "../app/runtime.ts";
@@ -92,11 +93,23 @@ export interface RecentRun {
   readonly tookMs: number;
 }
 
+/** A module research whose candidate waits for a review (Knowledge → Modules). */
+export interface WaitingCandidate {
+  readonly module: string;
+  /** Short run id. */
+  readonly run: string;
+  readonly at: string;
+  readonly claims?: { readonly proposed: number; readonly kept: number };
+  readonly review: number;
+}
+
 export interface RunsPage {
   readonly repos: readonly Repo[];
   /** The repository shown, or undefined for all. */
   readonly repo?: string;
   readonly waiting: readonly WaitingRun[];
+  /** Module research waiting for a review: a person decides, as for a run. */
+  readonly candidates: readonly WaitingCandidate[];
   readonly running: readonly RunningRun[];
   readonly recent: readonly RecentRun[];
   readonly today: { readonly runs: number; readonly modelCalls: number };
@@ -229,6 +242,15 @@ export async function runsPage(
     repos,
     ...(options.repo ? { repo: options.repo } : {}),
     waiting: waiting.sort((a, b) => a.run.updatedAt.localeCompare(b.run.updatedAt)),
+    candidates: candidatesOf(runtime, (r) => r.workflow === "onboard-module" && ids.has(r.id))
+      .filter((c) => !c.decision && c.doc.module)
+      .map((c) => ({
+        module: c.doc.module as string,
+        run: shortRunId(c.artifact.runId),
+        at: c.artifact.createdAt,
+        ...(c.claims ? { claims: { proposed: c.claims.proposed, kept: c.claims.kept } } : {}),
+        review: c.review.length,
+      })),
     running,
     recent,
     today: {

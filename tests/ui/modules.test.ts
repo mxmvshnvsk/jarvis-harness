@@ -262,8 +262,14 @@ describe("Knowledge → Modules", () => {
     expect(existsSync(join(sb.project, ".jarvis/knowledge/module-orders.md"))).toBe(false);
   });
 
-  it("a waiting candidate rings the bell, with a link to its folder", async () => {
+  it("a waiting candidate rings the bell and waits under Runs, with a link to its folder", async () => {
     researched();
+    const runs = await page("/");
+    expect(runs).toContain("1 waits for you");
+    expect(runs).toContain("Review what the research found: <code>src/orders</code>");
+    expect(runs).toContain('href="/knowledge/modules?path=src%2Forders">Review the module');
+    // the header leads to Knowledge from every page, a run's too
+    expect(runs).toContain('<a href="/knowledge">Knowledge</a>');
     const w = JSON.parse(await page("/waiting.json")) as { waiting: Array<{ href?: string; what: string }> };
     expect(w.waiting).toContainEqual(
       expect.objectContaining({

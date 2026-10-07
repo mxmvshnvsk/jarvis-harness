@@ -22,6 +22,7 @@ import type {
   RunsPage,
   StepRow,
   WaitCard,
+  WaitingCandidate,
   WaitingRun,
 } from "./model.ts";
 
@@ -94,7 +95,7 @@ ${chrome.refresh ? html`<noscript><meta http-equiv="refresh" content="${String(c
 <a class="brand" href="/">jarvis</a>
 ${chrome.back ? html`<a class="back" href="${chrome.back.href}">← ${chrome.back.label}</a>` : ""}
 ${chrome.repos ?? ""}
-${chrome.page === "runs" || chrome.page === "knowledge" ? html`<nav aria-label="Pages"><a href="/"${chrome.page === "runs" ? html` aria-current="page"` : ""}>Runs</a><a href="/knowledge/modules"${chrome.page === "knowledge" ? html` aria-current="page"` : ""}>Knowledge</a></nav>` : ""}
+<nav aria-label="Pages"><a href="/"${chrome.page === "runs" ? html` aria-current="page"` : ""}>Runs</a><a href="/knowledge"${chrome.page === "knowledge" ? html` aria-current="page"` : ""}>Knowledge</a></nav>
 ${chrome.canStart ? html`<a class="btn primary small" href="/#new">New task</a>` : ""}
 <div class="status">
 <div class="models-wrap" data-pop-wrap><button type="button" class="models" data-mcp aria-expanded="false" aria-controls="mcp-pop" title="MCP: checking the servers…"><span class="dot" data-state="pending" aria-hidden="true"></span><span>mcp</span></button>
@@ -197,6 +198,17 @@ function terminalHint(card: WaitCard, terminal: boolean, run: Run): Html {
 }
 
 /* ---- runs ---- */
+
+/** A module research whose candidate waits for a review on the Modules page. */
+function candidateCardHtml(c: WaitingCandidate, now: number): Html {
+  const href = `/knowledge/modules?path=${encodeURIComponent(c.module)}`;
+  return html`<article class="panel card">
+<div class="row"><span class="pill info">⏸ knowledge · module</span><span class="meta">onboard-module · ${c.run} · waiting ${ago(c.at, now)}</span></div>
+<h3>Review what the research found: <code>${c.module}</code></h3>
+<p>${c.claims ? `${c.claims.kept} of ${c.claims.proposed} claims confirmed against the code` : "A module document"}${c.review > 0 ? ` · ${c.review} generalisation${c.review === 1 ? "" : "s"} to check` : ""}. Nothing is written until you accept it.</p>
+<div class="actions"><a class="btn primary" href="${href}">Review the module</a><a class="btn" href="/runs/${encodeURIComponent(c.run)}">Open the run</a></div>
+</article>`;
+}
 
 function waitingCardHtml(w: WaitingRun, now: number, actions?: Actions): Html {
   const { run, card } = w;
@@ -380,8 +392,9 @@ ${l.tail ? html`<pre class="tail">${l.tail}</pre>` : ""}</div></div>`;
 }
 
 export function runsContent(page: RunsPage, now: number, actions?: Actions, start?: StartForm): Html {
+  const waits = page.waiting.length + page.candidates.length;
   const sum = [
-    `${page.waiting.length} wait${page.waiting.length === 1 ? "s" : ""} for you`,
+    `${waits} wait${waits === 1 ? "s" : ""} for you`,
     `${page.running.length} running`,
     `${page.today.runs} today`,
     `${page.today.modelCalls} model call${page.today.modelCalls === 1 ? "" : "s"} today`,
@@ -393,8 +406,8 @@ ${start && actions ? startHtml(start, actions) : ""}
 <section class="group" aria-labelledby="waits" data-live="waiting">
 <h2 id="waits">Waits for you</h2>
 ${
-  page.waiting.length > 0
-    ? html`<div class="cards">${page.waiting.map((w) => waitingCardHtml(w, now, actions))}</div>`
+  waits > 0
+    ? html`<div class="cards">${page.waiting.map((w) => waitingCardHtml(w, now, actions))}${page.candidates.map((c) => candidateCardHtml(c, now))}</div>`
     : html`<div class="panel empty">Nothing waits for you.</div>`
 }
 </section>
