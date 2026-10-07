@@ -1,8 +1,10 @@
 import { existsSync, readFileSync } from "node:fs";
 import { request } from "node:http";
+import { hostname } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createEngine } from "../../src/app/engine.ts";
+import { resumableOf } from "../../src/app/resumable.ts";
 import { createRuntime, type Runtime } from "../../src/app/runtime.ts";
 import { loadConfig } from "../../src/core/config/load.ts";
 import { createLauncher, type Launcher } from "../../src/ui/launcher.ts";
@@ -230,5 +232,106 @@ describe("New task on the page", () => {
     });
     expect(res.status).toBe(303);
     expect(res.headers.get("location")).toBe(`/runs/${run.id.replace(/^run_/, "").slice(0, 8)}`);
+  });
+
+  const serve = async () => {
+    ui = await startUiServer({
+      runtime: rt,
+      engine: createEngine(rt),
+      port: 0,
+      homeDir: sb.home,
+      projectRoot: sb.project,
+      pollMs: 30,
+      actor: async () => DEV,
+      launcher,
+    });
+    return ui.token;
+  };
+  /** A run a terminal started: it stopped on its agent's tool calls, the card there was left (`q`). */
+  const leftAtBudget = (pid: number) => {
+    const run = createRun("Order form: phone number mask");
+    rt.runs.update(run.id, { currentStep: "implementation", currentIteration: 1 });
+    rt.runs.transition(run.id, "RUNNING");
+    rt.checkpoints.save({
+      runId: run.id,
+      stepId: "implementation",
+      iteration: 1,
+      kind: "suspend",
+      state: { budget: { scope: "agent", dimension: "toolCalls", used: 50, cap: 50, agent: "research" } },
+    });
+    rt.runs.transition(run.id, "WAITING_HUMAN", {
+      reason: "research used its 50 tool calls",
+      waitingFor: { kind: "budget", detail: "agent toolCalls" },
+    });
+    rt.events.emit({ kind: "run.state", runId: run.id, payload: { state: "WAITING_HUMAN" } });
+    const card = { kind: "budget", pid, host: hostname() };
+    rt.events.emit({ kind: "card.open", runId: run.id, payload: card });
+    return { run, short: run.id.replace(/^run_/, "").slice(0, 8), card };
+  };
+
+  it("more granted here for a run a terminal started and left: the page goes on with it", async () => {
+    const token = await serve();
+    const { run, short, card } = leftAtBudget(process.pid);
+    rt.events.emit({ kind: "card.closed", runId: run.id, payload: card });
+    const res = await post(`/runs/${short}/budget`, { t: token, choice: "more", amount: "25" });
+    expect(res.location).toBe(`/runs/${short}`);
+    expect((await calls(1))[0]).toBe(`${sb.project}|off|resume ${run.id}`);
+    expect(launcher.drives(run.id)).toBe(true);
+    expect(rt.events.list({ runId: run.id, kind: "run.driver" })[0]?.payload).toMatchObject({
+      adopted: true,
+    });
+  });
+
+  it("a terminal still waits at the card: it goes on there, the page starts nothing", async () => {
+    const token = await serve();
+    const { run, short } = leftAtBudget(process.pid); // this process: alive
+    await post(`/runs/${short}/budget`, { t: token, choice: "more", amount: "25" });
+    expect(rt.events.list({ runId: run.id, kind: "budget.grant" })).toHaveLength(1);
+    expect(launcher.drives(run.id)).toBe(false);
+    const html = await page(`/runs/${short}`);
+    expect(html).toContain("The terminal waiting at the card goes on with it.");
+    expect(html).not.toContain(`action="/runs/${short}/resume"`);
+    expect((await post(`/runs/${short}/resume`, { t: token })).location).toBe(
+      `/runs/${short}?notice=not-waiting`,
+    );
+  });
+
+  it("Resume: a decision nobody went on with, a run stopped with Ctrl-C or left without its process", async () => {
+    const token = await serve();
+    // decided in a terminal that then closed: Resume on the run's page and in Waits for you
+    const { run, short, card } = leftAtBudget(process.pid);
+    rt.events.emit({
+      kind: "budget.grant",
+      runId: run.id,
+      stepId: "implementation",
+      iteration: 1,
+      payload: { scope: "agent", dimension: "toolCalls", toolCalls: 25, channel: "cli" },
+    });
+    rt.events.emit({ kind: "card.closed", runId: run.id, payload: card });
+    expect(resumableOf(rt, rt.runs.get(run.id) ?? run)).toBe("decided");
+    expect(await page(`/runs/${short}`)).toContain(`action="/runs/${short}/resume"`);
+    expect(await page("/")).toContain(`action="/runs/${short}/resume"`);
+    const res = await post(`/runs/${short}/resume`, { t: token });
+    expect(res.location).toBe(`/runs/${short}?notice=resumed`);
+    expect((await calls(1))[0]).toBe(`${sb.project}|off|resume ${run.id}`);
+
+    const stopped = createRun("Billing: rounding in invoice totals");
+    rt.runs.transition(stopped.id, "RUNNING");
+    expect(resumableOf(rt, rt.runs.get(stopped.id) ?? stopped)).toBe("interrupted");
+    rt.runs.transition(stopped.id, "SUSPENDED", { reason: "interrupted with Ctrl-C" });
+    const short2 = stopped.id.replace(/^run_/, "").slice(0, 8);
+    const html = await page(`/runs/${short2}`);
+    expect(html).toContain("stopped with Ctrl-C");
+    expect(html).toContain(`action="/runs/${short2}/resume"`);
+  });
+
+  it("nothing to resume: undecided, failed, ended", () => {
+    const { run, card } = leftAtBudget(process.pid);
+    rt.events.emit({ kind: "card.closed", runId: run.id, payload: card });
+    expect(resumableOf(rt, rt.runs.get(run.id) ?? run)).toBeUndefined(); // no decision yet
+    const failed = createRun("Billing: rounding in invoice totals");
+    rt.runs.transition(failed.id, "RUNNING");
+    rt.runs.transition(failed.id, "FAILED", { reason: "boom" });
+    expect(resumableOf(rt, rt.runs.get(failed.id) ?? failed)).toBeUndefined();
   });
 });

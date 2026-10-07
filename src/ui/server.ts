@@ -37,6 +37,7 @@ import {
 } from "../app/knowledgeView.ts";
 import { type McpProbe, mcpHealthOf } from "../app/mcpHealth.ts";
 import { modelsHealthOf } from "../app/modelHealth.ts";
+import { resumableOf } from "../app/resumable.ts";
 import type { Runtime } from "../app/runtime.ts";
 import { type OpenIn, reviewFiles } from "../cli/checkout.ts";
 import type { Actor } from "../core/domain/actor.ts";
@@ -409,7 +410,7 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
       empty: html`<div class="banner bad">Say what to change — a comment, or comments on lines of the diff</div>`,
       "not-waiting": html`<div class="banner bad">The run no longer waits here: nothing recorded</div>`,
       amount: html`<div class="banner bad">Say how many more — a whole number above zero</div>`,
-      resumed: html`<div class="banner ok">Resumed — it goes on in the background; if the window is still full, it waits again</div>`,
+      resumed: html`<div class="banner ok">Resumed — it goes on in the background from where it stopped</div>`,
       cancelled: html`<div class="banner ok">Cancelled — nothing runs it any more; its checkout and artifacts stay</div>`,
       "cancel-requested": html`<div class="banner ok">Cancel requested — the process running it stops at its next safe point (after the current model or tool call)</div>`,
       "already-ended": html`<div class="banner bad">The run has ended already: nothing to cancel</div>`,
@@ -535,7 +536,7 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
       started: html`<div class="banner ok">Research started — it shows up under Runs too; the bell tells you when its candidate is ready</div>`,
       queued: html`<div class="banner ok">${count || "1"} research${count && count !== "1" ? "es" : ""} queued — they run one after another</div>`,
       unqueued: html`<div class="banner ok">Taken out of the queue</div>`,
-      resumed: html`<div class="banner ok">Resumed — it goes on in the background; if the window is still full, it waits again</div>`,
+      resumed: html`<div class="banner ok">Resumed — it goes on in the background from where it stopped</div>`,
       "term-added": html`<div class="banner ok">Added to the glossary as a draft — the next run's searches widen with it</div>`,
       "no-file": html`<div class="banner bad">Not a knowledge file of this repository</div>`,
       "no-path": html`<div class="banner bad">Not a folder of a module here — pick one in the tree or from the path's suggestions</div>`,
@@ -965,6 +966,11 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
     if (!sent || !same(sent, token)) return send(r, 403, forbiddenPage());
     const short = shortRunId(run.id);
     const actor = async () => (options.actor ? await options.actor() : undefined);
+    // after a decision here: a terminal waiting at the card goes on with it; else the page does —
+    // also a run a terminal started and then left (pilot: more granted here, nothing went on)
+    const goOn = (r: Run): void => {
+      if (options.launcher && !waitingCard(runtime, r.id)) options.launcher.adopt(r);
+    };
     if (m[2] === "open") {
       if (!existsSync(run.workspace.path)) return redirect(r, `/runs/${short}?notice=no-checkout`);
       // the files the loop's reasons name first, at their lines, then what the run changed (as `o`)
@@ -1009,12 +1015,13 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
       );
     }
     if (m[2] === "resume") {
-      // a run parked on a quota window or a model: try now (it parks again if the window is still full)
+      // a run nobody moves on (src/app/resumable.ts): the page drives it from now on and resumes it;
+      // one parked on a quota window parks again if the window is still full
       const back = (form.get("back") ?? "").startsWith("/knowledge/")
         ? (form.get("back") as string)
         : `/runs/${short}`;
       const sep = back.includes("?") ? "&" : "?";
-      if (run.state !== "WAITING_BUDGET") return redirect(r, `${back}${sep}notice=not-waiting`);
+      if (!resumableOf(runtime, run)) return redirect(r, `${back}${sep}notice=not-waiting`);
       if (!options.launcher) return redirect(r, `${back}${sep}notice=no-launcher`);
       return redirect(r, `${back}${sep}notice=${options.launcher.adopt(run) ? "resumed" : "resuming"}`);
     }
@@ -1030,7 +1037,7 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
         if (!who) return redirect(r, `/runs/${short}?notice=actor`);
         grantBudget(runtime, run, stop, who, choice === "finish" ? { finish: true } : { more }, "ui");
       }
-      options.launcher?.resume(run); // a run the page started goes on in the background
+      goOn(run);
       return redirect(r, `/runs/${short}`);
     }
     if (m[2] === "rerun") {
@@ -1041,7 +1048,7 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
         if (!who) return redirect(r, `/runs/${short}?notice=actor`);
         requestRerun(runtime, run, who, "ui");
       }
-      options.launcher?.resume(run); // a run the page started goes on in the background
+      goOn(run);
       return redirect(r, `/runs/${short}`);
     }
     // decide: only the version the run waits on now, once
@@ -1080,8 +1087,15 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
       if (!(error instanceof DecisionTakenError)) throw error;
       return redirect(r, back("taken"));
     }
-    options.launcher?.resume(run); // a run the page started goes on in the background
+    goOn(run);
     return redirect(r, back());
+  };
+
+  // "Resume" starts `jarvis resume` through the launcher; without one, the command to copy stays
+  const withResume = <T extends { readonly resumable?: unknown }>(m: T): T => {
+    if (options.launcher) return m;
+    const { resumable: _gone, ...rest } = m;
+    return rest as T;
   };
 
   const routes = async (r: Request): Promise<void> => {
@@ -1093,11 +1107,12 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
       const all = runtime.runs.list({ includeTerminal: true, limit: 500 });
       const here = options.projectRoot && all.some((x) => x.workspace.repoRoot === options.projectRoot);
       const repo = repoParam === null ? (here ? options.projectRoot : undefined) : repoParam || undefined;
-      const model = await runsPage(runtime, engine, {
+      const listed = await runsPage(runtime, engine, {
         ...(repo ? { repo } : {}),
         ...(options.projectRoot ? { current: options.projectRoot } : {}),
         homeDir: options.homeDir,
       });
+      const model = { ...listed, waiting: listed.waiting.map(withResume) };
       return page(
         r,
         200,
@@ -1144,7 +1159,7 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
       const run = resolveRun(runMatch[1] as string);
       if (!run) return notFound(r, `No run "${runMatch[1]}".`);
       const model = {
-        ...(await runPage(runtime, engine, run, { homeDir: options.homeDir })),
+        ...withResume(await runPage(runtime, engine, run, { homeDir: options.homeDir })),
         driven: options.launcher?.drives(run.id) === true,
       };
       const ticking = run.state === "RUNNING" || model.card?.kind === "loop";
@@ -1169,7 +1184,9 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
       const type = decodeURIComponent(artMatch[2] as string);
       const name = decodeURIComponent(artMatch[3] as string);
       const found = artifactPage(runtime, run, type, name, Number.isInteger(v) && v > 0 ? v : undefined);
-      const model = found ? { ...found, driven: options.launcher?.drives(run.id) === true } : found;
+      const model = found
+        ? { ...withResume(found), driven: options.launcher?.drives(run.id) === true }
+        : found;
       if (!model) return notFound(r, `Run ${shortRunId(run.id)} has no ${type}/${name}.`);
       const notice = noticeOf(r);
       const extras: ArtifactExtras = {

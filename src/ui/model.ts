@@ -5,6 +5,7 @@ import { type BudgetWait, budgetWaitOf } from "../app/budgetWait.ts";
 import { candidatesOf } from "../app/candidates.ts";
 import { awaitedArtifact, type Decision, decisionOn, rerunRequested, waitingCard } from "../app/decide.ts";
 import { Journey, type LoopReport, type StepReport } from "../app/journey.ts";
+import { type Resumable, resumableOf } from "../app/resumable.ts";
 import type { Runtime } from "../app/runtime.ts";
 import type { RunTokens } from "../app/status.ts";
 import { type Change, changesIn, homePath } from "../cli/checkout.ts";
@@ -77,6 +78,8 @@ export interface WaitingRun {
   readonly card: WaitCard;
   /** A terminal waits at this run's card: a decision goes on at once. */
   readonly terminal: boolean;
+  /** Decided, and nobody goes on with it: "Resume" (src/app/resumable.ts). */
+  readonly resumable?: Resumable;
 }
 
 export interface RunningRun {
@@ -211,6 +214,7 @@ export async function runsPage(
         run,
         card: await waitCardOf(runtime, run, options.homeDir),
         terminal: waitingCard(runtime, run.id) !== undefined,
+        ...((r) => (r ? { resumable: r } : {}))(resumableOf(runtime, run, now)),
       });
     } else if (run.state === "WAITING_BUDGET") {
       // in progress, only paused: with what runs, not with what ended
@@ -297,6 +301,8 @@ export interface RunPage {
   readonly driven?: boolean;
   /** Parked on a quota window or a model: what it waits for and until when. */
   readonly wait?: BudgetWait;
+  /** Nobody moves it on, and `jarvis resume` would: the page's "Resume" (src/app/resumable.ts). */
+  readonly resumable?: Resumable;
   readonly feed: readonly FeedItem[];
   readonly artifacts: ReadonlyArray<ArtifactVersion & { readonly state: string }>;
   readonly leaseLive: boolean;
@@ -515,6 +521,7 @@ export async function runPage(
       const wait = budgetWaitOf(runtime, run);
       return wait ? { wait } : {};
     })(),
+    ...((r) => (r ? { resumable: r } : {}))(resumableOf(runtime, run, now.getTime())),
   };
 }
 
@@ -534,6 +541,7 @@ export interface ArtifactPage {
   readonly atGate: boolean;
   readonly terminal: boolean;
   readonly driven?: boolean;
+  readonly resumable?: Resumable;
 }
 
 export function artifactPage(
@@ -578,6 +586,7 @@ export function artifactPage(
     awaited: isAwaited && !decision,
     atGate: isAwaited,
     terminal: waitingCard(runtime, run.id) !== undefined,
+    ...((r) => (r ? { resumable: r } : {}))(resumableOf(runtime, run)),
   };
 }
 
