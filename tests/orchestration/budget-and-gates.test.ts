@@ -103,6 +103,40 @@ describe("per-run / per-step budget (ADR-0018 §4)", () => {
   });
 });
 
+describe("budget in the pool's unlimited hours", () => {
+  it("the caps of the step grow unlimitedScale times while the hours are on", async () => {
+    // every day, all day: the hours are on whenever the test runs
+    sb.write(
+      "home/.jarvis/config.yaml",
+      userConfig().replace("    maxOutput: 100\n", "    maxOutput: 100\n    quotaPool: night\n") +
+        "quotaPools:\n  night:\n    window: { minutes: 20 }\n    unlimited: [{ days: [mon, tue, wed, thu, fri, sat, sun] }]\n",
+    );
+    sb.write("project/.jarvis/project.yaml", "version: 1\nbudget:\n  perStep: { inputTokens: 100 }\n");
+    rt = await testRuntime(sb);
+    expect(rt.budget.scaleNow("night")).toBe(5);
+    server.respond(() => completion("ok")); // 42 prompt tokens per call
+    const wf = workflowOf({
+      name: "bn",
+      entry: "work",
+      steps: [{ id: "work", kind: "agentic", agent: "work", transitions: { onSuccess: "DONE" } }],
+    });
+    const engine = engineFor(rt, [wf], {
+      work: async (ctx) => {
+        for (;;)
+          await ctx.gateway.call({
+            modelId: "flash",
+            role: "work",
+            messages: [{ role: "user", content: "go" }],
+          });
+      },
+    });
+    const run = createRun(rt, "bn");
+    const result = await engine.execute(run.id, owner);
+    expect(result.run.stateReason).toContain("budget.perStep.inputTokens exceeded: 504 of 500");
+    expect(server.requests).toHaveLength(12); // 0 … 462 used → allowed; 504 ≥ 100 × 5 → refused
+  });
+});
+
 describe("input tokens as a cap (the real cost when every call re-sends the conversation)", () => {
   it("stops the step once its prompts reach budget.perStep.inputTokens; a grant of input goes on", async () => {
     sb.write("home/.jarvis/config.yaml", userConfig());

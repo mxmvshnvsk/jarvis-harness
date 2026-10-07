@@ -128,22 +128,33 @@ export class BudgetedGateway implements ModelCaller {
   private readonly budget: BudgetConfig;
   private readonly scope: BudgetScope;
 
-  constructor(inner: ModelCaller, db: DatabaseSync, config: ResolvedConfig, scope: BudgetScope) {
+  /** How many times the caps grow for a call of this model now (its pool's unlimited hours). */
+  private readonly scale: (modelId: string) => number;
+
+  constructor(
+    inner: ModelCaller,
+    db: DatabaseSync,
+    config: ResolvedConfig,
+    scope: BudgetScope,
+    scale: (modelId: string) => number = () => 1,
+  ) {
     this.inner = inner;
     this.db = db;
     this.budget = config.budget;
     this.scope = scope;
+    this.scale = scale;
   }
 
   /**
    * Caps are checked on consumed tokens: a call is refused once the cap is reached, so a step may
    * overshoot by at most one response. Counting the reserve would make small caps unusable.
    */
-  check(): void {
+  check(scale = 1): void {
     const run = usageFromEvents(this.db, this.scope.runId);
     const step = usageFromEvents(this.db, this.scope.runId, this.scope.stepId, this.scope.iteration);
     const grants = grantsFromEvents(this.db, this.scope.runId, this.scope.stepId, this.scope.iteration);
-    const plus = (cap: number | undefined, extra: number) => (cap === undefined ? undefined : cap + extra);
+    const plus = (cap: number | undefined, extra: number) =>
+      cap === undefined ? undefined : cap * scale + extra;
     const perRun = {
       outputTokens: plus(this.budget.perRun.outputTokens, grants.perRun.outputTokens),
       inputTokens: plus(this.budget.perRun.inputTokens, grants.perRun.inputTokens),
@@ -175,7 +186,7 @@ export class BudgetedGateway implements ModelCaller {
   }
 
   async call(request: ModelRequest): Promise<ModelResponse> {
-    this.check();
+    this.check(this.scale(request.modelId));
     return this.inner.call({
       ...request,
       runId: this.scope.runId,

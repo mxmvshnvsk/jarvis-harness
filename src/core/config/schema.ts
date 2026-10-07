@@ -115,6 +115,12 @@ export const QuotaPoolSchema = z.strictObject({
   soft: z.number().min(0).max(1).default(0.8),
   /** Hours when the platform does not limit the pool: admitted without a check, not counted after. */
   unlimited: z.array(UnlimitedSpanSchema).default([]),
+  /**
+   * In the unlimited hours the agents' call limits and the run's and the step's budget (perStep,
+   * perRun) of calls on this pool grow this many times: the pool lets everything through, a step
+   * that loops still ends.
+   */
+  unlimitedScale: z.number().min(1).default(5),
   /** The zone of `unlimited` (IANA, e.g. Europe/Moscow); none — the machine's. */
   timezone: z.string().refine(knownZone, "an IANA time zone, e.g. Europe/Moscow").optional(),
 });

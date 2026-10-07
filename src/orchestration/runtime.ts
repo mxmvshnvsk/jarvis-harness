@@ -237,11 +237,14 @@ export class LocalWorkflowEngine {
     const restored = this.restoredState(run, step, iteration);
     const historyId = this.rt.history.start(run.id, step.id, iteration, inputs);
     this.emit(run, "step.start", { stepId: step.id, iteration, kind: step.kind, inputs });
-    const gateway = new BudgetedGateway(this.rt.gateway, this.rt.db.db, this.rt.loaded.config, {
-      runId: run.id,
-      stepId: step.id,
-      iteration,
-    });
+    const models = this.rt.loaded.config.models;
+    const gateway = new BudgetedGateway(
+      this.rt.gateway,
+      this.rt.db.db,
+      this.rt.loaded.config,
+      { runId: run.id, stepId: step.id, iteration },
+      (modelId) => this.rt.budget.scaleNow(models[modelId]?.quotaPool ?? `model:${modelId}`),
+    );
     const tools = this.rt.tools.bind({
       run,
       stepId: step.id,

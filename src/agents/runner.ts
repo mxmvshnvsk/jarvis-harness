@@ -147,10 +147,19 @@ export class AgentRuntimeRunner implements AgentRunner {
     // project/user `agents.<id>.limits` over the built-in ones, plus what a person granted on a stop
     const override = config.agents[def.id]?.limits;
     const grants = grantsFromEvents(rt.db.db, ctx.run.id, ctx.step.id, ctx.iteration);
+    // in the pool's unlimited hours the limits grow (`unlimitedScale`), read anew at every check: a
+    // step that began at night is held to the day's limits once the night is over
+    const toolLimit = override?.maxToolCalls ?? def.limits.maxToolCalls;
+    const modelLimit = override?.maxModelCalls ?? def.limits.maxModelCalls;
+    const scale = () => rt.budget.scaleNow(route.pool);
     const limits = {
       ...def.limits,
-      maxToolCalls: (override?.maxToolCalls ?? def.limits.maxToolCalls) + grants.toolCalls,
-      maxModelCalls: (override?.maxModelCalls ?? def.limits.maxModelCalls) + grants.modelCalls,
+      get maxToolCalls() {
+        return toolLimit * scale() + grants.toolCalls;
+      },
+      get maxModelCalls() {
+        return modelLimit * scale() + grants.modelCalls;
+      },
     };
     // a used-up limit: finish with what there is (marked incomplete), or — `onLimit: ask`, a person at
     // hand — the run waits for more calls or "finish"; never asks where nobody answers (CI)

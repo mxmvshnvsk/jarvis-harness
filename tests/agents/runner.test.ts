@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { BUILTIN_AGENTS } from "../../src/agents/builtin/index.ts";
@@ -515,6 +515,27 @@ context: { maxContext: 8000 }
     expect(text).toMatch(
       /INCOMPLETE: agent research ran out of tool calls|incomplete: its agent ran out of budget/,
     );
+  });
+
+  it("in the pool's unlimited hours the agent's limits grow unlimitedScale times", async () => {
+    const home = join(sb.root, "home", ".jarvis", "config.yaml");
+    writeFileSync(
+      home,
+      `${readFileSync(home, "utf8").replace("    maxOutput: 2000\n", "    maxOutput: 2000\n    quotaPool: night\n")}quotaPools:\n  night:\n    window: { minutes: 20 }\n    unlimited: [{ days: [mon, tue, wed, thu, fri, sat, sun] }]\n    unlimitedScale: 3\n`,
+    );
+    sb.write(
+      "project/.jarvis/project.yaml",
+      "version: 1\nworkspace: { mode: cwd }\nagents: { research: { limits: { maxToolCalls: 2, maxModelCalls: 4 } } }\n",
+    );
+    rt = await testRuntime(sb, { PATH: process.env.PATH ?? "" });
+    server.respond((req) =>
+      req.body.tools ? toolCallCompletion("repo.list", {}) : completion(JSON.stringify(RESEARCH_DOC)),
+    );
+    const run = createRun(rt, "r");
+    await engineWith(rt, researchOnly).execute(run.id, { owner: "cli:t" });
+    const start = rt.events.list({ runId: run.id }).find((e) => e.kind === "agent.start");
+    expect(start?.payload).toMatchObject({ maxToolCalls: 6, maxModelCalls: 12 });
+    expect(rt.events.list({ runId: run.id }).filter((e) => e.kind === "tool.call")).toHaveLength(6);
   });
 
   it("onLimit: ask — the run waits at the limit with the conversation kept; more goes on, finish ends it", async () => {

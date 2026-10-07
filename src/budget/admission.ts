@@ -88,6 +88,13 @@ export class BudgetManager {
     return { now: false, ...(next ? { next } : {}) };
   }
 
+  /** How many times the agents' limits and the run's budget grow now: `unlimitedScale` in unlimited hours, else 1. */
+  scaleNow(pool: string): number {
+    const definition = this.pools[pool];
+    if (!definition || definition.unlimited.length === 0) return 1;
+    return unlimitedAt(scheduleOf(definition), this.clock()) ? definition.unlimitedScale : 1;
+  }
+
   /** What the pool spent in its unlimited hours does not count: the window starts after them. */
   private since(definition: QuotaPool, now: Date): Date | undefined {
     if (definition.unlimited.length === 0) return undefined;
