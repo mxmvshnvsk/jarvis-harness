@@ -23,7 +23,7 @@ export function secretRefsOf(config: unknown): Array<{ ref: string; where: strin
   return out;
 }
 
-async function readSecret(ctx: CliContext, prompt: string, stdin: NodeJS.ReadableStream): Promise<string> {
+async function readSecret(prompt: string, stdin: NodeJS.ReadableStream): Promise<string> {
   const tty = (stdin as NodeJS.ReadStream).isTTY === true;
   if (!tty) {
     // piped: the whole of stdin is the value (first line)
@@ -31,15 +31,22 @@ async function readSecret(ctx: CliContext, prompt: string, stdin: NodeJS.Readabl
     for await (const chunk of stdin) data += String(chunk);
     return data.replace(/\r?\n$/, "");
   }
-  ctx.out.error(prompt);
-  const muted = new Writable({ write: (_c, _e, cb) => cb() });
+  // the question on stderr as a plain prompt (pilot: printed as `error:`), the typed value not echoed
+  let typing = false;
+  const muted = new Writable({
+    write: (chunk, _e, cb) => {
+      if (!typing) process.stderr.write(chunk);
+      cb();
+    },
+  });
   const rl = createInterface({ input: stdin, output: muted, terminal: true });
   return new Promise<string>((resolve) => {
-    rl.question("", (answer) => {
+    rl.question(prompt, (answer) => {
       rl.close();
-      ctx.out.error("");
+      process.stderr.write("\n");
       resolve(answer);
     });
+    typing = true;
   });
 }
 
@@ -51,7 +58,7 @@ export async function runAuthSet(
 ): Promise<void> {
   const loaded = await loadForCli(ctx);
   const keychain = createKeychain(loaded, ctx.env);
-  const value = await readSecret(ctx, `value for keychain:${id} (input hidden): `, stdin);
+  const value = await readSecret(`value for keychain:${id} (input hidden): `, stdin);
   if (value.length === 0) {
     ctx.out.error("empty value; nothing stored");
     throw new CliExit(EXIT.error);
