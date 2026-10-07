@@ -304,7 +304,10 @@ describe("open questions answered on the page", () => {
     expect(page).toContain("Confluence 4400123 · Responses");
     // a decision says what it stands on too
     expect(page).toContain("<span>ABC-42 · plan, item 3</span>");
-    expect(page).toContain('id="decide-form"');
+    // the decision under the questions, a note folded there; no side column repeating the document
+    expect(page).toContain('class="dock" data-decision id="decide-form"');
+    expect(page).toContain('<details class="note"><summary>+ A note</summary>');
+    expect(page).not.toContain("Your decision");
     const res = await post(`/runs/${short}/decide`, {
       t: ui.token,
       artifact: spec.artifactId,

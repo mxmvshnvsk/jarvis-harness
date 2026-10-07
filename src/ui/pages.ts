@@ -1280,10 +1280,18 @@ ${answered || html`${hint}${own}`}</div>
 ${preparing}
 ${q.list.map(card)}
 ${
-  live
-    ? html`<div class="dock"><span class="sum">Answered questions go back with «Send back» — the next version must follow them; the rest stays open. Anything else: the note on the right.</span>
-<button type="submit" form="decide-form" name="decision" value="request_changes" class="btn strong big">Send back with the answers</button>
-<button type="submit" form="decide-form" name="decision" value="approve" class="btn accept big">Accept as is</button></div>`
+  live && extras.actions
+    ? form(
+        extras.actions,
+        `${runHref(page.run)}/decide`,
+        html`<input type="hidden" name="artifact" value="${page.artifact.artifactId}"><input type="hidden" name="version" value="${page.artifact.version}"><input type="hidden" name="lines" value="">
+<span class="sum">Answered questions go back with «Send back» — the next version must follow them; the rest stays open.</span>
+<details class="note"><summary>+ A note</summary><label class="field grow">Anything else to change<textarea name="comment" rows="3" placeholder="What the answers above do not cover"></textarea></label></details>
+<div class="actions"><button type="submit" name="decision" value="request_changes" class="btn strong big">Send back with the answers</button>
+<button type="submit" name="decision" value="approve" class="btn accept big">Accept as is</button>
+<span class="hint">${page.terminal ? "The terminal waiting there picks the decision up and goes on." : html`Same as <code>a</code> / <code>c</code> on the terminal's card.`}</span></div>`,
+        html` class="dock" data-decision id="decide-form"`,
+      )
     : ""
 }
 </section>`;
@@ -1319,8 +1327,10 @@ export function artifactContent(page: ArtifactPage, extras: ArtifactExtras): Htm
     }
     return "";
   };
+  // open questions answered here: the decision sits under them, the document below — no side column
+  const asked = page.questions !== undefined && page.awaited && extras.actions !== undefined;
   const aside =
-    page.awaited || page.decision || f
+    !asked && (page.awaited || page.decision || f)
       ? html`<aside class="panel aside" aria-labelledby="your-decision" data-live="decision">
 <h2 id="your-decision">${page.awaited ? "Your decision" : page.decision ? "Decision" : "In brief"}</h2>
 ${f?.summary ? html`<p style="font-size:14px;line-height:21px;color:var(--ink-2)">${cut(f.summary, 400)}</p>` : ""}
@@ -1344,17 +1354,13 @@ ${
         `${runHref(page.run)}/decide`,
         html`<input type="hidden" name="artifact" value="${a.artifactId}"><input type="hidden" name="version" value="${a.version}"><input type="hidden" name="lines" value="">
 <div class="decide">
-<label for="comment">${page.questions ? "Anything else to change" : "What to change"} <span class="muted">(for Send back; ${page.questions ? "the answers on the left and " : ""}line comments on the diff go with it)</span></label>
+<label for="comment">What to change <span class="muted">(for Send back; line comments on the diff go with it)</span></label>
 <textarea id="comment" name="comment" rows="3"></textarea>
-${
-  page.questions
-    ? html`<a class="btn big" href="#questions">Answer the questions, then decide</a>`
-    : html`<button type="submit" name="decision" value="approve" class="btn accept big">Accept</button>
-<button type="submit" name="decision" value="request_changes" class="btn strong big" data-send-back>Send back</button>`
-}
+<button type="submit" name="decision" value="approve" class="btn accept big">Accept</button>
+<button type="submit" name="decision" value="request_changes" class="btn strong big" data-send-back>Send back</button>
 <span class="hint">Same as <code>a</code> / <code>c</code> on the terminal's card. ${page.terminal ? "The terminal waiting there picks the decision up and goes on." : html`No terminal waits: the run goes on with <code>jarvis continue ${shortRunId(page.run.id)}</code>.`}</span>
 </div>`,
-        html` data-decision id="decide-form"`,
+        html` data-decision`,
       )
     : page.awaited
       ? html`<div class="decide"><span class="hint">Decide in the terminal: <code>jarvis continue ${shortRunId(page.run.id)}</code> — <code>a</code> accepts, <code>c</code> sends back.</span><button type="button" class="btn" data-copy="jarvis continue ${shortRunId(page.run.id)}">Copy command</button></div>`

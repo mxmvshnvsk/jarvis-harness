@@ -355,7 +355,7 @@ form.clarify{display:flex;flex-direction:column;gap:12px}
 form.clarify>.actions{margin:4px 0}
 .ownrule summary{cursor:pointer;font-size:13px;color:var(--accent)}
 .ownrule[open]{display:flex;flex-direction:column;gap:10px}
-.qs{padding:0;overflow:hidden}
+.qs{padding:0}
 .qs-head{display:flex;align-items:center;gap:8px 12px;flex-wrap:wrap;padding:16px 20px;border-bottom:1px solid var(--line)}
 .qs-head h2{font-size:17px;margin:0}
 .qs-prep{padding:12px 20px;border-bottom:1px solid var(--line)}
@@ -382,8 +382,11 @@ form.clarify>.actions{margin:4px 0}
 .q .pick:has(input:checked){border-color:var(--wait);color:var(--wait)}
 .q .pick input{margin:0;accent-color:var(--wait)}
 .q .done{font-size:14px;line-height:21px;padding:8px 12px;border-radius:8px;background:var(--ok-bg);color:var(--ink);white-space:pre-wrap}
-.qs .dock{position:sticky;bottom:0;display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:14px 20px;background:var(--panel)}
-.qs .dock .sum{flex:1 1 100%;font-size:13px;line-height:19px;color:var(--muted)}
+.qs .dock{display:flex;flex-direction:column;gap:10px;padding:14px 20px;background:var(--panel);border-top:1px solid var(--line);border-bottom-left-radius:inherit;border-bottom-right-radius:inherit}
+.qs .dock .sum{font-size:13px;line-height:19px;color:var(--muted)}
+.qs .dock .note summary{cursor:pointer;font-size:13px;color:var(--accent)}
+.qs .dock .note[open]{display:flex;flex-direction:column;gap:8px}
+.qs .dock .note textarea{padding:8px 10px;border-radius:6px;resize:vertical;min-height:64px}
 .planw{border:1px solid var(--line);border-radius:10px;background:var(--ground)}
 .planw>summary{display:flex;align-items:baseline;gap:10px;padding:10px 14px;cursor:pointer;list-style:none;flex-wrap:wrap}
 .planw>summary::-webkit-details-marker{display:none}
