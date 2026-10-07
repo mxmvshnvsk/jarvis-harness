@@ -422,6 +422,25 @@ export const SCRIPT = `
   };
   inPhase(document);
 
+  // running clocks count on between refreshes: the server's value plus the time since it arrived
+  // (an element a refresh brought is new, so it starts from its own value; no clock skew involved)
+  const arrived = new WeakMap();
+  const clockOf = (ms) => {
+    const s = Math.floor(ms / 1000), h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+    const sec = String(s % 60).padStart(2, '0');
+    return h > 0 ? h + ':' + String(m).padStart(2, '0') + ':' + sec : m + ':' + sec;
+  };
+  const countOn = () => {
+    const now = performance.now();
+    for (const el of document.querySelectorAll('[data-ms]')) {
+      if (!arrived.has(el)) arrived.set(el, now);
+      const text = clockOf(Number(el.dataset.ms) + now - arrived.get(el));
+      if (el.textContent !== text) el.textContent = text;
+    }
+  };
+  countOn();
+  setInterval(countOn, 1000);
+
   // replace the live regions with the server's fresh rendering; forms being typed in stay
   let busy = false, again = false;
   async function refresh() {

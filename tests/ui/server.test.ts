@@ -218,6 +218,32 @@ describe("jarvis ui: pages", () => {
     expect(page.body).not.toContain('class="panel now"');
   });
 
+  it("a working step: its clocks count on in the page between refreshes, the spinner keeps its turn", async () => {
+    const run = rt.runs.create({
+      task: "Order form: phone number mask",
+      workflow: "research",
+      owner: DEV,
+      workspace: { mode: "cwd", repoRoot: sb.project, path: sb.project, baseRef: "HEAD" },
+      dataClass: "internal",
+    });
+    rt.runs.transition(run.id, "RUNNING");
+    rt.runs.acquireLease(run.id, "cli:t", 60_000);
+    rt.events.emit({
+      kind: "step.start",
+      runId: run.id,
+      payload: { stepId: "research", iteration: 1, kind: "agentic" },
+    });
+    rt.events.emit({ kind: "agent.start", runId: run.id, payload: { agent: "research", maxToolCalls: 500 } });
+    const page = await get(`/runs/${run.id.replace(/^run_/, "").slice(0, 8)}`, authed());
+    expect(page.body).toContain('class="panel now"');
+    // the step's time, the wait for the model and the tool line's time: three running clocks
+    expect(page.body.match(/<span data-ms="\d+">\d+:\d\d<\/span>/g)?.length).toBeGreaterThanOrEqual(3);
+    expect(page.body).toMatch(/model call 1, waiting <span data-ms=/);
+    const js = (await get("/assets/app.js")).body;
+    expect(js).toContain("setInterval(countOn, 1000)");
+    expect(js).toContain("inPhase(fresh)");
+  });
+
   it("runs: what waits for you first, with what it waits for and a link", async () => {
     const { run } = seedWaiting(
       "Billing: rounding in invoice totals",

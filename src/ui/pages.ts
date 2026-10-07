@@ -284,27 +284,38 @@ function decisionText(card: ApprovalCard): string {
   return `${verb} by ${d.approval.actor.id}${d.channel === "ui" ? " in the browser" : d.channel === "cli" ? " in the terminal" : ""}`;
 }
 
+/**
+ * A running clock: the server's value, then the page counts on every second (src/ui/assets.ts) — the
+ * value came only with a refresh and jumped 15:27 → 15:30 → 15:32 (pilot).
+ */
+function ticking(ms: number): Html {
+  const at = Math.max(0, Math.round(ms));
+  return html`<span data-ms="${String(at)}">${clock(at)}</span>`;
+}
+
 /** `model call 12, waiting 0:21, receiving ~1.1k tok`: what the step's agent does now. */
-function callText(a: Activity): string {
+function callText(a: Activity): Html {
   const step = a.step;
-  if (!step) return "starting…";
-  if (a.waitingMs === undefined) return `${step.modelCalls} model call${step.modelCalls === 1 ? "" : "s"}`;
+  if (!step) return html`starting…`;
+  if (a.waitingMs === undefined)
+    return html`${step.modelCalls} model call${step.modelCalls === 1 ? "" : "s"}`;
   const coming = a.receiving
     ? a.receiving.outputChars > 0
       ? `, receiving ~${kilo(Math.round(a.receiving.outputChars / 4))} tok`
       : `, thinking ~${kilo(Math.round(a.receiving.reasoningChars / 4))} tok`
     : "";
   const retry = a.retrying ? `, retry ${a.retrying.attempt} after ${a.retrying.reason}` : "";
-  if (a.compacting) return `${compactingText(a.compacting)}, ${clock(a.compacting.ms)}${coming}${retry}`;
-  return `model call ${step.modelCalls + 1}, waiting ${clock(a.waitingMs)}${coming}${retry}`;
+  if (a.compacting)
+    return html`${compactingText(a.compacting)}, ${ticking(a.compacting.ms)}${coming}${retry}`;
+  return html`model call ${step.modelCalls + 1}, waiting ${ticking(a.waitingMs)}${coming}${retry}`;
 }
 
 /** `[8/18] implementation#2 · model call 12, waiting 0:21, receiving ~1.1k tok` */
-function activityText(a: Activity | undefined, position?: { index: number; total: number }): string {
-  if (!a?.step) return "starting…";
+function activityText(a: Activity | undefined, position?: { index: number; total: number }): Html {
+  if (!a?.step) return html`starting…`;
   const pos = position ? `[${position.index}/${position.total}] ` : "";
   const step = `${pos}${a.step.id}${a.step.iteration > 1 ? `#${a.step.iteration}` : ""}${a.step.agent && a.step.agent !== a.step.id ? ` · ${a.step.agent}` : ""}`;
-  return `${step} · ${callText(a)}`;
+  return html`${step} · ${callText(a)}`;
 }
 
 function toolBudget(a: Activity | undefined, now: number): Html {
@@ -312,9 +323,9 @@ function toolBudget(a: Activity | undefined, now: number): Html {
   const max = step?.maxToolCalls;
   const used = step?.toolCalls ?? 0;
   const pct = max ? Math.min(100, Math.round((used / max) * 100)) : 0;
-  const since = step ? clock(Math.max(0, now - Date.parse(step.startedAt))) : "";
+  const since = step ? ticking(now - Date.parse(step.startedAt)) : "";
   return html`<div class="bar" role="img" aria-label="${max ? `${used} of ${max} tool calls used` : `${used} tool calls`}"><span style="width:${pct}%"></span></div>
-<span class="meta">tools ${max ? `${used}/${max}` : used}${since ? ` · ${since}` : ""}</span>`;
+<span class="meta">tools ${max ? `${used}/${max}` : used}${since ? html` · ${since}` : ""}</span>`;
 }
 
 function recentState(run: Run): Html {
@@ -395,7 +406,7 @@ function launchHtml(l: LaunchView, now: number, homeDir: string): Html {
 }
 
 function launchRow(l: LaunchView, now: number, homeDir: string): Html {
-  const age = clock(Math.max(0, now - Date.parse(l.startedAt)));
+  const age = ticking(now - Date.parse(l.startedAt));
   if (l.exitCode !== null)
     return html`<div class="panel running launch failed">
 <div class="what"><b>${firstLine(l.task)}</b><span class="meta">${l.workflow} · ${l.exitCode === 0 ? "ended without a run" : `failed to start (exit ${l.exitCode})`} · log ${home(l.log, homeDir)}</span>
@@ -501,7 +512,7 @@ function stepRow(s: StepRow, now: number): Html {
   if (s.status === "running") notes.push("running now");
   const took =
     s.status === "running" && s.startedAt
-      ? clock(Math.max(0, now - Date.parse(s.startedAt)))
+      ? ticking(now - Date.parse(s.startedAt))
       : r && s.status !== "skipped"
         ? duration(r.durationMs)
         : "";
@@ -703,7 +714,7 @@ function nowHtml(page: RunPage, now: number, actions?: Actions): Html {
     ? `last: ${a.lastTool.capability}${a.lastTool.detail ? ` ${a.lastTool.detail}` : ""}${a.lastTool.ok ? "" : " ✗"}`
     : "";
   return html`<section class="panel now" aria-label="Now" data-live="card">
-<div class="row"><span class="spin" aria-hidden="true"></span><b>${a.step.id}${a.step.iteration > 1 ? `#${a.step.iteration}` : ""}${a.step.agent && a.step.agent !== a.step.id ? ` · ${a.step.agent}` : ""}</b><span class="meta">${clock(Math.max(0, now - Date.parse(a.step.startedAt)))} · ${callText(a)}</span></div>
+<div class="row"><span class="spin" aria-hidden="true"></span><b>${a.step.id}${a.step.iteration > 1 ? `#${a.step.iteration}` : ""}${a.step.agent && a.step.agent !== a.step.id ? ` · ${a.step.agent}` : ""}</b><span class="meta">${ticking(now - Date.parse(a.step.startedAt))} · ${callText(a)}</span></div>
 ${toolBudget(a, now)}
 ${last ? html`<span class="meta">${last}</span>` : ""}
 </section>`;
@@ -1112,7 +1123,7 @@ export function modelsPending(): Html {
  */
 export function launchContent(l: LaunchView & { readonly repo: string }, now: number, homeDir: string): Html {
   const failed = l.exitCode !== null;
-  const age = clock(Math.max(0, now - Date.parse(l.startedAt)));
+  const age = ticking(now - Date.parse(l.startedAt));
   return html`<div data-live="launch" style="display:flex;flex-direction:column;gap:28px"><div class="lede-col" style="display:flex;flex-direction:column;gap:8px">
 <div class="row"><span class="pill ${failed ? "bad" : "info"}">${failed ? (l.exitCode === 0 ? "ended without a run" : `failed to start · exit ${l.exitCode}`) : "◌ starting"}</span><span class="meta">${l.workflow} · started ${age} ago · ${home(l.repo, homeDir)}</span></div>
 <h1>${firstLine(l.task)}</h1>
