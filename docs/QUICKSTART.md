@@ -9,7 +9,7 @@
 ```sh
 git clone <repo> jarvis-harness && cd jarvis-harness
 pnpm install && pnpm build          # Node ≥ 22.18, без нативных модулей
-pnpm link --global                  # команда `jarvis` в PATH (или `node dist/cli/main.js`)
+pnpm link --global                  # команда `jarvis` в PATH (или `node bin/jarvis.js`)
 ```
 
 ## 1. Машина: модели и credentials (ADR-0017)
@@ -18,7 +18,7 @@ pnpm link --global                  # команда `jarvis` в PATH (или `n
 jarvis init                         # ~/.jarvis/config.yaml + .jarvis/ в проекте с шаблонами
 $EDITOR ~/.jarvis/config.yaml       # models: endpoint, egress: private|cloud, contextWindow …
 jarvis auth set corp-llm            # токен в OS keychain под вашим actor (ввод без эха)
-jarvis models probe deepseek-flash  # что модель реально умеет: tools, json, schema
+jarvis models probe corp-llm        # ключ из models:, не имя модели на шлюзе; что она умеет: tools, json, schema
 jarvis doctor                       # всё, что мешает старту, одним списком
 ```
 
@@ -61,25 +61,34 @@ list`, `jarvis skills list` — что получит агент для этог
 | `.jarvis/knowledge/*.md` | факты о проекте; front-matter `paths`/`stacks`/`tags` сужает область | — |
 | `.jarvis/standards/<id>.md` | правила; `severity: required` + `verification.check` (pattern/tool) | в шаге `verify` → нарушение возвращает implementation |
 | `.jarvis/skills/<id>/` | как делать тип изменения; `appliesTo` по стеку/путям/виду задачи | — |
+| `knowledge.sources` в project.yaml | документация команды в репозитории (`documentation/`, `AGENTS.md`), читается на месте | — |
 
 `jarvis standards check --base main` — те же проверки руками, до запуска.
 
 `jarvis onboard` создаёт заготовки `architecture.md` и `conventions.md` из фактов репозитория (модули и их
 зависимости из графа, документация, тесты, стиль коммитов); смысл модулей и правила дописывает человек.
 Файлы, отредактированные человеком, `--refresh` не перезаписывает. Смысл модуля объяснит агент:
-`jarvis onboard --module src/orders` (проверенные утверждения придут кандидатом, `jarvis candidates promote`).
+`jarvis onboard --module src/orders` (проверенные утверждения придут кандидатом, `jarvis candidates promote`), а
+в `jarvis ui` то же делается на вкладке Knowledge → Modules.
 
 ## 4. Запуск задачи (ADR-0001, 0003, 0004)
 
 ```sh
-jarvis work ABC-42                  # worktree jarvis/ABC-42/<run8>, граф sdd:
-                                    # discover → research → requirements → spec → [gate] →
-                                    # impact → plan → implementation → verify(tests, standards) → review → [gate]
-jarvis status ABC-42 --watch        # шаги, циклы, артефакты, токены, чего ждёт
+jarvis work ABC-42                  # ветка jarvis/ABC-42/<run8>, checkout ~/.jarvis/worktrees/<repo>/<run8>-ABC-42;
+                                    # граф sdd: discover → design → research → requirements → spec → [gate] →
+                                    # impact → plan → implementation → verify(tests, standards, checks, docs, telemetry)
+                                    # → review → [gate] → release-notes
+jarvis status <run> --watch 5       # id прогона из вывода work; без аргумента — все активные
+jarvis c                            # вернуться к прогону, который ждёт вас, и решить прямо там
 ```
 
-Коды выхода: `0` готово, `10` ждёт человека, `11` ждёт квоту, `12` отказ policy, `13` потеря аренды
-(ADR-0009 §3). Run durable: закрыли терминал — `jarvis resume <run>`; процесс умер — `--steal`.
+Короче: `jarvis fix ABC-43` — путь для бага (research → spec → [gate] → implementation → standards и checks →
+review → [gate]); `jarvis research ABC-44` — только исследование, ничего не меняя; `jarvis spec ABC-42` — до
+одобренной spec. Шаг `design` читает задачу, её страницы Confluence и макеты Figma без модели.
+
+Коды выхода: `0` готово, `1` ошибка, `10` ждёт человека, `11` ждёт квоту или модель, `12` отказ policy,
+`13` потеря аренды, `130` остановлен Ctrl-C (прогон сохранил место) (ADR-0009 §3). Run durable: закрыли терминал —
+`jarvis continue` или `jarvis resume <run>`; процесс умер — `--steal`.
 
 ## 5. Участие человека (ADR-0019)
 
@@ -113,20 +122,31 @@ jarvis review submit <run> --resume # маркеры → review-package → revi
 jarvis diff <run>                   # что изменилось относительно базового коммита
 jarvis apply <run>                  # изменения прогона одним коммитом в текущую ветку
 jarvis candidates list              # что review предложил записать как стандарт/знание
-jarvis candidates promote <id>      # файл в .jarvis/standards или knowledge — в обычный code review
+jarvis candidates promote <имя>    # имя из candidates list; файл в .jarvis/standards или knowledge — в обычный code review
 jarvis gc                           # старые worktree
 ```
 
 ## 7. CI (ADR-0009)
 
 ```sh
-jarvis --profile ci ci ABC-42 --bundle run.jarvis.json.gz   # exit 10 на gate + summary + bundle
+jarvis ci ABC-42 --bundle run.jarvis.json.gz   # профиль ci по умолчанию; exit 10 на gate + summary + bundle
 jarvis import run.jarvis.json.gz    # на машине разработчика: worktree от baseCommit + patch
 jarvis approve <run> --commit --resume                      # решение коммитится в репозиторий
 # следующий CI с humanGate: skip-if-approved проходит этот gate сам
 ```
 
-## 8. Лимиты и наблюдаемость (ADR-0018)
+## 8. Веб-интерфейс (ADR-0023, ADR-0024)
+
+`jarvis ui` — локальная страница (127.0.0.1, порт 4317):
+- прогоны и что ждёт вас;
+- решения по гейтам, бюджету и петлям; Resume и Cancel;
+- New task (research, fix, sdd, spec) в фоне;
+- документы и дифф реализации с комментариями к строкам;
+- Knowledge: Overview, Modules (исследовать модуль и принять кандидата), Documents, Architecture, Standards,
+  Skills, Glossary;
+- индикаторы моделей и MCP.
+
+## 9. Лимиты и наблюдаемость (ADR-0018)
 
 `quotaPools` в пользовательском конфиге (окно, soft/hard, безлимитные часы `unlimited`), `budget.perRun/perStep`
 в проекте. Модели роли — порядок предпочтения: когда пул заполнен, вызов уходит следующей модели в другом пуле.
@@ -135,5 +155,5 @@ jarvis approve <run> --commit --resume                      # решение к�
 
 ## Что дальше (roadmap)
 
-TS-адаптер на ts-morph и инкрементальный Project Graph (ADR-0008, ADR-0021 фаза 2), C#-пакет,
-`jarvis mcp serve` для IDE, evals на кассетах (ADR-0012), специализированные агенты docs/telemetry.
+Адаптеры других языков (первым — C#/.NET, ADR-0021), pre-commit хук, экспорт телеметрии, нативный адаптер
+Anthropic, включение embeddings после гейта evals (ADR-0015 §6) — см. ADR-0001, приложение B.

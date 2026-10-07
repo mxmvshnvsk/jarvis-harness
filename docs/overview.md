@@ -16,6 +16,7 @@ flowchart TB
     work[work / resume / approve / attach …]
     ci[ci / export / import]
     kn[knowledge / standards / skills / candidates]
+    ui[ui — локальная страница<br/>src/ui]
   end
   subgraph App["Runtime (src/app/runtime.ts)"]
     engine[LocalWorkflowEngine<br/>src/orchestration]
@@ -34,7 +35,7 @@ flowchart TB
   end
   subgraph Outside["Внешний мир"]
     llm[LLM endpoints]
-    mcp[MCP servers: Jira, Confluence, Bitbucket, …]
+    mcp[MCP servers: Jira, Confluence, Bitbucket, Figma, …]
     git[git worktree]
   end
   CLI --> App
@@ -51,14 +52,18 @@ flowchart TB
 |---|---|---|
 | Domain | Run, состояния, актор, артефакты, контракты возможностей; без зависимостей от стека | `src/core` |
 | Storage | схема и миграции, RunStore, ArtifactStore/BlobStore, checkpoints, журнал эффектов | `src/storage`, `src/artifacts` |
-| Models | адаптеры провайдеров, роутер по ролям, бюджет, кассеты, структурный вывод | `src/models`, `src/budget` |
+| Models | адаптеры провайдеров, роутер по ролям, пулы квот (безлимитные часы, переход на следующую модель роли), кассеты, структурный вывод | `src/models`, `src/budget` |
 | Orchestration | движок workflow, исполнители шагов, worktree, аренда | `src/orchestration` |
 | Agents | определения агентов, слоистый контекст, цикл вызова инструментов | `src/agents` |
 | Tools | локальные инструменты, MCP-клиент и профили, политика, редактирование секретов | `src/tools`, `src/mcp`, `src/security` |
 | Knowledge | стандарты, навыки, знание, глоссарий, индекс, граф проекта | `src/knowledge` |
 | Capabilities | детекция стеков, уровни поддержки, адаптеры языков | `src/capabilities`, `src/adapters` |
 | Interaction | треды с человеком: approval, clarification, review, conflict | `src/interaction` |
+| Onboarding | скан репозитория, дерево модулей, исследование модуля агентом | `src/onboarding` |
+| Design | задача, её страницы и макеты Figma, прочитанные кодом без модели | `src/design` |
+| Hooks | проверки перед `git push` | `src/hooks` |
 | App / CLI | сборка runtime, команды, вывод | `src/app`, `src/cli` |
+| Web UI | `jarvis ui`: прогоны, решения, New task, база знаний | `src/ui` |
 
 Архитектурный тест `tests/architecture/stackNeutral.test.ts` не даёт ядру упоминать конкретные стеки или
 импортировать адаптеры (ADR-0021).
@@ -69,8 +74,8 @@ flowchart TB
 
 ```
 CREATED → RUNNING → COMPLETED
-             ├→ WAITING_BUDGET → RUNNING          (квота; resumeAfter)
-             ├→ WAITING_HUMAN  → RUNNING | FAILED  (гейт, тред, неразрешённый эффект)
+             ├→ WAITING_BUDGET → RUNNING          (квота или модель недоступна; resumeAfter)
+             ├→ WAITING_HUMAN  → RUNNING | FAILED  (гейт, тред, неразрешённый эффект, бюджет, петля)
              ├→ SUSPENDED      → RUNNING
              ├→ FAILED         → RUNNING (повтор)
              └→ CANCELLED
@@ -105,15 +110,17 @@ Run держит *аренду* с эпохой (ADR-0002 §5): один про�
 ## Один run от начала до конца
 
 1. `jarvis work ABC-42` — preflight (модели, MCP-серверы, которые нужны агентам workflow), создание run,
-   worktree `jarvis/ABC-42/<run>` от базового коммита (ADR-0003).
-2. `discover` пишет `project-capabilities`; UNSUPPORTED останавливает run с причиной `policy:`.
+   ветка `jarvis/ABC-42/<run8>` и worktree `~/.jarvis/worktrees/<repo>/<run8>-ABC-42` от базового коммита (ADR-0003).
+2. `discover` пишет `project-capabilities`; UNSUPPORTED останавливает run с причиной `policy:`. `design` без
+   модели читает задачу, её страницы Confluence и макеты Figma: артефакты `sources` и `design`.
 3. Агенты `research → requirements → specification` читают репозиторий, Jira/Confluence через MCP,
    знание проекта. Пробел в требованиях → `needs_clarification` → run паркуется на треде.
 4. `approve-spec` — run в `WAITING_HUMAN`, `jarvis approve <run> --resume`
    (`--request-changes` возвращает по объявленному ребру).
 5. `impact` (с графом проекта как доказательством) → `plan` → `implementation` (пишет в worktree, вызывает
    `project.*` команды).
-6. `verify` — параллельно `tests`, `standards.check`, `docs`, `telemetry`; нарушение стандарта или дефект
+6. `verify` — параллельно `tests`, `standards.check`, `checks` (команды `tools.local`), `docs`, `telemetry`;
+   нарушение стандарта или дефект
    возвращает в `implementation` с причинами в контексте следующей итерации.
 7. `review` → `approve-impl`. Человек либо утверждает, либо оставляет `// REVIEW:` в коде и делает
    `jarvis review submit` — агент `review-analysis` классифицирует замечания и маршрутизирует граф.
@@ -121,8 +128,8 @@ Run держит *аренду* с эпохой (ADR-0002 §5): один про�
    ветку одним коммитом.
 
 Каждый шаг добавляет события (`model.call`, `tool.call`, `approval.recorded`, …) и использование токенов;
-`jarvis status <run>` показывает их; бюджеты окон квот не дают превысить лимит корпоративного шлюза
-(ADR-0018).
+`jarvis status <run>` и страница `jarvis ui` показывают их; бюджеты окон квот не дают превысить лимит
+корпоративного шлюза (ADR-0018).
 
 ## Где что лежит на диске
 
@@ -131,16 +138,21 @@ Run держит *аренду* с эпохой (ADR-0002 §5): один про�
   config.yaml                   # модели, роли, пулы квот, MCP endpoints, actor
   jarvis.db                     # SQLite: runs, artifacts, approvals, effects, interactions, events,
                                 #   usage, graph snapshots, knowledge index
+  jarvis.db.bak-<N>             # копия базы перед миграцией (одна, последняя)
   artifacts/blobs/              # content-addressed содержимое артефактов и обрезанных выводов
   runs/<run>/                   # состояние run: approval-request.json, summary
-  worktrees/                    # git worktree каждого run
+  worktrees/<repo>/<run8>-<task>/  # git worktree каждого run
+  logs/                         # технический лог NDJSON по дням (jarvis logs; JARVIS_LOG_DIR)
   cache/mcp/<server>.json       # tools/list серверов
+  cache/mcp-results/<server>/   # ответы MCP (Figma и др.) на сутки
   cache/graph/<repo>/blobs/     # факты графа по хешу файла, общие для веток
-  backups/                      # бэкапы перед миграциями
+  cache/{models,deps,view,launches}/  # пробы моделей, кэш зависимостей worktree, вид прогона, запуски из jarvis ui
+  daemon.sock                   # сокет jarvis daemon
 
 <project>/.jarvis/              # проект и команда, версионируется
   project.yaml                  # политика: dataClass, роли, tools.local, workspace, human, knowledge
   knowledge/*.md                # знание проекта (+ glossary.md)
+  specs/                        # каталог для spec команды (создаёт init; Jarvis сам туда не пишет)
   standards/<id>.md             # стандарты с front matter
   skills/<id>/{skill.yaml,instructions.md}
   agents/<id>.md                # переопределение инструкций агента
@@ -156,9 +168,10 @@ Run держит *аренду* с эпохой (ADR-0002 §5): один про�
 | 0 | завершено |
 | 1 | ошибка |
 | 10 | run ждёт человека (`WAITING_HUMAN`) |
-| 11 | run ждёт бюджета (`WAITING_BUDGET`) |
+| 11 | run ждёт окна квоты или модели (`WAITING_BUDGET`) |
 | 12 | остановлен политикой (`policy:` — человеческий гейт в CI с `humanGate: fail`, UNSUPPORTED стек, запрещённая возможность) |
 | 13 | аренда потеряна |
+| 130 | остановлен Ctrl-C (`SUSPENDED`), run сохранил место |
 
 ## Дальше
 

@@ -14,13 +14,29 @@ Workflow — YAML-граф шагов. `LocalWorkflowEngine` исполняет 
 - **Checkpoint** на каждой границе шага: состояние, итерации, транскрипт агента (каждые
   `checkpointEvery` вызовов инструментов) и, в worktree-режиме, коммит с трейлерами `Jarvis-Run`,
   `Jarvis-Step`, `Jarvis-Kind`.
-- **Парковка**: `WAITING_BUDGET` (пул квоты исчерпан; `resumeAfter`), `WAITING_HUMAN` (гейт, тред
-  уточнения, неразрешённый эффект, лимит на run/шаг). `jarvis resume` или daemon продолжают с checkpoint.
+- **Парковка**:
+  - `WAITING_BUDGET` — пул квоты заполнен (ни у одной модели роли нет места) или модель не отвечает;
+    `resumeAfter`;
+  - `WAITING_HUMAN` — гейт, тред уточнения, неразрешённый эффект, лимит на run/шаг, лимит агента при
+    `onLimit: ask`.
+
+  `jarvis resume`, `jarvis continue`, daemon или страница `jarvis ui` продолжают с checkpoint.
 - **Loop reasons**: при возврате по обратному ребру следующая итерация шага получает причины (нарушения
   стандартов, дефекты, замечания ревью) в слое L2 контекста.
 
-Файлы: встроенные `sdd`, `smoke` (`src/workflows/builtin.ts`); проектные `.jarvis/workflows/<name>.yaml`
-переопределяют по имени.
+Встроенные workflow (`src/workflows/builtin.ts`); проектные `.jarvis/workflows/<name>.yaml` переопределяют по
+имени:
+
+| Workflow | Команда | Шаги |
+|---|---|---|
+| `sdd` | `jarvis work` | полный путь, граф ниже |
+| `fix` | `jarvis fix` | discover → design → research → spec → approve-spec → implementation → verify → review → approve-impl |
+| `spec` | `jarvis spec` | discover → design → research → requirements → spec → approve-spec; одобренная spec продолжается в `sdd` (`next:`) |
+| `research` | `jarvis research` | discover → design → research; продолжается в `sdd` (`next:`) |
+| `onboard-module` | `jarvis onboard --module` | map (агент `onboard-mapper`) → verify (`onboard.verify`: утверждения сверяются с кодом, выжившее — `candidate`) |
+| `ask` | `jarvis ask` | answer (агент `knowledge-answerer`) |
+| `review-diff` | `jarvis prepush` | review (семантическое ревью диапазона) |
+| `smoke` | — | проверка самого движка |
 
 ## Граф `sdd`
 
@@ -46,8 +62,8 @@ flowchart LR
   requirements -.->|needs_clarification| thread((тред))
 ```
 
-`verify` — composite из `tests` (агент), `standards` (`standards.check`), `docs` и `telemetry`
-(агенты), все параллельно. `needs_clarification` — не ребро, а парковка: AgenticExecutor открывает тред
+`verify` — composite из `tests` (агент), `standards` (`standards.check`), `checks` (`project.checks`: команды
+`tools.local` для изменённых пакетов), `docs` и `telemetry` (агенты), все параллельно. `needs_clarification` — не ребро, а парковка: AgenticExecutor открывает тред
 уточнения, run ждёт человека, после решения тот же шаг исполняется заново с решением в контексте.
 
 | Шаг | Вид | Входы | Выход |
@@ -64,6 +80,7 @@ flowchart LR
 | verify | composite | | |
 | tests | agent `test` | spec, implementation | `tests` |
 | standards | deterministic `standards.check` | | `standards-check` |
+| checks | deterministic `project.checks` | | `checks` |
 | docs | agent `docs` | spec, implementation | `docs` |
 | telemetry | agent `telemetry` | spec, impact, implementation | `telemetry` |
 | review | agent `review` | spec, plan, implementation, tests, docs, telemetry | `review` |
@@ -88,18 +105,20 @@ flowchart LR
 
 | Агент | Роль | Возможности | Исходы |
 |---|---|---|---|
-| research | research | чтение репо¹, `jira.*`, `confluence.*` | ok |
-| requirements | research | чтение репо, `jira.*`, `confluence.*` | ok, needs_clarification |
+| research | research | чтение репо¹, `jira.*`, `confluence.*`, `figma.get` | ok |
+| requirements | research | чтение репо, `jira.*`, `confluence.*`, `figma.get` | ok, needs_clarification |
 | specification | research | `repo.read/list/search` | ok |
 | impact | research | чтение репо (в т.ч. `graph.impact`, `graph.neighbors`) | ok, needs_research |
 | plan | research | `repo.read/list/search` | ok, spec_infeasible |
-| implementation | implementation | чтение + `repo.write/edit`, `project.*` | ok |
+| implementation | implementation | чтение + `repo.write/edit`, `project.*`, `figma.get` | ok |
 | test | implementation | чтение + запись, `project.*` | ok, defects_found |
 | docs | implementation | чтение + запись | ok |
 | telemetry | implementation | чтение + запись | ok, spec_gap |
 | review | review | чтение, `project.*` | ok, fix_required, plan_wrong |
 | review-analysis | review | чтение, `knowledge.read` | ok, fix_required, spec_wrong, requirements_wrong, needs_clarification |
 | release-notes | research | чтение | ok |
+| onboard-mapper | research | чтение | ok |
+| knowledge-answerer | research | `knowledge.read`, `knowledge.search` | ok |
 
 ¹ чтение репо = `repo.read|list|search`, `git.log|diff|status`, `knowledge.read|search`,
 `graph.impact|neighbors`. Ни один агент не получает эффекты на внешние системы (комментарии, PR):
@@ -146,7 +165,7 @@ flowchart LR
 разрываются. Сбой суммаризатора —
 жёсткий trimming и событие `context.compaction_failed`, run продолжается; исчерпание квоты и ошибки
 авторизации паркуют run как обычно. Вручную — `jarvis context`, `jarvis compact`, `jarvis reset-context`
-([cli.md](cli.md#контекст-агента)).
+([cli.md](cli.md#jarvis-context-run)).
 
 ### Переопределение
 
@@ -192,15 +211,24 @@ steps:
 ## События
 
 Каждое действие — строка в `events` с `runId`, `stepId`, `iteration`, `payload`:
-`run.created|steal|cancel|applied|imported|gc`, `model.call|retry|error`, `tool.call|denied`,
-`effect.done|failed|verified|replayed|unresolved`, `approval.recorded|skipped|committed` (у
-`recorded` — `channel`: `cli` или `ui`), `loop.rerun` (повтор шага исчерпанной петли: `r` на карточке,
-кнопка `jarvis ui`), `card.open|closed` (карточка в терминале ждёт решения: так страница знает, пойдёт ли
-прогон дальше сразу),
-`interaction.opened|turn|resolved|rejected`, `review.submitted|classified|resolved`,
-`standards.checked`, `retrieval.knowledge`, `graph.update`, `security.redaction`,
-`context.pressure|trimmed|compacted|reset|tightened|compaction_failed|overflow`, `prepush.checked`,
-`mcp.discovered|unavailable`, `daemon.tick`. `jarvis status <run> --events n` показывает последние.
+- прогон: `run.created|state|lease|leaseLost|steal|recovered|interrupted|cancel|applied|imported|gc`;
+  `run.driver` (прогон ведёт страница `jarvis ui`: начат там или подхвачен, `adopted`), `run.resumedBy`
+  (страница запустила `jarvis resume`);
+- шаги: `step.start|finish|next|quick|error`, `workflow.loop|loopExhausted`, `loop.rerun` (повтор шага
+  исчерпанной петли: `r` на карточке, кнопка `jarvis ui`);
+- агент: `agent.start` (лимиты, выданное человеком, провенанс пакета знаний) `|finish|limit`;
+- модель: `model.call|progress|retry|error`, `model.failover` (вызов ушёл следующей модели роли: пул первой полон);
+- бюджет: `budget.grant` (человек добавил или сказал «закончить»);
+- инструменты и эффекты: `tool.call|denied`, `effect.done|failed|verified|replayed|unresolved`;
+- люди: `approval.recorded|skipped|committed` (у `recorded` — `channel`: `cli` или `ui`), `card.open|closed`
+  (карточка в терминале ждёт решения: так страница знает, пойдёт ли прогон дальше сразу),
+  `interaction.opened|turn|resolved|rejected`, `review.submitted|classified|resolved|markersRemoved`,
+  `workspace.humanEdit|scratchRemoved`;
+- знание и контекст: `knowledge.promoted`, `standards.checked`, `retrieval.knowledge`,
+  `graph.update|update_failed`, `context.pressure|trimmed|compacted|reset|tightened|compaction_failed|overflow|prefixChanged`;
+- прочее: `security.redaction|pathDenied`, `prepush.checked`, `mcp.discovered|unavailable`, `daemon.tick`.
+
+`jarvis status <run> --events n` показывает последние.
 Внешнего экспорта событий пока нет: схема `telemetry.export` и проверка egress есть, экспортёра — нет.
 
 Кроме журнала в базе есть `step.error` (необработанное исключение шага: сообщение и стек, урезанные), у `model.error` и
@@ -224,5 +252,5 @@ NDJSON-файлы `~/.jarvis/logs/jarvis-YYYY-MM-DD.ndjson` (каталог — 
 | `debug` | то же и тела: `model.request` — промпт **дельтой** (первый вызов шага целиком, дальше только новые сообщения; `messagesFrom` — откуда дельта, `rewrittenEarlier` — сколько прежних сообщений изменила компакция), `model.response` (текст, вызовы инструментов, usage, latency), `tool.result` (аргументы и результат) |
 
 `debug` содержит код и промпты проекта: лог лежит на той же машине, что база и артефакты, но не включай его в
-общих средах без надобности. Читает лог `jarvis logs` ([cli.md](cli.md#jarvis-logs-run---level-level---event-text---tail-n---since-age---full---path)),
+общих средах без надобности. Читает лог `jarvis logs` ([cli.md](cli.md#jarvis-logs-run---level-errorinfodebug---event-text---tail-n---since-age---full---path--f)),
 `jarvis doctor` показывает уровень, каталог и размер.

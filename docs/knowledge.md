@@ -80,7 +80,8 @@ agents: [research, specification]
 …
 ```
 
-Без front matter документ подходит любой задаче. Заголовки `#`/`##` делят документ на единицы индекса.
+Без front matter документ подходит любой задаче. Любой заголовок Markdown (`#`…`######`) начинает новую единицу
+индекса.
 
 ### Глоссарий
 
@@ -95,6 +96,15 @@ agents: [research, specification]
 
 Необязательная шестая колонка `определение` — что термин значит; её выводит `jarvis ask <термин>`.
 
+Термин можно добавить на странице Knowledge → Glossary в `jarvis ui`. Символы сначала сверяются с кодом без модели:
+- имя должно встречаться словом в отслеживаемом файле кода;
+- путь должен существовать;
+- пакет `@scope/pkg` должен быть в `package.json`.
+
+Не найденный символ форма просит подтвердить (Add anyway). Строка дописывается в таблицу в её колонках с сегодняшней
+датой, черновиком в рабочей копии, и действует со следующего прогона. Там же видны термины с проблемами: символа нет
+в коде, синоним у двух терминов ([ADR-0024](adr/0024-knowledge-in-web-ui.md) §4).
+
 Запрос «повторная регистрация заявки после отказа» расширяется до `restart onboarding`,
 `canRestartOnboarding`, `application`, `applications/` — детерминированно, с учётом словоформ (основа
 термина), и каждое расширение попадает в трассу результата.
@@ -104,9 +114,13 @@ agents: [research, specification]
 Для существующего репозитория `jarvis onboard` собирает факты (модули и их зависимости из графа,
 документация, тесты, стиль коммитов) и пишет `architecture.md` и `conventions.md` с front matter
 `tags: [architecture, generated]` / `[conventions, generated]` и маркером регенерации. Это заготовки только с
-проверяемыми фактами; смысл модулей и правила добавляет человек или `jarvis onboard --module <path>`: агент
-описывает один модуль с evidence, проверка сверяет цитаты с кодом, результат — кандидат со `paths` на `promote`. Подробности —
-[cli.md](cli.md#jarvis-onboard---dry-run---refresh---apply-config---no-graph).
+проверяемыми фактами; смысл модулей и правила добавляет человек или `jarvis onboard --module <path>` (модуль
+или папка внутри него; `--note` — что важно спросившему). Это прогон workflow `onboard-module`: агент
+`onboard-mapper` описывает модуль с цитатами, шаг `verify` без модели сверяет цитаты с файлами. Обобщения, которые
+цитата не доказывает, помечаются `[check: …]` — их человек проверяет до `promote`. Если не подтвердилось ничего,
+кандидата нет и прогон падает. То же — на странице Knowledge → Modules в `jarvis ui`
+([ADR-0024](adr/0024-knowledge-in-web-ui.md) §6). Подробности —
+[cli.md](cli.md#jarvis-onboard---dry-run---refresh---apply-config---no-graph---module-path---note-текст).
 
 ### Документация команды на месте: `knowledge.sources`
 
@@ -196,12 +210,17 @@ flowchart LR
 | UNSUPPORTED | нет ни адаптера, ни команд | run останавливается с `policy:` причиной |
 
 Адаптеры: TypeScript (`src/adapters/typescript`, ts-morph). Остальные стеки — BASIC. Как добавить —
-[extending.md](extending.md#адаптер-языка).
+[extending.md](extending.md#адаптер-языка-adr-0021).
 
 ## Кандидаты в знание (ADR-0020 §6)
 
-Агенты `review` и `review-analysis` предлагают `candidates` — правило, которое стоило бы
-зафиксировать как стандарт или документ. Они хранятся артефактами `candidate` и ждут человека:
-`jarvis candidates list`, `promote <id> [--id file-id]` (пишет файл в `.jarvis/standards/` или
-`.jarvis/knowledge/` и фиксирует решение), `reject <id>`. `human.review.knowledgePromotion: never`
-выключает предложения.
+Кандидатов предлагают агенты `review` и `review-analysis` (правило, которое стоило бы зафиксировать) и
+`onboard --module` (карта модуля). Они хранятся артефактами `candidate` и ждут человека. Виды:
+- `standard` — пишется как `severity: recommended`, `verification: semantic`;
+- `knowledge` — документ в `.jarvis/knowledge/`;
+- `skill-improvement` — `.jarvis/skills/<id>/IMPROVEMENT.md`.
+
+Команды: `jarvis candidates list|show`, `promote <имя> [--id file-id] [--replace]`, `reject <имя>`. Файл,
+сгенерированный Jarvis (с маркером), заменяется без вопросов; написанный человеком — только с `--replace`. То же
+решение — на странице Knowledge → Modules в `jarvis ui`. `human.review.knowledgePromotion` пока не действует:
+кандидаты сохраняются всегда.

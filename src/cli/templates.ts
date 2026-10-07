@@ -11,7 +11,7 @@ version: 1
 quotaPools:
   # corp-default:              # ADR-0018 §4
   #   window: { minutes: 20, kind: sliding }
-  #   limits: { outputTokens: 60000, requests: 300, concurrency: 2 }
+  #   limits: { outputTokens: 60000, requests: 300 }
   #   soft: 0.8
 
 models:

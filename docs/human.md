@@ -4,6 +4,24 @@
 run ждёт (`waitingFor`): **approval** (гейт), **clarification** (вопрос агента), **review**
 (замечания к коду), **conflict** (расхождение ручных правок). `jarvis threads` показывает открытые.
 
+Кроме тредов run ждёт решения ещё в двух случаях, оба — без треда:
+- **бюджет** (`waitingFor: budget`): кончился `budget.perRun|perStep` или лимит вызовов агента при `onLimit: ask`.
+  Решение — добавить (`enter` — половину лимита, `m` — другое число) или закончить шаг с тем, что есть (`f`,
+  результат помечается неполным);
+- **исчерпанная петля** (`waitingFor: loop`): поправить рабочую копию руками (`o` — открыть в редакторе, `s` —
+  шелл там) и `r` — запустить шаг снова.
+
+## Карточка и страница
+
+Run, остановившийся в терминале, показывает карточку решения: на гейте `enter` — прочитать документ целиком, `a` —
+принять, `c` / `e` — вернуть с правками (здесь же или в `$EDITOR`), `o` — открыть рабочую копию в редакторе, `q` —
+решить позже, `?` — справка. Отклонения в карточке нет — это `jarvis approve --reject`. `jarvis continue` (`c`)
+возвращает к карточке.
+
+То же решение можно принять на странице `jarvis ui` — той же функцией и с тем же актором. На одну версию — одно
+решение: второе отклоняется, а карточка, которая ждёт в терминале, видит решение со страницы и идёт дальше. Если
+карточки нет, run продолжает страница ([ADR-0023](adr/0023-editor-and-web-ui.md) §4, §6).
+
 ## Гейты
 
 Шаг `approval` ждёт решения по последней версии артефакта типа `artifactType`. Решение привязано к
@@ -16,8 +34,9 @@ jarvis approve <run> --reject --comment "…"          # run → FAILED
 jarvis approve <run> --commit                        # + .jarvis/approvals/<task>/<type>.json для CI
 ```
 
-`human.mode` задаёт профиль: `autonomous` (гейты по `human.gates`), `balanced` (по умолчанию),
-`strict`. `human.gates.<type>.required: false` проходит гейт молча с событием `approval.skipped`.
+`human.gates.<type>.required: false` проходит гейт молча с событием `approval.skipped`. `human.mode`
+(`autonomous`, `balanced`, `strict`) схема принимает, но пока он на поведение не влияет: гейты задаёт
+`human.gates`.
 
 ![work](assets/work.gif)
 
@@ -80,8 +99,8 @@ open ──analysis──▶ acknowledged ──implementation──▶ applied 
 
 Пока run ждёт, можно править файлы в его worktree. При `jarvis resume` они фиксируются как checkpoint
 `human edit` (`Jarvis-Kind: human-edit`) — не сбрасываются, попадают в diff и к агентам. Правка
-артефакта (spec и др.) — новая версия с unified diff и provenance «human». `human.manualEdits.enabled:
-false` возвращает строгий reset к checkpoint.
+артефакта (spec и др.) — новая версия с unified diff и provenance «human». `human.manualEdits.enabled` пока не
+действует: правки всегда фиксируются как checkpoint.
 
 ## Что видит человек
 

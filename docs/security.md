@@ -10,12 +10,17 @@ Jarvis рассчитан на закрытый контур: конфиденц
 | dataClass | Модели | Сеть инструментов/MCP |
 |---|---|---|
 | public | `egress: private` и `cloud` | none, intranet, internet |
-| internal | только `private` | none, intranet, internet (результат помечен как недоверенный) |
+| internal | только `private` | none, intranet, internet (пометка результата как недоверенного пока не сделана) |
 | confidential | только `private` | none, intranet |
 
-`egress` обязателен у каждой модели (схема не пропустит без него); сервер без `network` считается
-`internet`. Нарушения отсекаются роутером моделей и Tool Router до вызова; `jarvis doctor` печатает
-сводку политики. Для будущего экспорта телеметрии (`telemetry.export`) правило уже проверяется через `network` (`doctor`), сам экспортёр пока не реализован.
+`egress` обязателен у каждой модели (схема не пропустит без него); сервер без `network` получает сеть
+своего профиля (`atlassian`, `bitbucket` — `intranet`, `figma` — `internet`), а без профиля — `internet`. Нарушения отсекаются роутером моделей и Tool Router до вызова; `jarvis doctor` печатает
+сводку политики.
+
+Один MCP-сервер можно выпустить за пределы сети его `dataClass` только на чтение: `egressExceptions: [{ server,
+capabilities, reason }]` в `.jarvis/project.yaml` (и только там), `reason` — не короче 10 символов. Эффекты не
+выпускаются никогда. Каждый прогон и каждая страница `jarvis ui` об исключении предупреждают, у вызова в журнале —
+`egressException` (ADR-0016 §6). Для будущего экспорта телеметрии (`telemetry.export`) правило уже проверяется через `network` (`doctor`), сам экспортёр пока не реализован.
 
 ## Секреты (ADR-0010, ADR-0014 §1)
 
@@ -25,9 +30,12 @@ Jarvis рассчитан на закрытый контур: конфиденц
   контекст модели, артефакт или лог:
   - точные литералы из `secretEnv`, разрешённых `env:`/`keychain:` ссылок;
   - детекторы: PEM, AWS, GitHub, Slack, OpenAI, Google ключи, JWT, `Bearer …`, URL с basic-auth,
-    присваивания вида `password=…`, строки высокой энтропии; `security.secretPatterns` добавляет свои;
-  - `security.deniedPaths` — отказ **до чтения** файла (`.env`, `secrets/**`).
-- Замена — детерминированный плейсхолдер на run (одинаковый секрет → одинаковый плейсхолдер внутри run,
+    присваивания вида `password=…`, строки высокой энтропии в присваиваниях (пути, имена из кода, хеши и UUID
+    не трогаются); `security.secretPatterns` добавляет свои; значения переменных окружения с «секретными»
+    именами тоже маскируются;
+  - `security.deniedPaths` — отказ **до чтения** файла; встроенный список: `.env*`, `secrets/**`, `*.pem`,
+    `*.key`, `*.p12`, `*.pfx`, `id_rsa*`, `id_ed25519*`, `.ssh/**`, `.aws/**`, `.npmrc`, `.jarvis/credentials*`.
+- Замена — детерминированный плейсхолдер `[REDACTED:<тип>:<hash8>]` на run (одинаковый секрет → одинаковый плейсхолдер внутри run,
   другой — в другом run), событие `security.redaction` с типом детектора.
 
 ## Политика инструментов (ADR-0001 §9, ADR-0009 §6)
@@ -46,8 +54,8 @@ Tool Router решает перед каждым вызовом, по поряд
 
 ## Эффекты: ровно один раз (ADR-0002)
 
-Внешние действия (`jira.comment`, `jira.transition`, `confluence.create`, `bitbucket.pr.*`,
-`git.push`) идут через журнал:
+Внешние действия (`jira.comment`, `jira.transition`, `confluence.create`, `bitbucket.pr.create`,
+`bitbucket.pr.comment`, `git.push`) идут через журнал:
 
 ```
 intended(run, step, args, marker) → вызов → done(result)
@@ -55,14 +63,17 @@ intended(run, step, args, marker) → вызов → done(result)
                                                (маркер в тексте / статус / PR) → done | unresolved
 ```
 
-`unresolved` паркует run в `WAITING_HUMAN` с тредом `conflict` — человек решает, повторять ли.
+`unresolved` паркует run в `WAITING_HUMAN` (`waitingFor: effect`, событие `effect.unresolved`) — человек
+решает, повторять ли.
 Эффекты без способа проверки (`mcp.<server>.<tool>` без профиля) агентам по умолчанию не выдаются.
 
 ## Аренда и параллельность (ADR-0002 §5)
 
 Run исполняет один процесс: аренда с эпохой, heartbeat, fencing при записи checkpoint и эффектов —
 процесс с устаревшей эпохой не может ничего записать. `jarvis resume --steal` забирает аренду у
-мёртвого процесса с событием `run.steal`; daemon поднимает только run с истёкшей арендой.
+мёртвого процесса с событием `run.steal`. Daemon продолжает припаркованные run без живой аренды:
+`WAITING_BUDGET` — после `resumeAfter`, `WAITING_HUMAN` — когда решение уже записано; упавшие и прерванные не
+трогает.
 
 ## Workspace (ADR-0003)
 

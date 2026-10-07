@@ -5,19 +5,22 @@
 
 ## `jarvis ci <task>`
 
-Эквивалент `jarvis work` под профилем `ci` (`--profile <name>` меняет; профиль из `profiles:` только
-сужает): `interactive: false`, `workspace: { mode: cwd, allowWrites: false }`, `humanGate: artifact`,
-`mcp.deny: ["*.comment", "*.transition"]` по умолчанию из шаблона `jarvis init`.
+Эквивалент `jarvis work` под профилем `ci` (`--profile <name>` меняет): `interactive: false`, `workspace: { mode: cwd, allowWrites: false }`, `humanGate: artifact`,
+`mcp.deny: ["*.comment", "*.transition"]` по умолчанию из шаблона `jarvis init`. Профиль `ci` должен быть в
+`profiles:` (его создаёт `jarvis init`); без него команда завершается ошибкой.
 
 Результат job:
 
 | Ситуация | Код | Что остаётся |
 |---|---|---|
-| workflow дошёл до `DONE` | 0 | артефакты в БД runner'а, сводка |
+| run `COMPLETED` или `CANCELLED` | 0 | артефакты в БД runner'а, сводка |
 | run дошёл до гейта | 10 | markdown-сводка (шаги, ожидающие утверждения артефакты) в `--summary` / `$GITHUB_STEP_SUMMARY` / `$JARVIS_CI_SUMMARY`; `~/.jarvis/runs/<run>/approval-request.json` и `summary.md`; с `--bundle <file>` — бандл run |
-| исчерпан бюджет | 11 | то же, `resumeAfter` в сводке |
+| ждёт окна квоты или модели (`WAITING_BUDGET`) | 11 | то же: сводка, `approval-request.json`, бандл |
+| кончился `budget.perRun`/`perStep` или лимит агента | 10 | ждёт человека (`waitingFor: budget`) |
 | `humanGate: fail` и гейт достигнут, UNSUPPORTED стек, запрет политики | 12 | причина `policy: …` |
 | ошибка | 1 | |
+| аренда потеряна | 13 | |
+| остановлен Ctrl-C (`SUSPENDED`) | 130 | |
 
 Пример GitHub Actions:
 
@@ -43,7 +46,7 @@ jarvis import run.jarvis.json.gz
 ```
 
 Один gzipped JSON: строка run, шаги и checkpoints, артефакты с блобами, approvals, эффекты, треды с
-сообщениями, события, usage и патч workspace относительно базового коммита. `import` на другой
+сообщениями, события и патч workspace относительно базового коммита. `import` на другой
 машине воссоздаёт run с теми же id (дубликат отклоняется), worktree от базового коммита с наложенным
 патчем — и дальше обычные `jarvis status | approve | attach | resume`.
 

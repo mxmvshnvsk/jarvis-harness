@@ -9,27 +9,30 @@
 | env | `JARVIS_*` | точечные переопределения |
 | cli | `--profile`, `--cwd`, опции команд | |
 
-Приоритет: **cli → env → project → user → defaults**. Профиль (`--profile ci` или `JARVIS_PROFILE`)
-накладывается после слияния и может только *сужать*: отключать интерактив, запрещать возможности,
-переводить workspace в `cwd`, понижать бюджеты. `jarvis config show --sources` показывает источник
-каждого значения.
+Приоритет: **cli → env → project → user → defaults**. `dataClass` переменная или флаг может только повысить:
+понижение относительно файлов — ошибка конфигурации. Профиль (`--profile ci` или `JARVIS_PROFILE`) накладывается
+после слияния. Расширять он не может `dataClass` (только повысить), `workspace.allowWrites` (нельзя включить
+запрещённое) и `budget` (только понизить) — такая попытка — ошибка; `interactive`, `workspace.mode`, `humanGate`,
+запреты инструментов и MCP профиль задаёт как есть. `jarvis config show --sources` показывает источник каждого
+значения.
 
-Схемы строгие: неизвестный ключ — ошибка. Секреты в YAML запрещены: ключи, похожие на секрет (`token`,
-`password`, `*_KEY` …), принимают только ссылки `env:VAR` или `keychain:ID`.
+Схемы строгие: неизвестный ключ — ошибка. Секреты в YAML запрещены: `auth.token`, а также значения `env`
+stdio-серверов MCP и `models.<id>.headers` с «секретными» именами (`*TOKEN*`, `*SECRET*`, `*PASSWORD*`,
+`*API_KEY*`, `*PRIVATE*`, `*CREDENTIAL*`) принимают только ссылки `env:VAR` или `keychain:ID`.
 
 ## `~/.jarvis/config.yaml`
 
 ```yaml
 version: 1
 actor:
-  id: me@corp.local            # иначе JARVIS_ACTOR, иначе git config user.email (ADR-0006)
+  id: me@corp.local            # JARVIS_ACTOR важнее; без обоих — git config user.email (ADR-0006)
   display: Maxim
 
 quotaPools:                    # ADR-0018 §4
   corp-default:
     window: { minutes: 20, kind: sliding }   # sliding | fixed
-    limits: { outputTokens: 60000, inputTokens: 400000, requests: 300, concurrency: 2 }
-    soft: 0.8                  # доля окна, после которой новые вызовы ждут
+    limits: { outputTokens: 60000, inputTokens: 400000, requests: 300 }
+    soft: 0.8                  # доля окна, после которой вызовы моделей пула идут по одному
     unlimited:                 # часы без лимитов на платформе: вызовы идут без проверки
       - { from: "22:00", to: "07:00" }   # через полночь — ок
       - { days: [sat, sun] }             # дни целиком; можно и дни, и часы в одном пункте
@@ -38,7 +41,7 @@ quotaPools:                    # ADR-0018 §4
 
 models:                        # ADR-0007, ADR-0017 §2
   deepseek-flash:
-    provider: openai-compatible   # openai-compatible | anthropic | openai | ollama
+    provider: openai-compatible   # openai-compatible (нужен baseUrl) | openai | ollama (адрес по умолчанию); anthropic — адаптера пока нет
     baseUrl: https://llm.corp.local/v1
     model: deepseek-flash
     auth: { type: bearer, token: keychain:corp-llm }   # none | bearer | header{header,token}
@@ -73,23 +76,18 @@ telemetry:                     # ЗАРЕЗЕРВИРОВАНО: политик�
   export: { enabled: false, url: https://otel.corp.local, network: intranet, payloads: false, maxPayloadBytes: 4096 }
 ```
 
-`workspace.cache` — зависимости, которые переживают worktree. Раньше каждый прогон в своём worktree ставил
-зависимости с нуля, и до первого шага проходили минуты. После `setup` пути из `paths` копируются в
-`~/.jarvis/cache/deps/<проект>/<ключ>`, где ключ — хэш файлов `key` (lockfile). Следующий worktree с тем же
-lockfile получает их до `setup`, и `setup` почти ничего не делает. Копия — клон copy-on-write, где файловая
-система умеет (APFS — `cp -c`, btrfs/xfs — `--reflink`), поэтому там она не стоит ни времени, ни места. Хранятся
-три последних ключа. Сломанный кэш стоит только времени полного `setup`. Строка прогресса пишет
-`◌ dependencies restored node_modules (key …)` или `kept … for the next run`.
-
 `quotaPools` — окно и лимиты пула, общие для всех прогонов на моделях с этим `quotaPool`. Перед вызовом jarvis
 проверяет, что вызов поместится в окно (admission). Вывод резервируется не целым `maxOutput`, а типичным ответом
 такого же вызова: 95-й перцентиль последних ответов того же агента (ход с инструментами и итоговый ответ —
-отдельно), не меньше 2000 и не больше `maxOutput`; без истории — 8000 или `maxOutput`, если он меньше. Ответ
+отдельно; без агента — той же роли), не меньше 2000 и не больше `maxOutput`; пока таких ответов меньше 5 — 8000
+или `maxOutput`, если он меньше. Ответ
 длиннее резерва превышает окно не больше чем на этот один ответ; сам запрос по-прежнему разрешает весь
 `maxOutput`. В пилоте резерв целым `maxOutput` (16k) при лимите 30k на окно останавливал всё уже после 14k
 реально потраченных, хотя ответы агентов были около 250 токенов. Не поместился вызов — прогон ставится на паузу
 (`WAITING_BUDGET`) до освобождения окна и продолжается сам; в `jarvis ui` он виден как «paused, not failed» с
-временем продолжения и кнопкой **Resume now**.
+временем продолжения и кнопкой **Resume now**. Параллельность вызовов одной модели задаёт
+`models.<id>.maxConcurrency` (по умолчанию 2); с `soft` и выше — по одному. `limits.concurrency` схема принимает, но
+пока не применяет.
 
 `quotaPools.<pool>.unlimited` — часы, когда платформа пул не ограничивает (ночь, выходные). Пункты, которые
 стыкуются, работают как один: будние ночи 22–07 и выходные целиком дают безлимит с пятницы 22:00 до понедельника
@@ -102,8 +100,8 @@ then» в причине паузы).
 (`budget.perStep`, `budget.perRun`) для вызовов этого пула растут в `unlimitedScale` раз (по умолчанию в 5). Совсем
 лимиты не снимаются: зациклившийся агент всё равно остановится. Лимиты считаются заново при каждой проверке, так
 что шаг, начатый ночью, утром снова держится дневных лимитов. Выданное человеком (`+25 tool calls`)
-прибавляется сверху без умножения. Пул вообще без лимитов (`limits` пустые) лимиты агентов не трогает. Чтобы и на
-нём они росли всегда, объяви ему безлимитными все дни: `unlimited: [{ days: [mon, tue, wed, thu, fri, sat, sun] }]`. `jarvis models` показывает у окна пула `unlimited until …` или `unlimited from …`.
+прибавляется сверху без умножения. Пул без `unlimited` лимиты агентов не трогает, даже если сам он не ограничен
+(`limits` пустые). Чтобы они росли всегда, объяви ему безлимитными все дни: `unlimited: [{ days: [mon, tue, wed, thu, fri, sat, sun] }]`. `jarvis models` показывает у окна пула `unlimited until …` или `unlimited from …`.
 
 Модели роли (`roles.<role>.models`) — порядок предпочтения, и следующие подхватывают вызов, пока пул первой полон.
 Если вызов не помещается в пул своей модели, шлюз берёт следующую модель той же роли в **другом** пуле, если она:
@@ -135,7 +133,8 @@ roles:
 Роли, которые используют встроенные агенты: `research` (research, requirements, specification, impact,
 plan, release-notes, onboard-mapper, knowledge-answerer), `implementation` (implementation, test, docs, telemetry), `review` (review,
 review-analysis); `compaction` — суммаризатор контекста при компакции (ADR-0013); без неё суммаризирует
-модель самого агента. Роутер выбирает первую модель роли, которая
+модель самого агента. Сводка получает до 8000 токенов вывода (меньше, если `maxOutput` модели меньше;
+`roles.compaction.maxOutput` на неё не действует) и считается вызовом модели агента. Роутер выбирает первую модель роли, которая
 удовлетворяет требованиям агента (tools, structured output) и правилу egress для `dataClass` проекта.
 
 ## `.jarvis/project.yaml`
@@ -202,6 +201,7 @@ knowledge:                     # ADR-0020 §3, §5; ADR-0015
   sources:                     # документация команды на месте, без копий в .jarvis/ (см. knowledge.md)
     - path: documentation      # каталог или файл от корня репозитория
       include: ["**/*.md"]     # по умолчанию
+      exclude: ["drafts/**"]   # не брать; по умолчанию ничего
       skills: ["SKILL_*.md"]   # эти документы — скиллы (id: SKILL_foo-bar.md → foo-bar)
       scopes:                  # документ (glob от path) → пути кода, к которым он относится
         "billing/**": ["packages/lib/src/billing/**"]
@@ -237,7 +237,8 @@ mcp:
       url: https://mcp.corp.local/atlassian
       auth: { type: bearer, token: keychain:atlassian }
       network: intranet        # none | intranet | internet; по умолчанию — из профиля, иначе internet
-      profile: atlassian       # atlassian | bitbucket | { base: atlassian, map: { … } }
+      profile: atlassian       # atlassian | bitbucket | figma | { base: atlassian, map: { … } }
+      timeoutMs: 60000         # на один вызов инструмента (по умолчанию 60 с)
       allow: [jira.get, jira.search, jira.comment]   # пусто = все возможности профиля
       deny: [jira.transition]
     bitbucket:
@@ -263,15 +264,24 @@ profiles:                      # ADR-0009 §1 — только сужение
     budget: { perRun: { outputTokens: 100000 } }
 ```
 
+`workspace.cache` (только в `.jarvis/project.yaml`) — зависимости, которые переживают worktree. Раньше каждый прогон в своём worktree ставил
+зависимости с нуля, и до первого шага проходили минуты. После `setup` пути из `paths` копируются в
+`~/.jarvis/cache/deps/<проект>/<ключ>`, где ключ — хэш файлов `key` (lockfile). Следующий worktree с тем же
+lockfile получает их до `setup`, и `setup` почти ничего не делает. Копия — клон copy-on-write, где файловая
+система умеет (APFS — `cp -c`, btrfs/xfs — `--reflink`), поэтому там она не стоит ни времени, ни места. Хранятся
+три последних ключа. Сломанный кэш стоит только времени полного `setup`. Строка прогресса пишет
+`◌ dependencies restored node_modules (key …)` или `kept … for the next run`.
+
 ### Политика egress (ADR-0016)
 
 | dataClass | Модели | Инструменты / MCP |
 |---|---|---|
 | public | private, cloud | none, intranet, internet |
-| internal | только private | none, intranet, internet (результат помечается как недоверенный, ADR-0016 §4) |
+| internal | только private | none, intranet, internet (пометка результата как недоверенного, ADR-0016 §4, пока не сделана) |
 | confidential | только private | none, intranet |
 
-Модель без `egress` не проходит схему; сервер без `network` считается `internet`. Нарушение — отказ
+Модель без `egress` не проходит схему; сервер без `network` получает сеть своего профиля, а без профиля —
+`internet`. Нарушение — отказ
 роутера до вызова, событие `tool.denied`.
 
 Один сервер можно выпустить за пределы `dataClass` только на чтение — исключением в `.jarvis/project.yaml`
@@ -280,7 +290,8 @@ profiles:                      # ADR-0009 §1 — только сужение
 ```yaml
 egressExceptions:
   - server: figma
-    reason: "макеты задач; согласовано с …"
+    capabilities: ["figma.*"]  # по умолчанию ["*"]; выпускаются только чтения, эффекты — никогда
+    reason: "макеты задач; согласовано с …"   # не короче 10 символов
 ```
 
 ### Лимиты агентов (`agents`)
@@ -291,7 +302,7 @@ egressExceptions:
 
 ```yaml
 agents:
-  research:     { limits: { maxToolCalls: 80 } }      # по умолчанию 40 / 60
+  research:     { limits: { maxToolCalls: 80, maxModelCalls: 100 }, onLimit: ask }   # по умолчанию 40 / 60
   specification: { limits: { maxToolCalls: 30 } }    # 20 / 60
 ```
 
@@ -306,7 +317,7 @@ agents:
 
 Упёршись в лимит инструментов, агент получает «бюджет исчерпан, заканчивай с тем, что есть» и
 следующий ответ даёт без инструментов; на лимите вызовов модели цикл обрывается. Шаг не падает: документ
-финализируется как обычно, но помечается неполным — `budgetExhausted: tools|model` в происхождении
+финализируется как обычно, но помечается неполным — `budgetExhausted: tools|model|budget` в происхождении
 артефакта и в событии `agent.finish`. Это видно в строке шага («tool limit reached, result may be
 incomplete»), в итоге прогона и в `jarvis show` («⚠ incomplete»), а следующий агент получает такой вход
 с пометкой `INCOMPLETE` — чтобы не принимать его за полный.
@@ -345,8 +356,11 @@ agents:
 
 Зарезервированные: `JARVIS_HOME`, `JARVIS_CONFIG`, `JARVIS_PROFILE`, `JARVIS_ACTOR`,
 `JARVIS_KEYCHAIN_BACKEND` и переменные технического лога `JARVIS_LOG`, `JARVIS_LOG_DIR`,
-`JARVIS_LOG_KEEP_DAYS`, `JARVIS_LOG_MAX_FIELD` (см. [workflows.md](workflows.md#технический-лог)) и
-`JARVIS_PROGRESS=off` — без живой строки прогресса в терминале.
+`JARVIS_LOG_KEEP_DAYS`, `JARVIS_LOG_MAX_FIELD` (см. [workflows.md](workflows.md#технический-лог)),
+`JARVIS_PROGRESS=off` — без живой строки прогресса в терминале, переменные терминала `JARVIS_INTERACTIVE`,
+`JARVIS_NOTIFY`, `JARVIS_NOTIFY_AFTER`, `JARVIS_TITLE`, `JARVIS_TAB_PROGRESS`, `JARVIS_MARKS`, `JARVIS_PAGER`,
+`JARVIS_ACCESSIBLE`, `JARVIS_ASCII`, `JARVIS_EDITOR`, `JARVIS_CARD_POLL_MS` (см. [cli.md](cli.md)) и выставляемые
+самим Jarvis `JARVIS_RUN`, `JARVIS_SHELL*`. Они конфигурацию не переопределяют.
 
 Остальные `JARVIS_<PATH>` переопределяют конфигурацию: `__` разделяет сегменты пути, сегменты
 сопоставляются с ключами без учёта регистра, `_` и `-`:

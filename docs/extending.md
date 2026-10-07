@@ -36,9 +36,12 @@ interface LanguageAdapter {
 }
 ```
 
-`ProjectGraphExtractor.extract(file, content)` возвращает `FileFacts` (узлы `module | symbol | test
-| …`, рёбра `imports | calls | tests | …`) — чистую функцию от содержимого файла, поэтому результат
-кэшируется по хешу и граф детерминирован; `version` экстрактора — часть ключа кэша.
+`ProjectGraphExtractor.extract(file, content)` возвращает `FileFacts` (узлы `Module | Symbol | Type | Function |
+Endpoint | DataModel | Test | Event | Artifact`, рёбра `DEPENDS_ON | CALLS | REFERENCES | IMPLEMENTS | EXPOSES |
+PERSISTS | EMITS | TESTED_BY`) — чистую функцию от содержимого файла, поэтому результат кэшируется по хешу и граф
+детерминирован; `version` экстрактора — часть ключа кэша. `extensions` — какие файлы он берёт. Разрешение,
+которое по одному файлу не сделать (алиасы, пакеты монорепо), — необязательный `createResolver(workspace, files)`
+со своим `resolverVersion` (часть ключа снимка).
 
 Регистрация — `capabilities.register(new MyAdapter())` в `src/app/runtime.ts` (образец —
 `src/adapters/typescript/`). Адаптер даёт проекту уровень FULL. Внешние адаптеры (например, C# через
@@ -49,35 +52,40 @@ Roslyn-процесс) по плану ADR-0021 §8 — отдельные па�
 
 ## Инструменты и возможности
 
-`ToolProvider` (`src/tools/types.ts`) отдаёт список `Capability` с полями `name`, `description`,
-`inputSchema`, `network: none|intranet|internet`, `access: read|write|destructive`, `effect`
-(с `verify` для проверяемых) и `invoke`. Регистрация — `registry.register(provider)` в runtime.
+`ToolProvider` (`src/tools/types.ts`) — `{ name, capabilities() }`; `Capability`: `name`, `description`,
+`parameters` (JSON Schema аргументов), `network: none|intranet|internet`, `access: read|write|destructive`,
+`effect` (с `verify` для проверяемых), `handler(args, ctx)` и необязательный `server` (MCP-сервер за ней). Регистрация — `registry.register(provider)` в runtime.
 Локальные инструменты — `src/tools/local/provider.ts`; инструменты графа — `src/knowledge/graph`;
 MCP — `src/mcp/provider.ts`.
 
 Детерминированные шаги workflow (`tool: <name>`) находят либо встроенную функцию
-(`src/orchestration/tools/builtin.ts`: `artifact.write`, `project.discover`, `standards.check`,
-`noop`), либо любую возможность реестра (`project.tests`, `code.diagnostics`).
+(`src/orchestration/tools/builtin.ts`: `artifact.write`, `project.discover`, `design.collect`, `standards.check`,
+`project.checks`, `impact.quick`, `onboard.verify`, `noop`, `fail`), либо любую возможность реестра
+(`project.tests`, `code.diagnostics`).
 
 ## Профили MCP
 
-`src/mcp/profiles/<name>.ts` — отображение инструментов сервера на возможности (`ProfileCapability`):
-`{ tools: [кандидаты имён на сервере], description, access, effect, parameters, args(a) → аргументы
-сервера, verify? }`.
-Эффект обязан уметь проверить себя после resume (маркер в тексте, чтение статуса, поиск PR).
-Зарегистрировать в `src/mcp/profiles/index.ts`.
+`src/mcp/profiles/<name>.ts` — профиль `{ name, version, network, map }`, где `map` отображает инструменты
+сервера на возможности (`ProfileCapability`): `{ tools: [кандидаты имён на сервере], description, access, effect,
+parameters, args(a) → аргументы сервера, markerArg?, verify?, enrich?, cacheMs?, retryAfterSeconds? }`.
+Эффект обязан уметь проверить себя после resume (маркер в тексте, чтение статуса, поиск PR). Зарегистрировать —
+добавить в `BUILTIN_PROFILES` в `src/mcp/profiles/index.ts`. Без кода: `profile: { base, map }` в конфигурации
+сервера добавляет к встроенному профилю только чистые чтения.
 
 ## Агенты
 
-`AgentDefinition` (`src/agents/definition.ts`): `id`, `role`, `instructions`, `capabilities`
-(шаблоны вроде `project.*`), `requires`, `output: { type, schema, outcomes }`, `limits`. Схема
-результата — zod в `src/agents/builtin/schemas.ts`; поле `outcome` обязано быть в `outcomes`, иначе
-движок отвергнет результат. Добавить в список `src/agents/builtin/index.ts` и сослаться из workflow.
+`AgentDefinition` (`src/agents/definition.ts`): `id`, `role`, `description`, `instructions`, `capabilities`
+(шаблоны вроде `project.*`), `requires`, `output: { type, schema, outcomes }`, `limits` (по умолчанию 40 вызовов
+инструментов, 60 вызовов модели, checkpoint каждые 5), `contextInputs` (какие входы — целиком в контекст).
+Схема результата — zod в `src/agents/builtin/schemas.ts`; поле `outcome` обязано быть в `outcomes`, иначе
+движок отвергнет результат. Добавить в `BUILTIN_AGENTS` в `src/agents/builtin/index.ts` и сослаться из workflow;
+лимиты проект меняет через `agents.<id>.limits` и `onLimit`.
 
 ## Провайдеры моделей
 
-`ProviderAdapter` (`src/models/types.ts`) — `chat(request) → response` с usage и поддержкой
-инструментов/структурного вывода. Регистрация в `src/models/providers/index.ts`. Нативный Anthropic
+`ProviderAdapter` (`src/models/types.ts`) — `{ name, call(request, model, options) → ProviderResult }` с usage и
+поддержкой инструментов/структурного вывода. Регистрация — в `defaultAdapters()` (`src/models/providers/index.ts`)
+по ключу провайдера: `openai-compatible`, `openai`, `ollama`; `anthropic` пока без адаптера. Нативный Anthropic
 адаптер — в планах; сейчас всё, что говорит на OpenAI chat-completions, работает через
 `openai-compatible`.
 

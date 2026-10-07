@@ -14,7 +14,7 @@ evals/
       fixture/            # репозиторий-образец (без .git; инициализируется при прогоне)
       cassette/           # записанные ответы модели (режим record → replay)
   results/<date>-<suite>.json
-  baselines/<suite>.json
+  baseline/<suite>.json
 ```
 
 ```yaml
@@ -57,7 +57,7 @@ jarvis evals baseline regressions && jarvis evals diff regressions
 ```sh
 jarvis evals run --suite pilot --mode record            # живые модели, ответы пишутся в кассету
 jarvis evals run --suite pilot                          # replay — детерминированно, без сети
-jarvis evals run --suite pilot --mode live --variant roles.implementation.models=[qwen-coder]
+jarvis evals run --suite pilot --mode live --variant knowledge.maxSkills=3   # значение: строка, число, true/false
 jarvis evals run --suite pilot --mode replay --out evals/results/manual.json
 ```
 
@@ -88,8 +88,9 @@ jarvis evals baseline pilot                   # зафиксировать по�
 jarvis evals diff pilot --tolerance 0.05      # ненулевой код при падении больше 5 %
 ```
 
-`diff` сравнивает `successRate`, `successPer10k` и средние recall по кейсам; удобно в CI после
-изменения промптов или навыков.
+`diff` сравнивает `successRate`, `meanFileRecall`, `meanAcceptanceCoverage` и `successPer10k`; допуск —
+`max(tolerance·|baseline|, tolerance)`. `evals run` выходит с кодом 1, если хоть один кейс не успешен. Удобно в CI
+после изменения промптов или навыков.
 
 ## Кейс из реального run
 
@@ -97,7 +98,8 @@ jarvis evals diff pilot --tolerance 0.05      # ненулевой код при
 jarvis evals run-to-case <run> --suite pilot --id onboarding-restart
 ```
 
-Берёт fixture `git archive` базового коммита run, gold — из версий spec/impact/research, которые
-человек утвердил или правил (файлы из impact, acceptance из spec, источники из research), тестовую
+Берёт fixture `git archive` базового коммита run; gold: `files` — файлы, которые run изменил (git diff),
+`acceptance` — из `requirements[].acceptance` в spec, обязательные источники — только из версий spec/impact/research,
+которые правил человек; id по умолчанию — slug задачи; тестовую
 команду из `tools.local.test|tests|check`; записывает `source` для трассируемости. `--no-fixture` —
 только `case.yaml`. Кассету для replay нужно записать отдельным `--mode record`.
