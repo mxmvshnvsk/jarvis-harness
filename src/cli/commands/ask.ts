@@ -44,6 +44,7 @@ export async function runAsk(ctx: CliContext, words: readonly string[], options:
         evidence: sources,
         allowGeneral: options.general === true,
         env: ctx.env,
+        ...(retrieval.expansions.length > 0 ? { expansions: retrieval.expansions } : {}),
       }).finally(() => progress?.stop());
     const verified = answered?.verified;
     const nothing = terms.length === 0 && sources.length === 0 && !verified?.general;

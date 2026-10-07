@@ -42,6 +42,7 @@ import type { Runtime } from "../app/runtime.ts";
 import { type OpenIn, reviewFiles } from "../cli/checkout.ts";
 import type { Actor } from "../core/domain/actor.ts";
 import { isTerminal, type Run } from "../core/domain/run.ts";
+import { answerFromKnowledge, plan } from "../knowledge/ask.ts";
 import { loadKnowledgeDocs } from "../knowledge/resolver.ts";
 import { loadGlossary } from "../knowledge/retrieval/glossary.ts";
 import type { RetrievalResult } from "../knowledge/retrieval/retriever.ts";
@@ -55,6 +56,7 @@ import type { LocalWorkflowEngine } from "../orchestration/runtime.ts";
 import { egressNotices } from "../security/policy/egress.ts";
 import { shortRunId } from "../storage/runStore.ts";
 import { git } from "../tools/local/exec.ts";
+import { type AskView, askContent, askOfRun, recentAsks } from "./ask.ts";
 import { SCRIPT, STYLE } from "./assets.ts";
 import { type DiffFile, type Html, html, parseDiff } from "./html.ts";
 import {
@@ -611,6 +613,7 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
       return `${u.pathname}${u.search}`;
     };
     if (at === "/knowledge/glossary") return glossaryPost(r, form);
+    if (at === "/knowledge/ask") return askPost(r, form);
     if (at === "/knowledge/modules/research") {
       if (!options.launcher) return notFound(r, "Starting research is off here.");
       const tree = await treeOf();
@@ -847,6 +850,57 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
       }
       return knowledgePage(r, "Knowledge · skills", content, r.url.pathname + r.url.search);
     }
+    if (at === "/knowledge/ask") {
+      const ref = q("run");
+      const found = ref ? runtime.runs.resolve(ref) : undefined;
+      const run = found?.workflow === "ask" ? found : undefined;
+      const question = (q("q") ?? "").trim().slice(0, 500);
+      let current: AskView | undefined;
+      let error: string | undefined;
+      if (run) current = askOfRun(runtime, roots(), run);
+      else if (question) {
+        // Sources only: the search without a model, at once, no run
+        try {
+          const p = await plan(runtime, roots(), question, 8);
+          current = {
+            question,
+            general: false,
+            modelCalls: 0,
+            terms: p.terms,
+            sources: p.retrieval.evidence.map((e) => ({
+              ref: e.ref,
+              kind: e.kind,
+              title: e.title,
+              ...(e.snippet ? { snippet: e.snippet.replace(/\s+/g, " ").slice(0, 300) } : {}),
+              path: e.retrievalPath.map((x) => `${x.index}#${x.rank}`).join(","),
+            })),
+            ...(p.retrieval.expansions.length > 0 ? { expansions: p.retrieval.expansions } : {}),
+          };
+        } catch (e) {
+          error = `The search failed: ${(e as Error)?.message ?? String(e)}`;
+        }
+      } else if (ref) error = `No question ${ref} here.`;
+      const content = askContent(
+        {
+          counts,
+          ...(current ? { current } : {}),
+          recent: recentAsks(runtime, roots()),
+          form: {
+            q: current?.question ?? question,
+            mode: run || !question ? "answer" : q("mode") === "sources" ? "sources" : "answer",
+            general: current?.general ?? false,
+          },
+          ...(error ? { error } : {}),
+        },
+        actions,
+      );
+      return knowledgePage(
+        r,
+        current ? `Ask · ${current.question.slice(0, 60)}` : "Knowledge · ask",
+        content,
+        "/knowledge/ask",
+      );
+    }
     if (at === "/knowledge/glossary") {
       const glossary = await glossaryView();
       const term = q("term");
@@ -928,6 +982,53 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
     }
     glossaryCache = undefined;
     return redirect(r, `/knowledge/glossary?term=${encodeURIComponent(values.term)}&notice=term-added`);
+  };
+
+  /**
+   * Ask: the search now, then the answering run in this process, in the background; the page goes to the
+   * run as soon as it exists and follows it there (its sources are on the page before the model answers).
+   */
+  const askPost = async (r: Request, form: URLSearchParams): Promise<void> => {
+    const question = (form.get("q") ?? "").trim().slice(0, 500);
+    if (!question) return redirect(r, "/knowledge/ask");
+    const general = form.get("general") === "1";
+    const sourcesOnly = `/knowledge/ask?q=${encodeURIComponent(question)}&mode=sources`;
+    if (form.get("mode") === "sources") return redirect(r, sourcesOnly);
+    const dir = root as string;
+    const p = await plan(runtime, roots(), question, 8);
+    // the model only when it can add something: sources to read, or general knowledge asked for (as the CLI)
+    if (p.retrieval.evidence.length === 0 && !general) return redirect(r, sourcesOnly);
+    let started: (id: string) => void = () => {};
+    const created = new Promise<string>((resolve) => {
+      started = resolve;
+    });
+    const job = answerFromKnowledge(runtime, {
+      root: dir,
+      roots: roots(),
+      question,
+      evidence: p.retrieval.evidence,
+      allowGeneral: general,
+      env: process.env,
+      ...(p.retrieval.expansions.length > 0 ? { expansions: p.retrieval.expansions } : {}),
+      onRun: (id) => started(id),
+    });
+    job.catch((error) =>
+      runtime.log.error("ui.ask", { message: (error as Error)?.message ?? String(error) }),
+    );
+    const first = await Promise.race([created, job.then((x) => x.runId || `!${x.problem ?? "no run"}`)]);
+    if (first.startsWith("!")) {
+      const content = askContent(
+        {
+          counts: countsOf(),
+          recent: recentAsks(runtime, roots()),
+          form: { q: question, mode: "answer", general },
+          error: first.slice(1),
+        },
+        actions,
+      );
+      return knowledgePage(r, "Knowledge · ask", content, "/knowledge/ask");
+    }
+    return redirect(r, `/knowledge/ask?run=${encodeURIComponent(first.replace(/^run_/, "").slice(0, 8))}`);
   };
 
   /** "New task": the CLI started in the background, driven by the page (src/ui/launcher.ts). */

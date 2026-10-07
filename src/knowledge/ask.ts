@@ -116,6 +116,10 @@ export async function answerFromKnowledge(
     evidence: readonly Evidence[];
     allowGeneral: boolean;
     env: NodeJS.ProcessEnv;
+    /** Glossary expansions of the question's words, kept with the run for the page. */
+    expansions?: RetrievalResult["expansions"];
+    /** The run exists: its id, before the model is asked (the page follows it from here). */
+    onRun?: (runId: string) => void;
   },
 ): Promise<AnswerResult> {
   const resolved = await resolveActor(runtime.loaded.config, options.env, options.root);
@@ -146,8 +150,26 @@ export async function answerFromKnowledge(
     kind: "run.created",
     runId: run.id,
     actor: `${resolved.actor.kind}:${resolved.actor.id}`,
-    payload: { task: options.question, workflow: "ask", trigger: "ask" },
+    payload: {
+      task: options.question,
+      workflow: "ask",
+      trigger: "ask",
+      // what the model was given, so a page shows a past question as it was asked
+      ask: {
+        question: options.question,
+        general: options.allowGeneral,
+        sources: options.evidence.map((e) => ({
+          ref: e.ref,
+          kind: e.kind,
+          title: e.title,
+          ...(e.snippet ? { snippet: e.snippet.replace(/\s+/g, " ").slice(0, 300) } : {}),
+          path: e.retrievalPath.map((p) => `${p.index}#${p.rank}`).join(","),
+        })),
+        ...(options.expansions?.length ? { expansions: options.expansions } : {}),
+      },
+    },
   });
+  options.onRun?.(run.id);
   const result = await createEngine(runtime).execute(run.id, { owner: leaseOwner("cli"), steal: false });
   const artifact = runtime.artifacts.listLatest(run.id, "answer").at(-1);
   if (result.run.state !== "COMPLETED" || !artifact)
@@ -170,4 +192,32 @@ export async function answerFromKnowledge(
           : undefined),
     ),
   };
+}
+
+/** The answer of a finished ask run, checked again against the sources as they are now. */
+export function verifiedOf(
+  runtime: Runtime,
+  roots: KnowledgeRoots,
+  runId: string,
+): VerifiedAnswer | undefined {
+  const artifact = runtime.artifacts.listLatest(runId, "answer").at(-1);
+  if (!artifact) return undefined;
+  let doc: AnswerDoc;
+  try {
+    doc = JSON.parse(runtime.artifacts.text(artifact)) as AnswerDoc;
+  } catch {
+    return undefined;
+  }
+  return verifyAnswer(
+    {
+      found: doc.found === true,
+      answer: doc.answer ?? "",
+      citations: doc.citations ?? [],
+      gaps: doc.gaps ?? [],
+      ...(doc.general ? { general: doc.general } : {}),
+    },
+    (ref) =>
+      readByRef(roots, ref) ??
+      (ref.startsWith("knowledge:") && !ref.endsWith(".md") ? readByRef(roots, `${ref}.md`) : undefined),
+  );
 }

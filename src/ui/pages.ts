@@ -289,13 +289,13 @@ function decisionText(card: ApprovalCard): string {
  * A running clock: the server's value, then the page counts on every second (src/ui/assets.ts) — the
  * value came only with a refresh and jumped 15:27 → 15:30 → 15:32 (pilot).
  */
-function ticking(ms: number): Html {
+export function ticking(ms: number): Html {
   const at = Math.max(0, Math.round(ms));
   return html`<span data-ms="${String(at)}">${clock(at)}</span>`;
 }
 
 /** `model call 12, waiting 0:21, receiving ~1.1k tok`: what the step's agent does now. */
-function callText(a: Activity): Html {
+export function callText(a: Activity): Html {
   const step = a.step;
   if (!step) return html`starting…`;
   // the tools of the last answer still run: the model is not asked yet

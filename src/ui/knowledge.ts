@@ -27,6 +27,7 @@ export interface KnowledgeCounts {
 
 export type KnowledgeTab =
   | "overview"
+  | "ask"
   | "modules"
   | "docs"
   | "architecture"
@@ -42,6 +43,7 @@ export function knowledgeTabs(current: KnowledgeTab, counts?: KnowledgeCounts): 
   return html`<div class="lede"><h1>Knowledge</h1><span class="muted">what the agents know about this project</span></div>
 <nav class="tabs" aria-label="Knowledge">
 ${tab("overview", "/knowledge", "Overview")}
+${tab("ask", "/knowledge/ask", "Ask")}
 ${tab("modules", "/knowledge/modules", "Modules")}
 ${tab("docs", "/knowledge/docs", "Documents", counts?.docs)}
 ${tab("architecture", `/knowledge/docs?doc=${encodeURIComponent(ARCHITECTURE)}`, "Architecture")}
@@ -423,7 +425,7 @@ export function glossaryContent(page: GlossaryPage, actions?: Actions, notice?: 
   };
   return html`${knowledgeTabs("glossary", page.counts)}
 ${notice ?? ""}
-<p class="hint">Business term → synonyms → code symbols. Every search an agent makes is widened by it; <code>jarvis ask &lt;term&gt;</code> answers from it. Existing terms are changed in the file; here you add new ones.</p>
+<p class="hint">Business term → synonyms → code symbols. Every search an agent makes is widened by it; Ask (or <code>jarvis ask &lt;term&gt;</code>) answers from it. Existing terms are changed in the file; here you add new ones.</p>
 ${actions ? addFormHtml(page, actions) : ""}
 <form method="get" action="/knowledge/glossary" class="row kfilter" role="search"><label class="field grow"><span class="sr">Filter</span><input type="search" name="q" value="${page.filter ?? ""}" placeholder="Filter terms, synonyms, symbols…"></label>${page.problems ? html`<input type="hidden" name="problems" value="1">` : ""}<button type="submit" class="btn">Filter</button>
 <a class="btn${page.problems ? " strong" : ""}" href="${page.problems ? "/knowledge/glossary" : "/knowledge/glossary?problems=1"}">${page.problems ? "All terms" : `Problems only (${withProblems})`}</a>${actions ? fileActions(".jarvis/knowledge/glossary.md", "/knowledge/glossary", actions) : ""}</form>
