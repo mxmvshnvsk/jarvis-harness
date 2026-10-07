@@ -9,6 +9,7 @@ import {
   requestRerun,
   rerunRequested,
 } from "../app/decide.ts";
+import { type McpProbe, mcpHealthOf } from "../app/mcpHealth.ts";
 import { modelsHealthOf } from "../app/modelHealth.ts";
 import type { Runtime } from "../app/runtime.ts";
 import { type OpenIn, reviewFiles } from "../cli/checkout.ts";
@@ -30,6 +31,9 @@ import {
   forbiddenPage,
   launchContent,
   layout,
+  mcpPending,
+  mcpPopover,
+  mcpSummary,
   modelsPending,
   modelsPopover,
   modelsSummary,
@@ -64,6 +68,8 @@ export interface UiServerOptions {
   readonly readOnly?: boolean;
   /** Starts runs from the page and drives them (src/ui/launcher.ts); none — no "New task". */
   readonly launcher?: Launcher;
+  /** How often each MCP server is checked for an answer (ms); 0 — only on "Check now". */
+  readonly mcpCheckEveryMs?: number;
 }
 
 export interface UiServer {
@@ -179,6 +185,60 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
   const healthTimer = setInterval(() => scheduleHealth(0), 10_000);
   healthTimer.unref?.();
   scheduleHealth(0);
+
+  /*
+   * The MCP indicator: the servers as `jarvis mcp list` sees them, the agents' calls of the last half
+   * hour, and whether each server answers — a connection of its own at start, every 10 minutes and on
+   * "Check now" (a server started by uvx or npx takes seconds to come up: never in a request).
+   */
+  const PENDING_MCP = JSON.stringify({
+    state: "pending",
+    title: "MCP: checking the servers…",
+    html: mcpPending().value,
+  });
+  const probes = new Map<string, McpProbe>();
+  const checking = new Set<string>();
+  let mcpJson: string | undefined;
+  const computeMcp = () => {
+    try {
+      const health = mcpHealthOf(runtime, probes, checking);
+      const first = health.servers.some((s) => s.checking && !s.probe);
+      mcpJson = JSON.stringify({
+        state: first ? "pending" : health.state,
+        checking: health.servers.some((s) => s.checking),
+        title: first ? "MCP: checking the servers…" : mcpSummary(health),
+        html: mcpPopover(health, options.readOnly ? {} : { checkToken: token }).value,
+      });
+    } catch {
+      // a busy database: the next round tries again
+    }
+  };
+  const checkMcp = async () => {
+    const ids = runtime.mcp.pool.serverIds().filter((id) => !checking.has(id));
+    for (const id of ids) checking.add(id);
+    computeMcp();
+    await Promise.all(
+      ids.map(async (id) => {
+        try {
+          const { entry, ms } = await runtime.mcp.pool.probe(id);
+          probes.set(id, { at: new Date().toISOString(), ok: true, ms, tools: entry.tools.length });
+        } catch (error) {
+          const message = (error instanceof Error ? error.message : String(error)).split("\n")[0] ?? "error";
+          probes.set(id, { at: new Date().toISOString(), ok: false, error: message.slice(0, 300) });
+        } finally {
+          checking.delete(id);
+        }
+      }),
+    );
+    computeMcp();
+  };
+  const mcpEvery = options.mcpCheckEveryMs ?? 10 * 60_000;
+  const mcpChecker = mcpEvery > 0 ? setInterval(() => void checkMcp(), mcpEvery) : undefined;
+  mcpChecker?.unref?.();
+  const mcpTimer = setInterval(computeMcp, 10_000);
+  mcpTimer.unref?.();
+  computeMcp();
+  if (mcpEvery > 0) void checkMcp();
 
   // runs the page started: match them to their launches, go on after a wait (src/ui/launcher.ts)
   const tender = options.launcher
@@ -340,6 +400,15 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
   /** Accept / Send back / Run again / Open in editor: the same functions as the terminal's keys. */
   const post = async (r: Request): Promise<void> => {
     if (r.url.pathname === "/runs/new") return startTask(r);
+    if (r.url.pathname === "/mcp/check") {
+      if (!actions) return notFound(r, "Nothing to do at /mcp/check.");
+      const sent = (await formOf(r.req)).get("t");
+      if (!sent || !same(sent, token)) return send(r, 403, forbiddenPage());
+      void checkMcp();
+      return send(r, 202, mcpJson ?? PENDING_MCP, "application/json; charset=utf-8", {
+        "Cache-Control": "no-store",
+      });
+    }
     const m = /^\/runs\/([^/]+)\/(decide|rerun|open)$/.exec(r.url.pathname);
     const run = m ? resolveRun(m[1] as string) : undefined;
     if (!m || !run || !actions) return notFound(r, `Nothing to do at ${r.url.pathname}.`);
@@ -539,6 +608,12 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
         "Cache-Control": "no-store",
       });
     }
+    if (path === "/mcp.json") {
+      if (!mcpJson) computeMcp();
+      return send(r, 200, mcpJson ?? PENDING_MCP, "application/json; charset=utf-8", {
+        "Cache-Control": "no-store",
+      });
+    }
     const launchAt = /^\/launches\/([0-9a-f]+)$/.exec(path);
     if (launchAt) {
       const launch = options.launcher?.get(launchAt[1] as string);
@@ -656,6 +731,8 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
         if (poller) clearInterval(poller);
         if (tender) clearInterval(tender);
         clearInterval(healthTimer);
+        clearInterval(mcpTimer);
+        if (mcpChecker) clearInterval(mcpChecker);
         if (healthSoon) clearTimeout(healthSoon);
         for (const c of clients) c.end();
         clients.clear();

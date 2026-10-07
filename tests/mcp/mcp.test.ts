@@ -334,6 +334,26 @@ describe("profiled server", () => {
   });
 });
 
+describe("probe", () => {
+  it("a connection of its own: the tools listed, the cache refreshed, a dead server or a silent one an error", async () => {
+    await setup(
+      `${serverYaml("jira", "      profile: atlassian")}
+    silent:
+      transport: stdio
+      command: node
+      args: ["-e", "setInterval(() => {}, 1000)"]
+      readOnly: true`,
+    );
+    const pool = (rt as Runtime).mcp.pool;
+    const { entry, ms } = await pool.probe("jira");
+    expect(entry.tools.length).toBeGreaterThan(0);
+    expect(ms).toBeGreaterThanOrEqual(0);
+    expect((rt as Runtime).mcp.provider.report("jira").discovered?.count).toBe(entry.tools.length);
+    await expect(pool.probe("silent", 300)).rejects.toThrow("no answer in 0 s");
+    await expect(pool.probe("nope")).rejects.toThrow('unknown MCP server "nope"');
+  });
+});
+
 describe("unprofiled server", () => {
   it("exposes nothing until discovered and allowed; readOnly makes tools pure", async () => {
     await setup(`${serverYaml("raw", "      allow: []")}\n${serverYaml("ro", "      readOnly: true")}`);

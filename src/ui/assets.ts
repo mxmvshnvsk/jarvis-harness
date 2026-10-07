@@ -416,51 +416,85 @@ export const SCRIPT = `
     });
   }
 
-  // the models indicator: a dot that says how the models are doing; details in a popover on click
-  const modelsButton = document.querySelector('[data-models]');
-  const modelsPop = document.getElementById('models-pop');
-  let modelsBusy = false;
-  async function refreshModels() {
-    if (!modelsButton || modelsBusy) return;
-    modelsBusy = true;
-    try {
-      const res = await fetch('/models.json', { credentials: 'same-origin', cache: 'no-store' });
-      if (!res.ok) return;
-      const data = await res.json();
-      // the server is still collecting: ask again shortly; the popover says it waits for data
-      if (data.state === 'pending') setTimeout(() => refreshModels(), 1500);
-      modelsButton.querySelector('.dot').dataset.state = data.state;
-      modelsButton.title = data.title;
-      modelsButton.setAttribute('aria-label', data.title);
-      const body = modelsPop && modelsPop.querySelector('[data-models-body]');
+  // the header's indicators — models and MCP: a dot that says how they are doing, details in a popover
+  // on click; the numbers come from the server's last round, so a click never waits for the journal
+  function indicator(name, url) {
+    const button = document.querySelector('[data-' + name + ']');
+    const pop = document.getElementById(name + '-pop');
+    let busy = false;
+    function show(data) {
+      button.querySelector('.dot').dataset.state = data.state;
+      button.title = data.title;
+      button.setAttribute('aria-label', data.title);
+      const body = pop.querySelector('[data-' + name + '-body]');
       if (body) body.innerHTML = data.html;
-    } catch {
-      /* the next tick tries again */
-    } finally {
-      modelsBusy = false;
+      // the server is still collecting or checking: ask again shortly; the popover says it waits
+      if (data.state === 'pending' || data.checking) setTimeout(() => refresh(), 1500);
     }
+    async function refresh() {
+      if (!button || !pop || busy) return;
+      busy = true;
+      try {
+        const res = await fetch(url, { credentials: 'same-origin', cache: 'no-store' });
+        if (res.ok) show(await res.json());
+      } catch {
+        /* the next tick tries again */
+      } finally {
+        busy = false;
+      }
+    }
+    function setOpen(open) {
+      if (!button || !pop) return;
+      pop.hidden = !open;
+      button.setAttribute('aria-expanded', String(open));
+      // on a phone the popover is fixed to the window's width, right under the button (the header wraps)
+      pop.style.top = open && window.innerWidth <= 640 ? button.getBoundingClientRect().bottom + 8 + 'px' : '';
+      if (open) {
+        for (const other of indicators) if (other.pop !== pop) other.setOpen(false);
+        refresh();
+      }
+    }
+    if (button && pop) {
+      refresh();
+      setInterval(refresh, 10000);
+      button.addEventListener('click', () => setOpen(pop.hidden));
+    }
+    return { button, pop, refresh, show, setOpen };
   }
-  const setPop = (open) => {
-    if (!modelsButton || !modelsPop) return;
-    modelsPop.hidden = !open;
-    modelsButton.setAttribute('aria-expanded', String(open));
-    // on a phone the popover is fixed to the window's width, right under the button (the header wraps)
-    modelsPop.style.top = open && window.innerWidth <= 640 ? modelsButton.getBoundingClientRect().bottom + 8 + 'px' : '';
-    if (open) refreshModels();
-  };
-  if (modelsButton) {
-    refreshModels();
-    setInterval(refreshModels, 10000);
-    modelsButton.addEventListener('click', () => setPop(modelsPop.hidden));
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && modelsPop && !modelsPop.hidden) { setPop(false); modelsButton.focus(); }
-    });
-    document.addEventListener('click', (e) => {
-      // a click on something the refresh just replaced is no click outside
-      if (!e.target.isConnected) return;
-      if (modelsPop && !modelsPop.hidden && !e.target.closest('.models-wrap')) setPop(false);
-    });
+  const indicators = [];
+  const models = indicator('models', '/models.json');
+  const mcp = indicator('mcp', '/mcp.json');
+  indicators.push(models, mcp);
+  async function refreshModels() {
+    await models.refresh();
+    await mcp.refresh();
   }
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    for (const x of indicators) if (x.pop && !x.pop.hidden) { x.setOpen(false); x.button.focus(); }
+  });
+  document.addEventListener('click', async (e) => {
+    // a click on something the refresh just replaced is no click outside
+    if (!e.target.isConnected) return;
+    const check = e.target.closest('[data-mcp-check]');
+    if (check) {
+      // "Check now": the server connects to each MCP server anew; the popover follows the check
+      check.disabled = true;
+      try {
+        const res = await fetch('/mcp/check', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: 't=' + encodeURIComponent(check.dataset.mcpCheck),
+        });
+        if (res.ok) mcp.show(Object.assign(await res.json(), { checking: true }));
+      } catch {
+        check.disabled = false;
+      }
+      return;
+    }
+    for (const x of indicators) if (x.pop && !x.pop.hidden && !e.target.closest('[data-pop-wrap]')) x.setOpen(false);
+  });
 
   // "New task" from the header: straight into the text box
   const focusNew = () => { if (location.hash === '#new') document.querySelector('#new textarea')?.focus(); };

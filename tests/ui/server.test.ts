@@ -175,8 +175,8 @@ describe("jarvis ui: pages", () => {
     expect(["ok", "busy", "down", "idle"]).toContain(data.state);
     // the page's script opens the popover and asks for the numbers (pilot: a lost block left it shut)
     const js = (await get("/assets/app.js")).body;
-    expect(js).toContain("async function refreshModels()");
-    expect(js).toContain("modelsButton.addEventListener('click'");
+    expect(js).toContain("indicator('models', '/models.json')");
+    expect(js).toContain("button.addEventListener('click', () => setOpen(pop.hidden))");
     expect(data.title).toMatch(/^Models: /);
     expect(data.html).toContain("jarvis models stats");
   });

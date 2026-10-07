@@ -176,6 +176,39 @@ export class McpPool {
     return this.options.cache.put(serverId, entry.tools);
   }
 
+  /**
+   * Is the server up right now: a connection of its own (not the pool's, which may be stale), the
+   * tool list, the cache refreshed, the connection closed. For the `mcp` indicator of `jarvis ui`.
+   */
+  async probe(serverId: string, timeoutMs = 60_000): Promise<{ entry: ToolsCacheEntry; ms: number }> {
+    const config = this.options.servers[serverId];
+    if (!config) throw new Error(`unknown MCP server "${serverId}"`);
+    const started = Date.now();
+    const opening = this.open(serverId, config);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error(`no answer in ${Math.round(timeoutMs / 1000)} s`)),
+        timeoutMs,
+      );
+      timer.unref?.();
+    });
+    try {
+      const opened = await Promise.race([opening, timeout]);
+      try {
+        return { entry: this.options.cache.put(serverId, opened.tools), ms: Date.now() - started };
+      } finally {
+        await opened.client.close().catch(() => {});
+      }
+    } catch (error) {
+      // a server that answers after the timeout is closed then
+      opening.then((late) => late.client.close()).catch(() => {});
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   async call(serverId: string, name: string, args: Record<string, unknown>): Promise<McpCallResult> {
     const entry = await this.entry(serverId);
     const result = await entry.client.callTool({ name, arguments: args });

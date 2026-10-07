@@ -1,5 +1,6 @@
 import { type Activity, clock, kilo } from "../app/activity.ts";
 import { duration } from "../app/journey.ts";
+import type { McpHealth, McpServerHealth } from "../app/mcpHealth.ts";
 import type { HealthState, ModelHealth, ModelPerf, ModelsHealth } from "../app/modelHealth.ts";
 import type { Change } from "../cli/checkout.ts";
 import { toolMix } from "../cli/progress.ts";
@@ -90,7 +91,9 @@ ${chrome.repos ?? ""}
 ${chrome.page === "runs" ? html`<nav aria-label="Pages"><a href="/" aria-current="page">Runs</a></nav>` : ""}
 ${chrome.canStart ? html`<a class="btn primary small" href="/#new">New task</a>` : ""}
 <div class="status">
-<div class="models-wrap"><button type="button" class="models" data-models aria-expanded="false" aria-controls="models-pop" title="Models: collecting the stats…"><span class="dot" data-state="pending" aria-hidden="true"></span><span>models</span></button>
+<div class="models-wrap" data-pop-wrap><button type="button" class="models" data-mcp aria-expanded="false" aria-controls="mcp-pop" title="MCP: checking the servers…"><span class="dot" data-state="pending" aria-hidden="true"></span><span>mcp</span></button>
+<div id="mcp-pop" class="pop" role="dialog" aria-label="MCP servers" hidden><div data-mcp-body>${mcpPending()}</div></div></div>
+<div class="models-wrap" data-pop-wrap><button type="button" class="models" data-models aria-expanded="false" aria-controls="models-pop" title="Models: collecting the stats…"><span class="dot" data-state="pending" aria-hidden="true"></span><span>models</span></button>
 <div id="models-pop" class="pop" role="dialog" aria-label="Models" hidden><div data-models-body>${modelsPending()}</div></div></div>
 <span class="live" data-state="connecting" role="status"><span class="dot" aria-hidden="true"></span><span class="label">connecting…</span><span aria-hidden="true">·</span><span>${chrome.address}</span></span>
 <button type="button" class="theme" data-theme-switch aria-label="Switch the theme" title="Switch the theme"><svg class="moon" viewBox="0 0 16 16" aria-hidden="true"><path d="M13.5 9.6A5.75 5.75 0 0 1 6.4 2.5a5.75 5.75 0 1 0 7.1 7.1z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"></path></svg><svg class="sun" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="3" fill="none" stroke="currentColor" stroke-width="1.5"></circle><path d="M8 1v1.75M8 13.25V15M1 8h1.75M13.25 8H15M3.05 3.05l1.24 1.24M11.71 11.71l1.24 1.24M3.05 12.95l1.24-1.24M11.71 4.29l1.24-1.24" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path></svg></button>
@@ -915,4 +918,114 @@ ${
 <section class="panel feed" aria-labelledby="output"><h2 id="output">Output</h2>
 ${l.tail ? html`<pre class="tail">${l.tail}</pre>` : html`<p class="muted">Nothing yet.</p>`}
 <span class="meta">log ${home(l.log, homeDir)}</span></section></div>`;
+}
+
+/* ---- the MCP indicator (ADR-0023, ADR-0017): the same dot and popover as the models' ---- */
+
+/** One line for the indicator's tooltip: the worst server and why. */
+export function mcpSummary(h: McpHealth): string {
+  if (h.servers.length === 0) return "MCP: no servers configured";
+  const worst = h.servers.find((s) => s.state === h.state);
+  const why = worst?.reasons[0];
+  return `MCP: ${HEALTH[h.state].label}${worst && h.state !== "ok" && h.state !== "idle" ? ` — ${worst.id}${why ? `: ${why}` : ""}` : ""}`;
+}
+
+const day = (ts: string) => `${ts.slice(0, 10)} ${wall(ts)}`;
+const names = (xs: readonly string[]) => (xs.length > 0 ? xs.join(", ") : "—");
+
+function serverHtml(s: McpServerHealth): Html {
+  const p = s.probe;
+  const check = s.checking
+    ? "checking now…"
+    : p
+      ? p.ok
+        ? `answered ${wall(p.at)} · ${p.tools ?? 0} tools · ${duration(p.ms ?? 0)}`
+        : `no answer ${wall(p.at)} · ${p.error ?? "error"}`
+      : "not checked yet";
+  const r = s.recent;
+  const calls =
+    r.calls + r.denied === 0
+      ? "none"
+      : [
+          `${r.calls} call${r.calls === 1 ? "" : "s"}`,
+          ...(r.failed > 0 ? [`${r.failed} failed`] : []),
+          ...(r.denied > 0 ? [`${r.denied} denied by policy`] : []),
+          ...(r.lastCallAt ? [`last ${wall(r.lastCallAt)}`] : []),
+        ].join(" · ");
+  const rows: Array<[string, string]> = [
+    ["check", check],
+    ["discovered", s.discovered ? `${day(s.discovered.at)} · ${s.discovered.count} tools` : "never"],
+    ["exposed", names(s.exposed)],
+    ...(s.denied.length > 0
+      ? ([["denied", `${names(s.denied)} (allow / deny)`]] as Array<[string, string]>)
+      : []),
+    ...(s.unmapped.length > 0
+      ? ([["unmapped", `${names(s.unmapped)} (the server lacks the tool)`]] as Array<[string, string]>)
+      : []),
+    ...(s.notAllowed.length > 0
+      ? ([
+          [
+            "not allowed",
+            `${s.notAllowed.length} tool${s.notAllowed.length === 1 ? "" : "s"} without a profile entry: ${s.notAllowed.slice(0, 6).join(", ")}${s.notAllowed.length > 6 ? ", …" : ""}`,
+          ],
+        ] as Array<[string, string]>)
+      : []),
+    [`last ${r.minutes} min`, calls],
+    ...(r.latencyMs
+      ? ([
+          [
+            "latency",
+            `p50 ${duration(r.latencyMs.p50)} · p90 ${duration(r.latencyMs.p90)} · max ${duration(r.latencyMs.max)}`,
+          ],
+        ] as Array<[string, string]>)
+      : []),
+    ...(r.byCapability.length > 0
+      ? ([
+          [
+            "used",
+            r.byCapability
+              .map((c) => `${c.name} ${c.calls}${c.failed > 0 ? ` (${c.failed} failed)` : ""}`)
+              .join(" · "),
+          ],
+        ] as Array<[string, string]>)
+      : []),
+    ...(r.lastFailure
+      ? ([
+          [
+            "last failure",
+            `${wall(r.lastFailure.at)} · ${r.lastFailure.capability} · ${r.lastFailure.reason}`,
+          ],
+        ] as Array<[string, string]>)
+      : []),
+  ];
+  return html`<li class="mh">
+<div class="row"><span class="dot" data-state="${s.checking && !p ? "pending" : s.state}" aria-hidden="true"></span><b class="mono">${s.id}</b><span class="pill ${HEALTH[s.state].pill}">${HEALTH[s.state].label}</span><span class="meta">${s.profile ? `profile ${s.profile}` : s.readOnly ? "readOnly" : "no profile"} · ${s.network}${s.egressAllowed ? "" : " ✗"} · ${s.transport}</span></div>
+${s.reasons.length > 0 ? html`<ul class="why">${s.reasons.map((x) => html`<li>${x}</li>`)}</ul>` : ""}
+<span class="meta mono">${s.target}${s.auth ? ` · auth ${s.auth}` : ""}</span>
+<dl class="perf">${rows.map(([k, v]) => html`<dt>${k}</dt><dd>${v}</dd>`)}</dl>
+</li>`;
+}
+
+/** The popover's body: each server, a check on demand, then where the rest is. */
+export function mcpPopover(h: McpHealth, options: { readonly checkToken?: string } = {}): Html {
+  const checking = h.servers.some((s) => s.checking);
+  return html`<div class="pop-head"><b>MCP</b><span class="pill ${HEALTH[h.state].pill}">${HEALTH[h.state].label}</span><span class="meta">at ${wall(h.at)}</span>${
+    options.checkToken && h.servers.length > 0
+      ? checking
+        ? html`<span class="spin" aria-hidden="true"></span>`
+        : html`<button type="button" class="btn small" data-mcp-check="${options.checkToken}">Check now</button>`
+      : ""
+  }</div>
+${
+  h.servers.length > 0
+    ? html`<ul class="mhs">${h.servers.map(serverHtml)}</ul>`
+    : html`<p class="muted">No MCP servers — add them under mcp.servers in ~/.jarvis/config.yaml or .jarvis/project.yaml.</p>`
+}
+<p class="hint">In the terminal: <code>jarvis mcp list --refresh</code> (connect and list) · <code>jarvis doctor</code> (credentials) · <code>jarvis auth set &lt;id&gt;</code> (a token)</p>`;
+}
+
+/** The popover before the first answer: open at once, saying what it waits for. */
+export function mcpPending(): Html {
+  return html`<div class="pop-head"><b>MCP</b><span class="spin" aria-hidden="true"></span><span class="meta">waiting for data</span></div>
+<p class="muted">Reading the MCP servers' state and checking that each answers — the first check of a server started by uvx or npx takes a few seconds.</p>`;
 }
