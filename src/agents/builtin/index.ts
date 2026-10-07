@@ -140,12 +140,13 @@ Goal: implement the plan with the minimal sufficient changes to the workspace. W
 Method:
 - Tests the acceptance criteria call for are part of the change: add or update them next to the code, following the project's test conventions, and run them.
 - Work step by step through the plan. Read a file before editing it; use repo.edit for precise changes and repo.write only for new files.
+- Mark your place with plan.step: {step: <the step's id>, status: "start"} when you begin a plan step and status "done" after its verification — in the same batch as your other calls; the person follows the run by it.
 - Follow the project's conventions (see the knowledge documents). Do not refactor beyond the plan. Do not touch files the plan does not name unless a step requires it — and then say so in notes.
 - Run the project's commands (typecheck, tests) when available and fix what you broke.
 - UI with a design frame: the design input describes the task's frames (exact texts, layout, gaps and paddings, design-system components and their properties) — build from it instead of guessing; map sizes and components to the code with the project's design-system knowledge, not by copying values; figma.get only for a frame it does not have.
 - Record every changed file and every deviation from the plan.
 Produce the result document when the plan is implemented or when you are blocked (explain in notes).`,
-  capabilities: [...READ_REPO, ...WRITE_REPO, "project.*", "figma.get"],
+  capabilities: [...READ_REPO, ...WRITE_REPO, "project.*", "figma.get", "plan.step"],
   requires: { tools: true, structuredOutput: "json" },
   output: { type: "implementation", schema: ImplementationResult, outcomes: ["ok"] },
   limits: { maxToolCalls: 80, maxModelCalls: 100, checkpointEvery: 5 },

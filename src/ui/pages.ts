@@ -5,6 +5,7 @@ import { isStale, issueKeyOf, type StartPoint } from "../app/continuation.ts";
 import { duration } from "../app/journey.ts";
 import type { McpHealth, McpServerHealth } from "../app/mcpHealth.ts";
 import type { HealthState, ModelHealth, ModelPerf, ModelsHealth, Unlimited } from "../app/modelHealth.ts";
+import type { PlanProgress } from "../app/planProgress.ts";
 import type { Change } from "../cli/checkout.ts";
 import { toolMix } from "../cli/progress.ts";
 import { documentToMarkdown } from "../cli/render.ts";
@@ -524,7 +525,7 @@ ${
 <a href="${runHref(r.run)}">Open</a>
 </div>`
           : html`<div class="panel running">
-<div class="what"><a href="${runHref(r.run)}">${firstLine(r.run.task)}</a><span class="meta">${cancelling(r.run) ? html`<span class="bad">cancelling…</span> · ` : ""}${r.run.workflow} · ${shortRunId(r.run.id)} · ${activityText(r.activity, r.position)}</span></div>
+<div class="what"><a href="${runHref(r.run)}">${firstLine(r.run.task)}</a><span class="meta">${cancelling(r.run) ? html`<span class="bad">cancelling…</span> · ` : ""}${r.run.workflow} · ${shortRunId(r.run.id)} · ${activityText(r.activity, r.position)}${r.planProgress ? html` · <b class="planat">plan ${planAt(r.planProgress)}</b>${r.planProgress.current !== undefined ? ` ${cut(r.planProgress.steps[r.planProgress.current]?.description ?? "", 70)}` : ""}` : ""}</span></div>
 <div class="budget">${toolBudget(r.activity, now)}</div>
 <a href="${runHref(r.run)}">Follow</a>
 </div>`,
@@ -653,7 +654,7 @@ ${b.calls.slice(0, 12).map((c) => {
 
 /* ---- one run ---- */
 
-function stepRow(s: StepRow, now: number): Html {
+function stepRow(s: StepRow, now: number, plan?: PlanProgress): Html {
   const icon = {
     done: ["✓", "ok"],
     failed: ["✗", "bad"],
@@ -692,7 +693,7 @@ function stepRow(s: StepRow, now: number): Html {
       `sent the work back to ${loop.to} ${loop.iteration}${loop.max ? `/${loop.max}` : ""} — ${loop.outcome}`,
     );
   if (s.status === "waiting") notes.push(s.paused ? "paused · waits for the quota window" : "waits for you");
-  if (s.status === "running") notes.push("running now");
+  if (s.status === "running") notes.push(plan ? `running now · plan ${planAt(plan)}` : "running now");
   const took =
     s.status === "running" && s.startedAt
       ? ticking(now - Date.parse(s.startedAt))
@@ -898,10 +899,44 @@ function nowHtml(page: RunPage, now: number, actions?: Actions): Html {
     : "";
   return html`<section class="panel now" aria-label="Now" data-live="card">
 <div class="row"><span class="spin" aria-hidden="true"></span><b>${a.step.id}${a.step.iteration > 1 ? `#${a.step.iteration}` : ""}${a.step.agent && a.step.agent !== a.step.id ? ` · ${a.step.agent}` : ""}</b><span class="meta">${ticking(now - Date.parse(a.step.startedAt))} · ${callText(a)}</span></div>
+${page.planProgress ? planWidget(page.planProgress, page.planProgress.lastFile) : ""}
 ${a.batch ? batchHtml(a.batch) : ""}
 ${toolBudget(a, now)}
 ${last ? html`<span class="meta">${last}</span>` : ""}
 </section>`;
+}
+
+const planAt = (p: PlanProgress): string =>
+  p.current !== undefined ? `${p.current + 1} of ${p.steps.length}` : `${p.done} of ${p.steps.length} done`;
+
+/**
+ * An implementation's place in its plan: one line folded («Plan 3 of 7: …»), the panel open — the step
+ * now with its files and check, a bar of the steps, the whole plan. Stays open across refreshes.
+ */
+function planWidget(p: PlanProgress, lastFile?: string): Html {
+  const now = p.current !== undefined ? p.steps[p.current] : undefined;
+  const glyph = (st: string) =>
+    st === "done"
+      ? html`<span class="ok">✓</span>`
+      : st === "on"
+        ? html`<span class="spin" aria-hidden="true"></span>`
+        : html`<span class="muted">·</span>`;
+  const files = (n: number) => `${n} file${n === 1 ? "" : "s"}`;
+  return html`<details class="planw" data-keep="plan">
+<summary><span class="of">Plan ${planAt(p)}</span>${now ? html`<span class="d">${now.description}</span>` : html`<span class="d muted">every step of the plan is done; the result comes next</span>`}${p.outOfOrder ? html`<span class="warn" style="font-size:12px">out of plan order</span>` : ""}</summary>
+<div class="planbox">
+<div class="segs" aria-label="${String(p.done)} of ${String(p.steps.length)} done">${p.steps.map((s) => html`<i class="${s.status === "done" ? "ok" : s.status === "on" ? "on" : ""}"></i>`)}</div>
+${
+  now
+    ? html`<div class="pmeta">${now.files.length > 0 ? html`<span><span class="k">files</span> ${now.files.map((f, i) => html`${i > 0 ? " · " : ""}<code>${f}</code>`)}</span>` : ""}${now.verification ? html`<span><span class="k">check</span> ${now.verification}</span>` : ""}${lastFile || now.files.length > 0 ? html`<span><span class="k">now</span> ${lastFile ? html`edit <code>${lastFile}</code>` : "reading"}${now.files.length > 0 ? ` · ${now.touched} of ${files(now.files.length)} touched` : ""}</span>` : ""}</div>`
+    : ""
+}
+<ol class="plist">${p.steps.map(
+    (s, i) =>
+      html`<li class="${s.status}">${glyph(s.status)}<span class="n">${String(i + 1)}</span><span class="d">${s.description}</span><span class="f">${s.status === "on" && lastFile && s.files.includes(lastFile) ? `editing ${lastFile.split("/").pop()}` : s.files.length > 0 ? files(s.files.length) : ""}</span></li>`,
+  )}</ol>
+</div>
+</details>`;
 }
 
 /** Lines of Activity shown open; the rest of the run's feed is one click away. */
@@ -966,7 +1001,7 @@ ${cancelling(r) ? html`<div class="banner bad" data-live="cancelling" role="stat
 <div class="cols">
 <section class="panel side steps" aria-labelledby="steps" data-live="steps">
 <h2 id="steps">Steps</h2>
-<ol style="margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:2px">${page.steps.map((s) => stepRow(s, now))}</ol>
+<ol style="margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:2px">${page.steps.map((s) => stepRow(s, now, s.status === "running" ? page.planProgress : undefined))}</ol>
 </section>
 <div class="mainc">
 ${card ? (card.kind === "loop" ? loopCardHtml(card, page, actions) : card.kind === "approval" ? approvalCardHtml(card, page, actions) : card.kind === "budget" ? budgetCardHtml(card, page, actions) : card.kind === "clarify" ? clarifyCardHtml(card, page, actions) : otherCardHtml(card.what, page)) : page.wait ? waitHtml(page, page.wait, now, actions) : page.next || page.continuedBy ? continuationHtml(page, actions) : nowHtml(page, now, actions)}

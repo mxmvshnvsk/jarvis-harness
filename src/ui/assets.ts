@@ -384,6 +384,29 @@ form.clarify>.actions{margin:4px 0}
 .q .done{font-size:14px;line-height:21px;padding:8px 12px;border-radius:8px;background:var(--ok-bg);color:var(--ink);white-space:pre-wrap}
 .qs .dock{position:sticky;bottom:0;display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:14px 20px;background:var(--panel)}
 .qs .dock .sum{flex:1 1 100%;font-size:13px;line-height:19px;color:var(--muted)}
+.planw{border:1px solid var(--line);border-radius:10px;background:var(--ground)}
+.planw>summary{display:flex;align-items:baseline;gap:10px;padding:10px 14px;cursor:pointer;list-style:none;flex-wrap:wrap}
+.planw>summary::-webkit-details-marker{display:none}
+.planw>summary::before{content:"▸";color:var(--muted);font-size:12px}
+.planw[open]>summary::before{content:"▾"}
+.planw .of{font-family:var(--mono);font-size:12px;font-weight:600;color:var(--accent);white-space:nowrap}
+.planw summary .d{font-size:14px;line-height:20px;color:var(--ink);flex:1;min-width:0}
+.planbox{display:flex;flex-direction:column;gap:10px;padding:0 14px 14px}
+.segs{display:flex;gap:4px}
+.segs i{flex:1;height:6px;border-radius:3px;background:var(--line)}
+.segs i.ok{background:var(--ok)}.segs i.on{background:var(--accent)}
+.pmeta{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--ink-2)}
+.pmeta code{font-size:12px}
+.pmeta .k{color:var(--muted);display:inline-block;min-width:44px}
+.plist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px}
+.plist li{display:grid;grid-template-columns:18px 22px minmax(0,1fr) auto;gap:8px;align-items:baseline;font-size:13px;line-height:19px;padding:4px 6px;border-radius:6px}
+.plist li.on{background:var(--accent-soft)}
+.plist .spin{width:10px;height:10px;border-width:2px}
+.plist .n{font-family:var(--mono);color:var(--muted)}
+.plist .d{color:var(--ink)}
+.plist li.todo .d{color:var(--muted)}
+.plist .f{font-family:var(--mono);font-size:11px;color:var(--muted)}
+.planat{color:var(--accent);font-weight:600}
 .startfrom:empty{display:none}
 .from{border:1px solid var(--line);border-radius:8px;padding:12px 14px;display:flex;flex-direction:column;gap:6px;background:var(--ground)}
 .from .check{margin:0}

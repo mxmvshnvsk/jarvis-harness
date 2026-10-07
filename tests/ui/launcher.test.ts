@@ -586,4 +586,53 @@ describe("New task on the page", () => {
     expect(doc.rule).toBe("Only zone ids from logistics-api");
     expect(rt.runs.get(run.id)?.waitingFor).toBeUndefined();
   });
+
+  it("an implementation shows its place in the plan: one line folded, the panel on a click", async () => {
+    await serve();
+    const run = createRun("ABC-42: Delivery slots on the order form");
+    rt.runs.update(run.id, { currentStep: "implementation", currentIteration: 1 });
+    rt.runs.transition(run.id, "RUNNING");
+    rt.runs.acquireLease(run.id, "cli:elsewhere", 90_000);
+    rt.artifacts.put({
+      runId: run.id,
+      type: "plan",
+      name: "plan.json",
+      content: JSON.stringify({
+        summary: "s",
+        steps: [
+          { id: "1", description: "Types for the slots", files: ["src/slots.types.ts"], verification: "tsc" },
+          {
+            id: "2",
+            description: "Fetch the slots in the saga",
+            files: ["src/saga.ts"],
+            verification: "saga test",
+          },
+          { id: "3", description: "Slot picker", files: [], verification: "picker test" },
+        ],
+      }),
+      provenance: { kind: "agent", agentId: "plan" },
+    });
+    const at = { runId: run.id, stepId: "implementation" };
+    rt.events.emit({ kind: "step.start", ...at, payload: { stepId: "implementation", iteration: 1 } });
+    rt.events.emit({ kind: "agent.start", ...at, payload: { agent: "implementation" } });
+    for (const [capability, args] of [
+      ["plan.step", { step: "1", status: "start" }],
+      ["repo.write", { path: "src/slots.types.ts", content: "x" }],
+      ["plan.step", { step: "2", status: "start" }],
+    ] as const)
+      rt.events.emit({
+        kind: "tool.call",
+        ...at,
+        payload: { capability, ok: true, args: JSON.stringify(args) },
+      });
+    const short = run.id.replace(/^run_/, "").slice(0, 8);
+    const body = await page(`/runs/${short}`);
+    expect(body).toContain('<details class="planw" data-keep="plan">');
+    expect(body).toContain(
+      '<span class="of">Plan 2 of 3</span><span class="d">Fetch the slots in the saga</span>',
+    );
+    expect(body).toContain("<code>src/saga.ts</code>");
+    expect(body).toContain("running now · plan 2 of 3");
+    expect(await page("/")).toContain('<b class="planat">plan 2 of 3</b> Fetch the slots in the saga');
+  });
 });

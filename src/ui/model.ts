@@ -7,6 +7,7 @@ import { type Continuation, continuationOf, continuedFromOf, contradictionsOf } 
 import { awaitedArtifact, type Decision, decisionOn, rerunRequested, waitingCard } from "../app/decide.ts";
 import { continuedBy } from "../app/handoff.ts";
 import { Journey, type LoopReport, type StepReport } from "../app/journey.ts";
+import { type PlanProgress, planProgressOf } from "../app/planProgress.ts";
 import { type Resumable, resumableOf } from "../app/resumable.ts";
 import type { Runtime } from "../app/runtime.ts";
 import type { RunTokens } from "../app/status.ts";
@@ -142,6 +143,8 @@ export interface RunningRun {
   readonly wait?: BudgetWait;
   readonly activity?: Activity;
   readonly position?: { readonly index: number; readonly total: number };
+  /** An implementation's place in its plan (src/app/planProgress.ts). */
+  readonly planProgress?: PlanProgress;
 }
 
 export interface RecentRun {
@@ -341,10 +344,12 @@ export async function runsPage(
       const activity = activityOf(events, new Date(now));
       const plan = workflowOf(engine, run)?.steps.map((s) => s.id) ?? [];
       const at = activity?.step ? plan.indexOf(activity.step.id) : -1;
+      const progress = implementing(activity) ? planProgressOf(runtime, run, events) : undefined;
       running.push({
         run,
         ...(activity ? { activity } : {}),
         ...(at >= 0 ? { position: { index: at + 1, total: plan.length } } : {}),
+        ...(progress ? { planProgress: progress } : {}),
       });
     } else finished.push(run);
   }
@@ -524,6 +529,8 @@ export interface RunPage {
   readonly feed: readonly FeedItem[];
   readonly artifacts: ReadonlyArray<ArtifactVersion & { readonly state: string }>;
   readonly leaseLive: boolean;
+  /** An implementation's place in its plan, while it runs. */
+  readonly planProgress?: PlanProgress;
   /** A finished research/spec that can go on (src/app/continuation.ts): "Continue to sdd". */
   readonly next?: Continuation & { readonly contradictions: number };
   /** The run that went on from this one. */
@@ -808,6 +815,9 @@ export async function runPage(
     })(),
     ...((r) => (r ? { resumable: r } : {}))(resumableOf(runtime, run, now.getTime())),
     ...continuationLinks(runtime, engine, run),
+    ...((p) => (p ? { planProgress: p } : {}))(
+      run.state === "RUNNING" && implementing(activity) ? planProgressOf(runtime, run, events) : undefined,
+    ),
   };
 }
 
@@ -917,5 +927,9 @@ function questionsOf(
   const given = givenFor(runtime, artifact);
   return { questions: { list, ...(suggestions ? { suggestions } : {}), ...(given ? { given } : {}) } };
 }
+
+/** The step running now is an implementation (it works through a plan). */
+const implementing = (a: Activity | undefined): boolean =>
+  a?.step?.agent === "implementation" || a?.step?.id === "implementation";
 
 export { shortRunId };

@@ -299,6 +299,29 @@ export class LocalToolProvider implements ToolProvider {
         },
       },
       {
+        // ADR-0023: the page shows which plan step an implementation is on (src/app/planProgress.ts)
+        name: "plan.step",
+        description:
+          "Mark where you are in the plan: status start before working on a plan step, done after its verification. No effect on the workspace; send it together with your other calls.",
+        network: "none",
+        access: "read",
+        effect: false,
+        parameters: {
+          type: "object",
+          properties: {
+            step: { type: "string", description: "the plan step's id" },
+            status: { type: "string", enum: ["start", "done"] },
+          },
+          required: ["step", "status"],
+        },
+        handler: async (args) => {
+          const step = typeof args.step === "string" ? args.step.trim() : "";
+          const status = args.status === "done" ? "done" : "start";
+          if (!step) return { ok: false, error: "name the plan step: its id from the plan" };
+          return { ok: true, text: `noted: plan step ${step} ${status === "done" ? "done" : "started"}` };
+        },
+      },
+      {
         name: "repo.write",
         description: "Create or overwrite a file inside the workspace. A text file is ended with a newline.",
         network: "none",
