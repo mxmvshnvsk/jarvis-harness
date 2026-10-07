@@ -91,6 +91,21 @@ Remaining commands of ADR-0001 §15:
   everything after 14k spent with a 16k reserve; a run paused on WAITING_BUDGET shows in `jarvis ui` as paused,
   not failed (with the pool, how full it is, when it goes on), among the running ones, with Resume now; the feed
   says the run waits instead of "gave up"
+- quota pools: unlimited hours (`quotaPools.<pool>.unlimited`: days and/or HH:MM in `timezone`; touching spans run
+  together) — admission lets calls through, what was spent then is not counted in the window afterwards, a pool
+  that waits goes on when its window frees or its unlimited hours begin; in those hours agent limits and
+  `budget.perStep/perRun` grow `unlimitedScale` times (default 5, read at every check, grants on top); a call that
+  does not fit its pool goes to the role's next model in another pool (`model.failover`, back once the first has
+  room); `jarvis models` and the models button in `jarvis ui` (`∞ until 07:00`, `∞`) show it; the window in the
+  popover shows input tokens too
+- a decision made on the page (more budget, run again, an approval) goes on through the page when no terminal waits
+  at the card (pilot: a terminal-started run left at its card did not continue after more was granted); Resume for a
+  run nobody moves on (decided, SUSPENDED, RUNNING without its process, parked on a quota window)
+- compaction: up to 8000 output tokens for the summary (pilot: a reasoning model spent 2000 thinking — one handoff
+  empty, the next cut off, the agent re-read everything); an empty or cut-off summary is completed with the record of
+  the calls and the task's sources as read (`context.compacted` … `fallback`); `design.collect` writes the issue and
+  its Confluence pages as read to a `sources` artifact, an input of research and requirements
+- `jarvis ui` New task offers research first and selects it
 - output styling: one palette for every command (`src/cli/style.ts`; headings bold, the subject bold cyan, metadata
   dim, commands cyan, ok/additions green, warnings yellow, errors/removals red), backticked spans render as commands,
   `jarvis diff` coloured like git, `candidates show` renders the markdown; errors are prefixed `error:`, notices go

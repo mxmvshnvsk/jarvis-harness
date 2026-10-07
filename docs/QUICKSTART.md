@@ -128,7 +128,8 @@ jarvis approve <run> --commit --resume                      # решение к�
 
 ## 8. Лимиты и наблюдаемость (ADR-0018)
 
-`quotaPools` в пользовательском конфиге (окно, soft/hard), `budget.perRun/perStep` в проекте.
+`quotaPools` в пользовательском конфиге (окно, soft/hard, безлимитные часы `unlimited`), `budget.perRun/perStep`
+в проекте. Модели роли — порядок предпочтения: когда пул заполнен, вызов уходит следующей модели в другом пуле.
 `jarvis models list` — расход окна по пулам; `status` — токены Run; события — в `jarvis.db`
 (`events`), redaction секретов включён везде (ADR-0010).
 
