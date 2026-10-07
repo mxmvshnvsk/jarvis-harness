@@ -114,6 +114,61 @@ describe("profiles", () => {
   });
 });
 
+describe("Data Center servers (@atlassian-dc-mcp/jira, …/confluence)", () => {
+  // their tools and parameters as the servers declare them (0.35)
+  const DC: Record<string, Record<string, unknown>> = {
+    "jira.get": { tool: "jira_getIssue", schema: { issueKey: {}, expand: {}, fields: {} } },
+    "jira.search": { tool: "jira_searchIssues", schema: { jql: {}, maxResults: {}, startAt: {} } },
+    "jira.comment": { tool: "jira_postIssueComment", schema: { issueKey: {}, comment: {} } },
+    "jira.transition": { tool: "jira_transitionIssue", schema: { issueKey: {}, transitionId: {} } },
+    "confluence.get": { tool: "confluence_getContent", schema: { contentId: {}, bodyMode: {}, expand: {} } },
+    "confluence.search": { tool: "confluence_searchContent", schema: { cql: {}, limit: {}, excerpt: {} } },
+    "confluence.create": {
+      tool: "confluence_createContent",
+      schema: { title: {}, spaceKey: {}, content: {} },
+    },
+  };
+  const call = (cap: string, args: Record<string, unknown>) => {
+    const profile = resolveProfile({ profile: "atlassian" } as never);
+    const entry = profile?.map[cap];
+    expect(entry?.tools).toContain(DC[cap]?.tool);
+    return filterBySchema(entry?.args?.(args) ?? args, {
+      properties: DC[cap]?.schema as Record<string, unknown>,
+    });
+  };
+
+  it("maps every capability onto their tools and parameter names", () => {
+    expect(call("jira.get", { key: "ABC-42" })).toEqual({ issueKey: "ABC-42" });
+    expect(call("jira.search", { jql: "project = ABC", limit: 5 })).toEqual({
+      jql: "project = ABC",
+      maxResults: 5,
+    });
+    expect(call("jira.comment", { key: "ABC-42", body: "done" })).toEqual({
+      issueKey: "ABC-42",
+      comment: "done",
+    });
+    expect(call("jira.transition", { key: "ABC-42", transition: "31" })).toEqual({
+      issueKey: "ABC-42",
+      transitionId: "31",
+    });
+    expect(call("confluence.get", { id: "1234" })).toEqual({ contentId: "1234", bodyMode: "text" });
+    expect(call("confluence.create", { space: "BILL", title: "Rounding", body: "<p>x</p>" })).toEqual({
+      title: "Rounding",
+      spaceKey: "BILL",
+      content: "<p>x</p>",
+    });
+  });
+
+  it("free text becomes CQL for a server that takes only CQL", () => {
+    expect(call("confluence.search", { query: 'invoice "total"' })).toEqual({
+      cql: 'text ~ "invoice  total "',
+      limit: 10,
+      excerpt: "highlight",
+    });
+    expect(call("confluence.search", { cql: "space = BILL" })).toMatchObject({ cql: "space = BILL" });
+  });
+});
+
 describe("profiled server", () => {
   it("exposes profile capabilities before discovery and reports unmapped ones after", async () => {
     await setup(serverYaml("jira", "      profile: atlassian\n      deny: [jira.transition]"));

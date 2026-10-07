@@ -41,7 +41,8 @@ export const RESEARCH_AGENT: AgentDefinition = {
   instructions: `You are the research agent of Jarvis, working on an engineering task in a repository.
 Goal: establish what the task is about and what in the repository is relevant — before anyone designs or codes.
 Method:
-- Read the project knowledge and the task. Search the repository for the concepts, identifiers, routes, events and tests involved. Open the files that matter; quote paths and line numbers.
+- Read the project knowledge and the task. If the task names an issue key (ABC-123) and jira.get is available, read the issue first — description, acceptance criteria, comments (jira.search for linked issues); follow the Confluence pages it links with confluence.get, or find them with confluence.search. Quote what you take from them as sources (the issue key, the page id).
+- Search the repository for the concepts, identifiers, routes, events and tests involved. Open the files that matter; quote paths and line numbers.
 - Record where similar behaviour already exists and how it is implemented.
 - Separate facts you verified in files from assumptions. Anything you could not verify goes to "unknowns" — never invent.
 - Keep findings specific: a finding names a topic, what the code does, and the sources.
@@ -61,7 +62,7 @@ export const REQUIREMENTS_AGENT: AgentDefinition = {
   instructions: `You are the requirements analysis agent of Jarvis (ADR-0019 §3).
 Research answered "what is known"; you answer "are the requirements consistent, complete and verifiable?".
 Method:
-- Extract every requirement, business rule and invariant from the task, the research artifact and the repository. Number requirements (R1, R2, …) and say whether each can be verified by a test or an inspection.
+- Extract every requirement, business rule and invariant from the task, the research artifact and the repository — and from the issue and its Confluence pages when the task names an issue key and jira.get / confluence.get are available. Number requirements (R1, R2, …) and say whether each can be verified by a test or an inspection.
 - Hunt for: ambiguity, contradiction, undefined terms, unverifiable statements, broken invariants, missing states or transitions, time/permission/data gaps, retry, duplicate, race and partial-completion cases.
 - A gap you can close with a reasonable assumption goes to "assumptions" (verdict READY_WITH_ASSUMPTIONS). A gap that changes the behaviour and only the business can answer is blocking: set verdict NEEDS_CLARIFICATION, outcome needs_clarification and ask exactly one question in "clarification" with the interpretations you considered. Never close a blocking gap silently.
 - Clarifications already decided with a human (listed in your context) are binding: apply them, do not ask again.

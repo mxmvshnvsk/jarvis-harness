@@ -50,6 +50,44 @@ Jarvis подключает MCP-серверы по официальному Typ
 | `atlassian` | `jira.get`, `jira.search`, `confluence.get`, `confluence.search` | `jira.comment` (по маркеру в тексте), `jira.transition` (чтением статуса), `confluence.create` |
 | `bitbucket` | `bitbucket.pr.get`, `bitbucket.pr.list`, `bitbucket.pr.diff` | `bitbucket.pr.create`, `bitbucket.pr.comment` |
 
+Профиль `atlassian` понимает официальный Atlassian Remote MCP (Cloud), распространённый community-сервер
+(`jira_*` / `confluence_*`) и серверы для Data Center `@atlassian-dc-mcp/jira` и `@atlassian-dc-mcp/confluence`
+(`jira_getIssue`, `confluence_getContent`, …). Каждый из них — отдельный сервер, профиль у обоих `atlassian`:
+каждый отдаёт то, что умеет, остальное — `unmapped`. Аргументы передаются во всех известных написаниях,
+вызов оставляет те, что объявляет схема инструмента; Confluence DC требует CQL, поэтому свободный текст
+поиска уходит как `text ~ "…"`, а страница читается текстом, а не storage-XML.
+
+```yaml
+# ~/.jarvis/config.yaml (личные токены) или .jarvis/project.yaml (общий список серверов)
+mcp:
+  servers:
+    jira:
+      transport: stdio
+      command: npx
+      args: ["-y", "@atlassian-dc-mcp/jira@0.35.0"]
+      env:
+        JIRA_HOST: jira.example.corp
+        JIRA_API_TOKEN: keychain:jira          # jarvis auth set jira — персональный токен (PAT)
+        NODE_OPTIONS: --use-system-ca          # корпоративный CA из системного хранилища
+      network: intranet
+      profile: atlassian
+      allow: [jira.get, jira.search]           # только чтение
+    confluence:
+      transport: stdio
+      command: npx
+      args: ["-y", "@atlassian-dc-mcp/confluence@0.35.0"]
+      env:
+        CONFLUENCE_HOST: confluence.example.corp
+        CONFLUENCE_API_TOKEN: keychain:confluence
+        NODE_OPTIONS: --use-system-ca
+      network: intranet
+      profile: atlassian
+      allow: [confluence.get, confluence.search]
+```
+
+Агенты research и requirements, если задача называет ключ (`ABC-123`), сначала читают задачу и связанные
+страницы Confluence и ссылаются на них как на источники.
+
 `profile: { base: atlassian, map: { "jira.worklog": "jira_add_worklog" } }` добавляет только чистые
 чтения; эффекты из конфигурации объявить нельзя (их проверку должен знать код).
 

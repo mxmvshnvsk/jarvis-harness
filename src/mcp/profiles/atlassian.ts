@@ -2,10 +2,13 @@ import { type McpProfile, type ProfileCapability, params } from "../types.ts";
 
 /**
  * Atlassian profile (ADR-0017 §4): Jira and Confluence. Tool candidates cover the official Atlassian
- * Remote MCP server (camelCase) and the common community server (`jira_*` / `confluence_*`).
+ * Remote MCP server (camelCase), the common community server (`jira_*` / `confluence_*`) and the Data
+ * Center servers `@atlassian-dc-mcp/jira` and `@atlassian-dc-mcp/confluence` (`jira_getIssue`,
+ * `confluence_getContent`, … — one server each, so one profile serves both). Arguments carry every
+ * known spelling; the call keeps only those the tool's schema declares.
  */
 const jiraGet: ProfileCapability = {
-  tools: ["getJiraIssue", "jira_get_issue", "get_issue"],
+  tools: ["getJiraIssue", "jira_get_issue", "jira_getIssue", "get_issue"],
   description: "Read one Jira issue by key: summary, description, status, links, comments.",
   access: "read",
   effect: false,
@@ -14,7 +17,7 @@ const jiraGet: ProfileCapability = {
 };
 
 const jiraSearch: ProfileCapability = {
-  tools: ["searchJiraIssuesUsingJql", "jira_search", "search_issues"],
+  tools: ["searchJiraIssuesUsingJql", "jira_search", "jira_searchIssues", "search_issues"],
   description: "Search Jira issues with JQL.",
   access: "read",
   effect: false,
@@ -23,7 +26,7 @@ const jiraSearch: ProfileCapability = {
 };
 
 const jiraComment: ProfileCapability = {
-  tools: ["addCommentToJiraIssue", "jira_add_comment", "add_comment"],
+  tools: ["addCommentToJiraIssue", "jira_add_comment", "jira_postIssueComment", "add_comment"],
   description: "Add a comment to a Jira issue. An effect: journaled and verified by marker.",
   access: "write",
   effect: true,
@@ -46,7 +49,7 @@ const jiraComment: ProfileCapability = {
 };
 
 const jiraTransition: ProfileCapability = {
-  tools: ["transitionJiraIssue", "jira_transition_issue", "transition_issue"],
+  tools: ["transitionJiraIssue", "jira_transition_issue", "jira_transitionIssue", "transition_issue"],
   description: "Move a Jira issue to another status. An effect: verified by reading the status back.",
   access: "write",
   effect: true,
@@ -59,6 +62,7 @@ const jiraTransition: ProfileCapability = {
     issue_key: a.key ?? a.issueKey,
     transition: a.transition,
     transition_id: a.transition,
+    transitionId: a.transition,
   }),
   verify: async (connection, resolveTool, args, _marker) => {
     const tool = resolveTool(jiraGet.tools);
@@ -73,25 +77,37 @@ const jiraTransition: ProfileCapability = {
 };
 
 const confluenceGet: ProfileCapability = {
-  tools: ["getConfluencePage", "confluence_get_page", "get_page"],
+  tools: ["getConfluencePage", "confluence_get_page", "confluence_getContent", "get_page"],
   description: "Read a Confluence page by id.",
   access: "read",
   effect: false,
   parameters: params({ id: "page id" }, ["id"]),
-  args: (a) => ({ pageId: a.id ?? a.pageId, page_id: a.id ?? a.pageId }),
+  args: (a) => ({
+    pageId: a.id ?? a.pageId,
+    page_id: a.id ?? a.pageId,
+    contentId: a.id ?? a.pageId,
+    // Data Center: the body as text, not storage-format XML the agent would have to read through
+    bodyMode: "text",
+  }),
 };
 
 const confluenceSearch: ProfileCapability = {
-  tools: ["searchConfluenceUsingCql", "confluence_search", "search"],
+  tools: ["searchConfluenceUsingCql", "confluence_search", "confluence_searchContent", "search"],
   description: "Search Confluence with CQL or free text.",
   access: "read",
   effect: false,
   parameters: params({ query: "free text", cql: "CQL query (alternative to query)", limit: "max results" }),
-  args: (a) => ({ cql: a.cql ?? a.query, query: a.query ?? a.cql, limit: a.limit ?? 10 }),
+  // a server that takes only CQL gets free text as `text ~ "…"` (Data Center: CQL is required)
+  args: (a) => ({
+    cql: a.cql ?? (typeof a.query === "string" ? `text ~ "${a.query.replace(/["\\]/g, " ")}"` : undefined),
+    query: a.query ?? a.cql,
+    limit: a.limit ?? 10,
+    excerpt: "highlight",
+  }),
 };
 
 const confluenceCreate: ProfileCapability = {
-  tools: ["createConfluencePage", "confluence_create_page", "create_page"],
+  tools: ["createConfluencePage", "confluence_create_page", "confluence_createContent", "create_page"],
   description: "Create a Confluence page. An effect: verified by searching for the marker.",
   access: "write",
   effect: true,
@@ -103,6 +119,7 @@ const confluenceCreate: ProfileCapability = {
   args: (a) => ({
     spaceId: a.space,
     space_key: a.space,
+    spaceKey: a.space,
     title: a.title,
     body: a.body,
     content: a.body,
