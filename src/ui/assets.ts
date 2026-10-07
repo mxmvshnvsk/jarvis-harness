@@ -89,6 +89,7 @@ input.amount{height:44px;width:11em;padding:0 10px;font-family:inherit;font-size
 .models{display:inline-flex;align-items:center;gap:8px;min-height:36px;padding:0 10px;border:1px solid var(--border-btn);border-radius:6px;background:var(--panel);color:var(--ink-2);font-family:var(--mono);font-size:12px;cursor:pointer}
 .models:hover,.models[aria-expanded=true]{border-color:var(--ink-2);color:var(--ink)}
 .models .dot[data-state=down]{box-shadow:0 0 0 3px var(--bad-bg)}
+.models .free{padding:1px 6px;border-radius:999px;background:var(--ok-bg);color:var(--ok);font-size:11px;white-space:nowrap}
 .pop{position:absolute;right:0;top:calc(100% + 8px);width:min(520px,calc(100vw - 32px));max-height:min(70vh,640px);overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:12px;box-shadow:0 16px 40px var(--shadow);padding:14px 16px;z-index:30}
 .pop[hidden]{display:none}
 .pop>div{display:flex;flex-direction:column;gap:12px}
@@ -631,6 +632,12 @@ export const SCRIPT = `
       button.querySelector('.dot').dataset.state = data.state;
       button.title = data.title;
       button.setAttribute('aria-label', data.title);
+      // ∞ while a model is not limited (unlimited hours, a pool with no limits)
+      const badge = button.querySelector('[data-badge]');
+      if (badge) {
+        badge.textContent = data.badge || '';
+        badge.hidden = !data.badge;
+      }
       const body = pop.querySelector('[data-' + name + '-body]');
       if (body) body.innerHTML = data.html;
       // the server is still collecting or checking: ask again shortly; the popover says it waits

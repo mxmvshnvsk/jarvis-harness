@@ -3,7 +3,7 @@ import { type BudgetStop, sourceOf, unitOf } from "../app/budgetStop.ts";
 import { type BudgetWait, whenText } from "../app/budgetWait.ts";
 import { duration } from "../app/journey.ts";
 import type { McpHealth, McpServerHealth } from "../app/mcpHealth.ts";
-import type { HealthState, ModelHealth, ModelPerf, ModelsHealth } from "../app/modelHealth.ts";
+import type { HealthState, ModelHealth, ModelPerf, ModelsHealth, Unlimited } from "../app/modelHealth.ts";
 import type { Change } from "../cli/checkout.ts";
 import { toolMix } from "../cli/progress.ts";
 import { documentToMarkdown } from "../cli/render.ts";
@@ -109,7 +109,7 @@ ${chrome.canStart ? html`<a class="btn primary small" href="/#new">New task</a>`
 <div class="status">
 <div class="models-wrap" data-pop-wrap><button type="button" class="models" data-mcp aria-expanded="false" aria-controls="mcp-pop" title="MCP: checking the servers…"><span class="dot" data-state="pending" aria-hidden="true"></span><span>mcp</span></button>
 <div id="mcp-pop" class="pop" role="dialog" aria-label="MCP servers" hidden><div data-mcp-body>${mcpPending()}</div></div></div>
-<div class="models-wrap" data-pop-wrap><button type="button" class="models" data-models aria-expanded="false" aria-controls="models-pop" title="Models: collecting the stats…"><span class="dot" data-state="pending" aria-hidden="true"></span><span>models</span></button>
+<div class="models-wrap" data-pop-wrap><button type="button" class="models" data-models aria-expanded="false" aria-controls="models-pop" title="Models: collecting the stats…"><span class="dot" data-state="pending" aria-hidden="true"></span><span>models</span><span class="free" data-badge hidden></span></button>
 <div id="models-pop" class="pop" role="dialog" aria-label="Models" hidden><div data-models-body>${modelsPending()}</div></div></div>
 <span class="live" data-state="connecting" role="status"><span class="dot" aria-hidden="true"></span><span class="label">connecting…</span><span aria-hidden="true">·</span><span>${chrome.address}</span></span>
 <button type="button" class="theme notify" data-notify aria-pressed="false" aria-label="System notifications when a run waits for you" title="System notifications when a run waits for you"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.75a4 4 0 0 0-4 4v2.6L2.75 11h10.5L12 8.35v-2.6a4 4 0 0 0-4-4zM6.5 13a1.5 1.5 0 0 0 3 0" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"></path></svg></button>
@@ -970,12 +970,43 @@ const HEALTH: Record<HealthState, { label: string; pill: string }> = {
   idle: { label: "idle", pill: "plain" },
 };
 
-/** One line for the indicator's tooltip: the worst model and why. */
+/** One line for the indicator's tooltip: the worst model and why; and what is unlimited now. */
 export function modelsSummary(h: ModelsHealth): string {
   if (h.models.length === 0) return "Models: none configured";
   const worst = h.models.find((m) => m.state === h.state);
   const why = worst?.reasons[0];
-  return `Models: ${HEALTH[h.state].label}${worst && h.state !== "ok" && h.state !== "idle" ? ` — ${worst.id}${why ? `: ${why}` : ""}` : ""}`;
+  const free = unlimitedNow(h);
+  return `Models: ${HEALTH[h.state].label}${worst && h.state !== "ok" && h.state !== "idle" ? ` — ${worst.id}${why ? `: ${why}` : ""}` : ""}${free ? ` · ${free.id}: ${unlimitedText(free.unlimited)}` : ""}`;
+}
+
+/** The model unlimited now that matters most: the one whose unlimited hours are on, else a pool with no limits. */
+function unlimitedNow(h: ModelsHealth): (ModelHealth & { unlimited: Unlimited }) | undefined {
+  const free = h.models.filter((m): m is ModelHealth & { unlimited: Unlimited } => m.unlimited?.now === true);
+  return free.find((m) => !(m.unlimited.now && m.unlimited.always)) ?? free[0];
+}
+
+/** `∞ until 07:00` on the header's button while a model is not limited; nothing otherwise. */
+export function modelsBadge(h: ModelsHealth): string | undefined {
+  const free = unlimitedNow(h);
+  if (!free?.unlimited.now) return undefined;
+  return free.unlimited.until ? `∞ until ${whenAt(free.unlimited.until)}` : "∞";
+}
+
+/** `14:30` today, `Mon 07:00` another day. */
+function whenAt(ts: string): string {
+  const at = new Date(ts);
+  const time = at.toTimeString().slice(0, 5);
+  return at.toDateString() === new Date().toDateString()
+    ? time
+    : `${at.toLocaleDateString("en-GB", { weekday: "short" })} ${time}`;
+}
+
+function unlimitedText(u: Unlimited): string {
+  if (u.now)
+    return u.always
+      ? "unlimited (its pool has no limits)"
+      : `unlimited hours${u.until ? ` until ${whenAt(u.until)}` : ""}`;
+  return u.next ? `unlimited hours from ${whenAt(u.next)}` : "";
 }
 
 const pct = (share: number) => `${Math.round(share * 100)}%`;
@@ -997,14 +1028,15 @@ function modelHtml(m: ModelHealth): Html {
     ...m.waiting.quota.map((id) => ({ id, why: "quota" })),
   ];
   return html`<li class="mh">
-<div class="row"><span class="dot" data-state="${m.state}" aria-hidden="true"></span><b class="mono">${m.id}</b><span class="pill ${HEALTH[m.state].pill}">${HEALTH[m.state].label}</span></div>
+<div class="row"><span class="dot" data-state="${m.state}" aria-hidden="true"></span><b class="mono">${m.id}</b><span class="pill ${HEALTH[m.state].pill}">${HEALTH[m.state].label}</span>${m.unlimited?.now ? html`<span class="pill ok">∞ ${unlimitedText(m.unlimited)}</span>` : ""}</div>
 ${m.reasons.length > 0 ? html`<ul class="why">${m.reasons.map((x) => html`<li>${x}</li>`)}</ul>` : ""}
 ${
   w
     ? html`<div class="win">${used !== undefined ? html`<div class="bar" role="img" aria-label="quota window ${used}% used"><span class="${w.share !== undefined && w.share >= 1 ? "full" : w.share !== undefined && w.share >= w.soft ? "soft" : ""}" style="width:${used}%"></span></div>` : ""}
-<span class="meta">${kilo(w.outputTokens)}${w.outputLimit ? ` / ${kilo(w.outputLimit)}` : ""} output tok · ${w.requests}${w.requestLimit ? ` / ${w.requestLimit}` : ""} requests · ${w.minutes} min window${w.share !== undefined ? ` · ${pct(w.share)}` : ""}</span></div>`
+<span class="meta">${w.inputLimit || w.inputTokens > 0 ? `${kilo(w.inputTokens)}${w.inputLimit ? ` / ${kilo(w.inputLimit)}` : ""} input · ` : ""}${kilo(w.outputTokens)}${w.outputLimit ? ` / ${kilo(w.outputLimit)}` : ""} output tok · ${w.requests}${w.requestLimit ? ` / ${w.requestLimit}` : ""} requests · ${w.minutes} min window${w.share !== undefined ? ` · ${pct(w.share)}` : ""}</span></div>`
     : ""
 }
+${m.unlimited && !m.unlimited.now && m.unlimited.next ? html`<span class="meta">${unlimitedText(m.unlimited)}</span>` : ""}
 ${m.inFlight.calls > 0 ? html`<span class="meta now-line"><span class="spin" aria-hidden="true"></span>${m.inFlight.calls} request${m.inFlight.calls === 1 ? "" : "s"} being answered now${m.inFlight.longestMs ? ` · longest ${duration(m.inFlight.longestMs)}` : ""}</span>` : ""}
 <span class="meta">last ${r.minutes} min: ${lineOf}</span>
 ${m.perf ? perfHtml(m.perf) : ""}

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { type HealthInput, modelsHealth } from "../../src/app/modelHealth.ts";
 import type { Run } from "../../src/core/domain/run.ts";
 import type { StoredEvent } from "../../src/telemetry/events.ts";
+import { modelsBadge, modelsPopover, modelsSummary } from "../../src/ui/pages.ts";
 
 let seq = 0;
 const ev = (kind: string, ts: string, payload: Record<string, unknown>): StoredEvent =>
@@ -138,5 +139,57 @@ describe("how the models are doing", () => {
     expect(perf?.retriedCalls).toBe(1);
     expect(h.models[0]?.inFlight).toEqual({ calls: 1, longestMs: 12_000 });
     expect(h.models[1]?.inFlight).toEqual({ calls: 0 });
+  });
+
+  it("unlimited: the pool's unlimited hours or a pool with no limits — the window does not make it busy", () => {
+    const h = modelsHealth(
+      base({
+        models: [
+          { id: "flash", pool: "corp" },
+          { id: "flash-vip", pool: "vip" },
+        ],
+        pool: (name) =>
+          name === "corp"
+            ? {
+                soft: 0.8,
+                minutes: 20,
+                inputLimit: 2_000_000,
+                inputTokens: 1_990_000,
+                outputTokens: 900,
+                requests: 30,
+                unlimited: { now: true, until: "2026-10-08T05:00:00.000Z" },
+              }
+            : undefined,
+        unlimitedPool: (name) => name === "vip",
+      }),
+    );
+    const [flash, vip] = h.models;
+    expect(flash?.unlimited).toEqual({ now: true, until: "2026-10-08T05:00:00.000Z" });
+    expect(flash?.window).toMatchObject({ inputTokens: 1_990_000, inputLimit: 2_000_000 });
+    expect(flash?.window?.share).toBeUndefined();
+    expect(flash?.state).toBe("ok");
+    expect(vip?.unlimited).toEqual({ now: true, always: true });
+    expect(modelsBadge(h)).toMatch(/^∞ until /);
+    expect(modelsSummary(h)).toContain("flash: unlimited hours until");
+    expect(modelsPopover(h).value).toContain("∞ unlimited (its pool has no limits)");
+    expect(modelsPopover(h).value).toContain("1990k / 2000k input");
+
+    // outside the hours: the window counts again, and when they begin is said
+    const day = modelsHealth(
+      base({
+        pool: () => ({
+          soft: 0.8,
+          minutes: 20,
+          inputLimit: 2_000_000,
+          inputTokens: 1_990_000,
+          outputTokens: 900,
+          requests: 30,
+          unlimited: { now: false, next: "2026-10-07T20:00:00.000Z" },
+        }),
+      }),
+    );
+    expect(day.models[0]?.state).toBe("busy");
+    expect(modelsBadge(day)).toBeUndefined();
+    expect(modelsPopover(day).value).toContain("unlimited hours from");
   });
 });

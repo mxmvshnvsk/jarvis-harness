@@ -19,7 +19,14 @@ export interface ModelHealth {
   /** Why it is not simply fine, most important first; empty when it is. */
   readonly reasons: readonly string[];
   readonly pool: string;
+  /**
+   * Calls of this model are not limited now: its pool's unlimited hours (until when), or a pool with no
+   * limits at all (`always`); or when the unlimited hours begin next.
+   */
+  readonly unlimited?: Unlimited;
   readonly window?: {
+    readonly inputTokens: number;
+    readonly inputLimit?: number;
     readonly outputTokens: number;
     readonly outputLimit?: number;
     readonly requests: number;
@@ -50,6 +57,10 @@ export interface ModelHealth {
   /** Short ids of the runs waiting for this model to answer again, and for its quota window. */
   readonly waiting: { readonly model: readonly string[]; readonly quota: readonly string[] };
 }
+
+export type Unlimited =
+  | { readonly now: true; readonly until?: string; readonly always?: true }
+  | { readonly now: false; readonly next?: string };
 
 export interface ModelPerf {
   readonly latencyMs?: Percentiles;
@@ -88,12 +99,17 @@ export interface HealthInput {
     | {
         readonly soft: number;
         readonly minutes: number;
+        readonly inputLimit?: number;
         readonly outputLimit?: number;
         readonly requestLimit?: number;
+        readonly inputTokens?: number;
         readonly outputTokens: number;
         readonly requests: number;
+        readonly unlimited?: Unlimited;
       }
     | undefined;
+  /** A model whose pool is not limited at all (none configured, or no limits in it). */
+  readonly unlimitedPool?: (name: string) => boolean;
   /** `model.call`, `model.retry`, `model.error`, `model.progress` of the last half hour. */
   readonly events: readonly StoredEvent[];
   /** Runs parked in WAITING_BUDGET, with the model they wait on. */
@@ -181,15 +197,23 @@ function healthOf(m: { id: string; pool: string }, input: HealthInput, stats?: M
   };
 
   const usage = input.pool(m.pool);
-  const shares = usage
-    ? [
-        usage.outputLimit ? usage.outputTokens / usage.outputLimit : undefined,
-        usage.requestLimit ? usage.requests / usage.requestLimit : undefined,
-      ].filter((v): v is number => v !== undefined)
-    : [];
+  const unlimited: Unlimited | undefined = input.unlimitedPool?.(m.pool)
+    ? { now: true, always: true }
+    : usage?.unlimited;
+  // in unlimited hours the window says nothing about what gets through
+  const shares =
+    usage && !unlimited?.now
+      ? [
+          usage.inputLimit ? (usage.inputTokens ?? 0) / usage.inputLimit : undefined,
+          usage.outputLimit ? usage.outputTokens / usage.outputLimit : undefined,
+          usage.requestLimit ? usage.requests / usage.requestLimit : undefined,
+        ].filter((v): v is number => v !== undefined)
+      : [];
   const share = shares.length > 0 ? Math.max(...shares) : undefined;
   const window = usage
     ? {
+        inputTokens: usage.inputTokens ?? 0,
+        ...(usage.inputLimit ? { inputLimit: usage.inputLimit } : {}),
         outputTokens: usage.outputTokens,
         ...(usage.outputLimit ? { outputLimit: usage.outputLimit } : {}),
         requests: usage.requests,
@@ -256,6 +280,7 @@ function healthOf(m: { id: string; pool: string }, input: HealthInput, stats?: M
     state,
     reasons,
     pool: m.pool,
+    ...(unlimited ? { unlimited } : {}),
     ...(window ? { window } : {}),
     recent,
     ...(stats ? { perf: perfOf(stats) } : {}),
@@ -287,16 +312,31 @@ export function modelsHealthOf(runtime: Runtime, now: Date = new Date()): Models
       const definition = runtime.budget.pool(name);
       const usage = runtime.budget.windowUsage(name);
       if (!definition || !usage) return undefined;
+      const u = runtime.budget.unlimited(name);
+      const unlimited: Unlimited | undefined = !u
+        ? undefined
+        : u.now
+          ? { now: true, ...(u.until ? { until: u.until.toISOString() } : {}) }
+          : { now: false, ...(u.next ? { next: u.next.toISOString() } : {}) };
       return {
         soft: definition.soft,
         minutes: definition.window.minutes,
+        ...(definition.limits.inputTokens !== undefined ? { inputLimit: definition.limits.inputTokens } : {}),
         ...(definition.limits.outputTokens !== undefined
           ? { outputLimit: definition.limits.outputTokens }
           : {}),
         ...(definition.limits.requests !== undefined ? { requestLimit: definition.limits.requests } : {}),
+        inputTokens: usage.promptTokens,
         outputTokens: usage.outputTokens,
         requests: usage.requests,
+        ...(unlimited ? { unlimited } : {}),
       };
+    },
+    unlimitedPool: (name) => {
+      const definition = runtime.budget.pool(name);
+      if (!definition) return true;
+      const l = definition.limits;
+      return l.inputTokens === undefined && l.outputTokens === undefined && l.requests === undefined;
     },
     events,
     parked,

@@ -89,6 +89,7 @@ import {
   mcpPending,
   mcpPopover,
   mcpSummary,
+  modelsBadge,
   modelsPending,
   modelsPopover,
   modelsSummary,
@@ -251,6 +252,7 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
         state: health.state,
         title: modelsSummary(health),
         html: modelsPopover(health).value,
+        ...((b) => (b ? { badge: b } : {}))(modelsBadge(health)),
       });
     } catch {
       // a busy database: the next round tries again
