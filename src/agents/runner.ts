@@ -24,6 +24,7 @@ import { buildBaseMessages } from "./context.ts";
 import type { AgentRegistry } from "./definition.ts";
 import { packageForStep } from "./knowledge.ts";
 import { ReadLedger, readKey } from "./rereads.ts";
+import { SearchLedger } from "./searches.ts";
 
 /** The agent's "I have what I need": the document is asked for next (system rule in context.ts). */
 export const saidDone = (text: string): boolean => /^\s*\**DONE\b/i.test(text);
@@ -198,6 +199,7 @@ export class AgentRuntimeRunner implements AgentRunner {
       !grants.finish;
     // files read in this step, from the conversation itself (src/agents/rereads.ts)
     const reads = ReadLedger.from(transcript);
+    const searches = SearchLedger.from(transcript);
     let toolCalls = restored?.toolCalls ?? 0;
     let modelCalls = restored?.modelCalls ?? 0;
     const emit = (kind: string, payload: Record<string, unknown>) =>
@@ -456,7 +458,11 @@ export class AgentRuntimeRunner implements AgentRunner {
         );
         if (answered.kind !== "first")
           emit("tool.reread", { capability: call.name, path: args.path, kind: answered.kind });
-        transcript = [...transcript, { role: "tool", toolCallId: call.id, content: answered.content }];
+        // the same empty search again: it ran, and the answer says it was empty before too
+        const sought = searches.answer(call.name, args, call.id, answered.content);
+        if (sought.kind !== "first")
+          emit("tool.repeat", { capability: call.name, pattern: args.pattern, kind: sought.kind });
+        transcript = [...transcript, { role: "tool", toolCallId: call.id, content: sought.content }];
       }
       // after the whole answer: a checkpoint mid-way would keep tool calls without their results
       if (Math.floor(toolCalls / limits.checkpointEvery) > Math.floor(callsBefore / limits.checkpointEvery))
