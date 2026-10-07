@@ -476,7 +476,7 @@ describe("New task on the page", () => {
     const card = await page(`/runs/${short}`);
     expect(card).toContain("requirements asks before going on");
     expect(card).toContain("Can a customer pick a slot for today after 18:00?");
-    expect(card).toContain(`action="/runs/${short}/clarify"`);
+    expect(card).toContain(`action="/runs/${short}/clarify" class="clarify"`);
     expect(card).not.toContain("Answer in the terminal");
     // on the list of runs: what it asks, and where to answer
     expect(await page("/")).toContain("⏸ clarification · requirements");

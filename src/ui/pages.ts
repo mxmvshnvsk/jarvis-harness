@@ -1068,7 +1068,7 @@ function clarifyCardHtml(card: ClarifyCard, page: RunPage, actions?: Actions): H
 <label class="field grow">The rule<textarea name="rule" rows="2" maxlength="2000" placeholder="State it so it can be tested: states, conditions, edge cases">${p?.rule ?? ""}</textarea></label>
 <div class="actions"><button type="submit" name="move" value="rule" class="btn">Accept this rule and go on</button></div>
 </details>`,
-        ' class="clarify"',
+        html` class="clarify"`,
       )
     : html`<div class="actions"><span class="hint">Answer in the terminal: <code>${cmd}</code></span><button type="button" class="btn" data-copy="${cmd}">Copy command</button></div>`;
   return html`<section class="panel decision" aria-labelledby="decision" data-live="card">
