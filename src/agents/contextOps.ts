@@ -7,6 +7,7 @@ import {
   type PressureLevel,
   pressureOf,
   resolveThresholds,
+  SUMMARY_MAX_OUTPUT,
   splitBlocks,
   summarizerMessages,
   type Thresholds,
@@ -179,9 +180,9 @@ export async function reshapeContext(
       iteration: t.iteration,
       messages: summarizerMessages(rendered, previous),
       temperature: 0,
-      maxOutput: Math.min(2000, summarizerMaxOutput),
+      maxOutput: Math.min(SUMMARY_MAX_OUTPUT, summarizerMaxOutput),
     });
-    return response.text;
+    return { text: response.text, truncated: response.finishReason === "length" };
   };
 
   const compacted = await compactTranscript(trimmed.transcript, {
@@ -233,6 +234,7 @@ export async function reshapeContext(
       after: report.tokensAfter,
       blocks: report.blocksCompacted,
       trimmed: report.trimmed,
+      ...(compacted?.fallback ? { fallback: compacted.fallback } : {}),
       originals: report.originals,
     },
   });

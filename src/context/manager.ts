@@ -1,7 +1,7 @@
 import { ModelError } from "../models/errors.ts";
 import type { Message } from "../models/types.ts";
 import { levelOf, type PressureLevel, pressureOf, type Thresholds } from "./pressure.ts";
-import { compactTranscript, isSourceResult, trimmable, trimToolResults } from "./transcript.ts";
+import { compactTranscript, isSourceResult, type Summary, trimmable, trimToolResults } from "./transcript.ts";
 
 /** At `watch`: keep the 3 newest tool results, and trim only once 4 older ones are untrimmed. */
 const WATCH_KEEP = 3;
@@ -23,7 +23,7 @@ export interface ContextManagerOptions {
   /** Estimated tokens of messages (tool definitions included by the caller). */
   readonly estimate: (messages: readonly Message[]) => number;
   readonly store: (text: string) => string;
-  readonly summarize: (rendered: string, previousHandoff?: string) => Promise<string>;
+  readonly summarize: (rendered: string, previousHandoff?: string) => Promise<Summary>;
   /** A smaller base (L3/L4 rebuilt with a tighter budget); called at most once per step. */
   readonly tighten?: () => Message[];
   readonly emit: (kind: string, payload: Record<string, unknown>) => void;
@@ -128,6 +128,7 @@ export class ContextManager {
           after: tokens,
           blocks: r.compactedBlocks,
           originals: r.originals,
+          ...(r.fallback ? { fallback: r.fallback } : {}),
         });
       } catch (error) {
         if (mustPropagate(error)) throw error;

@@ -13,24 +13,24 @@ steps:
     tool: project.discover
     outputs: [project-capabilities]
     transitions: { onSuccess: design }
-  # the design frames of the task (issue → its pages → Figma), read and described by code, no model
+  # the task's issue and its pages as read, and their design frames described — by code, no model
   - id: design
     kind: deterministic
     tool: design.collect
-    outputs: [design]
+    outputs: [sources, design]
     transitions: { onSuccess: research }
   - id: research
     kind: agentic
     agent: research
     phase: research
-    inputs: [design]
+    inputs: [sources, design]
     outputs: [research]
     transitions: { onSuccess: requirements }
   - id: requirements
     kind: agentic
     agent: requirements
     phase: requirements
-    inputs: [research, design]
+    inputs: [sources, research, design]
     outputs: [requirements]
     transitions: { onSuccess: spec }
   - id: spec
@@ -187,17 +187,17 @@ steps:
     tool: project.discover
     outputs: [project-capabilities]
     transitions: { onSuccess: design }
-  # the design frames of the task (issue → its pages → Figma), read and described by code, no model
+  # the task's issue and its pages as read, and their design frames described — by code, no model
   - id: design
     kind: deterministic
     tool: design.collect
-    outputs: [design]
+    outputs: [sources, design]
     transitions: { onSuccess: research }
   - id: research
     kind: agentic
     agent: research
     phase: research
-    inputs: [design]
+    inputs: [sources, design]
     outputs: [research]
     transitions: { onSuccess: DONE }
 `;
@@ -214,24 +214,24 @@ steps:
     tool: project.discover
     outputs: [project-capabilities]
     transitions: { onSuccess: design }
-  # the design frames of the task (issue → its pages → Figma), read and described by code, no model
+  # the task's issue and its pages as read, and their design frames described — by code, no model
   - id: design
     kind: deterministic
     tool: design.collect
-    outputs: [design]
+    outputs: [sources, design]
     transitions: { onSuccess: research }
   - id: research
     kind: agentic
     agent: research
     phase: research
-    inputs: [design]
+    inputs: [sources, design]
     outputs: [research]
     transitions: { onSuccess: requirements }
   - id: requirements
     kind: agentic
     agent: requirements
     phase: requirements
-    inputs: [research, design]
+    inputs: [sources, research, design]
     outputs: [requirements]
     transitions: { onSuccess: spec }
   - id: spec
@@ -325,17 +325,17 @@ steps:
     tool: project.discover
     outputs: [project-capabilities]
     transitions: { onSuccess: design }
-  # the design frames of the task (issue → its pages → Figma), read and described by code, no model
+  # the task's issue and its pages as read, and their design frames described — by code, no model
   - id: design
     kind: deterministic
     tool: design.collect
-    outputs: [design]
+    outputs: [sources, design]
     transitions: { onSuccess: research }
   - id: research
     kind: agentic
     agent: research
     phase: research
-    inputs: [design]
+    inputs: [sources, design]
     outputs: [research]
     transitions: { onSuccess: spec }
   - id: spec

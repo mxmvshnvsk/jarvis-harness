@@ -1,5 +1,11 @@
 import { BudgetExceededError, grantsFromEvents } from "../budget/runBudget.ts";
-import { ContextManager, effectiveWindow, resolveThresholds, summarizerMessages } from "../context/index.ts";
+import {
+  ContextManager,
+  effectiveWindow,
+  resolveThresholds,
+  SUMMARY_MAX_OUTPUT,
+  summarizerMessages,
+} from "../context/index.ts";
 import type { ArtifactVersion } from "../core/domain/artifact.ts";
 import { ModelError } from "../models/errors.ts";
 import { resolveModel } from "../models/router.ts";
@@ -208,9 +214,9 @@ export class AgentRuntimeRunner implements AgentRunner {
             agentId: def.id,
             messages: summarizerMessages(rendered, previous),
             temperature: 0,
-            maxOutput: Math.min(2000, summarizerRoute.model.maxOutput),
+            maxOutput: Math.min(SUMMARY_MAX_OUTPUT, summarizerRoute.model.maxOutput),
           });
-          return response.text;
+          return { text: response.text, truncated: response.finishReason === "length" };
         },
         // Aggressive pressure also tightens L3/L4: the same inputs under a smaller budget.
         tighten: () => buildBase(Math.floor(charBudget * 0.6)),

@@ -6,13 +6,18 @@ export const DESIGN_LIMITS = { issues: 3, pages: 6, frames: 8 } as const;
 
 const num = (v: unknown, fallback: number) => (typeof v === "number" && v > 0 ? Math.floor(v) : fallback);
 
+/** The issue and page texts handed to the agents as they were read, at most this much. */
+export const SOURCES_LIMITS = { perSource: 20_000, total: 60_000 } as const;
+
 /**
- * `design.collect` — the design frames of a task, read by code before any agent runs: the issues the
- * task names (`jira.get`), the Confluence pages they link (`confluence.get`, embedded frames included),
- * every Figma frame link found there (`figma.get`, described by code). The result is the `design`
- * artifact the agents get as an input. Every call goes through the Tool Router like an agent's — policy,
- * the egress exception, the journal. Pilot: the research agent read 2 of 7 frames and spent its tool
- * calls deciding which.
+ * `design.collect` — the task's sources and their design frames, read by code before any agent runs:
+ * the issues the task names (`jira.get`), the Confluence pages they link (`confluence.get`, embedded
+ * frames included), every Figma frame link found there (`figma.get`, described by code). Two artifacts
+ * the agents get as inputs: `sources` (the issues and pages as read) and `design` (the frames). Every
+ * call goes through the Tool Router like an agent's — policy, the egress exception, the journal.
+ * Pilot: the research agent read 2 of 7 frames and spent its tool calls deciding which; and with the
+ * pages read here only for their links, it read the issue and a page three times each and never
+ * opened the page with the API the task needed.
  */
 export const collectDesign: DeterministicTool = async (ctx, args) => {
   const limits = {
@@ -21,15 +26,13 @@ export const collectDesign: DeterministicTool = async (ctx, args) => {
     frames: num(args.maxFrames, DESIGN_LIMITS.frames),
   };
   const available = new Set(ctx.tools.list().map((d) => d.name));
-  if (!available.has("figma.get"))
-    return { status: "success", reason: "figma.get is not available here: no design frames read" };
 
   const sources: Array<{ from: string; text: string }> = [{ from: "the task", text: ctx.run.task }];
   const keys = [...new Set(ctx.run.task.match(/\b[A-Z][A-Z0-9]+-\d+\b/g) ?? [])].slice(0, limits.issues);
   if (available.has("jira.get"))
     for (const key of keys) {
       const r = await ctx.tools.invoke("jira.get", { key });
-      if (r.ok) sources.push({ from: `issue ${key}`, text: r.text });
+      if (r.ok) sources.push({ from: `issue ${key}`, text: withoutHead(r.text) });
     }
   const pages = [
     ...new Set(
@@ -43,8 +46,28 @@ export const collectDesign: DeterministicTool = async (ctx, args) => {
       const r = await ctx.tools.invoke("confluence.get", { id });
       if (!r.ok) continue;
       const title = /"title":\s*"([^"]+)"/.exec(r.text)?.[1];
-      sources.push({ from: `Confluence ${title ? `«${title}» ` : ""}(${id})`, text: r.text });
+      sources.push({ from: `Confluence ${title ? `«${title}» ` : ""}(${id})`, text: withoutHead(r.text) });
     }
+  const outputs: string[] = [];
+  const read = sources.slice(1);
+  if (read.length > 0) {
+    const artifact = ctx.runtime.artifacts.put({
+      runId: ctx.run.id,
+      type: "sources",
+      name: "sources.md",
+      content: sourcesDoc(read),
+      provenance: { kind: "tool", capability: "design.collect" },
+      stepId: ctx.step.id,
+      iteration: ctx.iteration,
+    });
+    outputs.push(`${artifact.artifactId}@${artifact.version}`);
+  }
+  const done = (reason: string) => ({
+    status: "success" as const,
+    reason,
+    ...(outputs.length > 0 ? { outputs } : {}),
+  });
+  if (!available.has("figma.get")) return done("figma.get is not available here: no design frames read");
 
   const found: Array<{ link: string; from: string }> = [];
   const seen = new Set<string>();
@@ -55,10 +78,9 @@ export const collectDesign: DeterministicTool = async (ctx, args) => {
       seen.add(id);
       found.push({ link, from: s.from });
     }
-  if (found.length === 0)
-    return { status: "success", reason: "no design frame links in the task, its issues or pages" };
+  if (found.length === 0) return done("no design frame links in the task, its issues or pages");
 
-  const read: Array<{ link: string; from: string; text: string }> = [];
+  const frames: Array<{ link: string; from: string; text: string }> = [];
   const missed: Array<{ link: string; from: string; why: string }> = [];
   let limited: string | undefined;
   for (const f of found.slice(0, limits.frames)) {
@@ -72,7 +94,7 @@ export const collectDesign: DeterministicTool = async (ctx, args) => {
     if (!r.ok && /time(d)? ?out/i.test(r.error ?? r.text))
       r = await ctx.tools.invoke("figma.get", { url: f.link, depth: 4 });
     if (r.ok) {
-      read.push({ ...f, text: r.text.replace(/^\[figma\.get\] ok\n/, "") });
+      frames.push({ ...f, text: withoutHead(r.text) });
       continue;
     }
     const message = r.error ?? r.text;
@@ -88,8 +110,8 @@ export const collectDesign: DeterministicTool = async (ctx, args) => {
   const doc = [
     "# Design frames of the task",
     "",
-    `Read by Jarvis from the task, its issues and their Confluence pages, without a model: ${read.length} frame${read.length === 1 ? "" : "s"} read${missed.length > 0 ? `, ${missed.length} not` : ""}. Texts, layout, components and spacing come from Figma as they are; map them to the code with the project's design-system knowledge — the colours and fonts of the designs may be newer than the code's theme.`,
-    ...read.flatMap((f, i) => [
+    `Read by Jarvis from the task, its issues and their Confluence pages, without a model: ${frames.length} frame${frames.length === 1 ? "" : "s"} read${missed.length > 0 ? `, ${missed.length} not` : ""}. Texts, layout, components and spacing come from Figma as they are; map them to the code with the project's design-system knowledge — the colours and fonts of the designs may be newer than the code's theme.`,
+    ...frames.flatMap((f, i) => [
       "",
       `## ${i + 1}. ${(/^### (.+)$/m.exec(f.text)?.[1] ?? "frame").trim()}`,
       `From ${f.from} · ${f.link}`,
@@ -109,5 +131,30 @@ export const collectDesign: DeterministicTool = async (ctx, args) => {
     stepId: ctx.step.id,
     iteration: ctx.iteration,
   });
-  return { status: "success", outputs: [`${artifact.artifactId}@${artifact.version}`] };
+  return { status: "success", outputs: [...outputs, `${artifact.artifactId}@${artifact.version}`] };
 };
+
+/** A tool's answer without its `[jira.get] ok` line. */
+const withoutHead = (text: string): string => text.replace(/^\[[a-z.]+\] ok\n/, "");
+
+/** The issues and pages as read, in order, each clipped, all within the total. */
+function sourcesDoc(read: ReadonlyArray<{ from: string; text: string }>): string {
+  let left: number = SOURCES_LIMITS.total;
+  const parts = read.map((s) => {
+    const room = Math.max(0, Math.min(SOURCES_LIMITS.perSource, left));
+    left -= Math.min(s.text.length, room);
+    const text =
+      s.text.length > room
+        ? `${s.text.slice(0, room)}\n… [${s.text.length - room} more chars: ask the tool for the rest]`
+        : s.text;
+    return `## ${s.from[0]?.toUpperCase()}${s.from.slice(1)}\n\n${text.trim()}`;
+  });
+  return [
+    "# The task's sources",
+    "",
+    "Read by Jarvis before the agents, without a model: the issues the task names and the Confluence pages they link, as the tools returned them. Quote them by the issue key or the page id; ask jira.get / confluence.get only for what is not here.",
+    "",
+    parts.join("\n\n"),
+    "",
+  ].join("\n");
+}

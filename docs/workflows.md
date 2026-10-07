@@ -53,9 +53,9 @@ flowchart LR
 | Шаг | Вид | Входы | Выход |
 |---|---|---|---|
 | discover | deterministic `project.discover` | — | `project-capabilities` |
-| design | deterministic `design.collect` | — | `design` (если есть фреймы) |
-| research | agent `research` | design | `research` |
-| requirements | agent `requirements` | research, design | `requirements` |
+| design | deterministic `design.collect` | — | `sources` (задача и её страницы), `design` (если есть фреймы) |
+| research | agent `research` | sources, design | `research` |
+| requirements | agent `requirements` | sources, research, design | `requirements` |
 | spec | agent `specification` | research, requirements, design | `spec` |
 | approve-spec | approval `spec` | | |
 | impact | `impact.quick`, иначе agent `impact` | research, spec | `impact` |
@@ -137,8 +137,13 @@ flowchart LR
 | aggressive | то же с меньшим хвостом и пересобранной с бюджетом ×0,6 базой L3/L4 (раз за шаг) |
 | reset | handoff вместо всей истории, не больше двух раз за шаг |
 
-Суммаризирует роль `compaction`, а без неё — модель агента. Оригинал сжатой части лежит блобом, ссылки
-`Originals:` накапливаются в handoff; пары вызов/результат инструмента не разрываются. Сбой суммаризатора —
+Суммаризирует роль `compaction`, а без неё — модель агента; на сводку до 8000 токенов вывода, потому что
+рассуждающая модель тратит на размышления ту же квоту (в пилоте при 2000 одна сводка пришла пустой, следующая
+оборвалась на полуслове). Пустая сводка историю ничем не заменяет: в handoff идут прежний handoff, запись вызовов
+(инструмент, аргументы, где лежит результат) и источники задачи как прочитаны. Обрезанная сводка дополняется той
+же записью вызовов. В событии `context.compacted` в этих случаях есть `fallback: empty|truncated`. Оригинал
+сжатой части лежит блобом, ссылки `Originals:` накапливаются в handoff; пары вызов/результат инструмента не
+разрываются. Сбой суммаризатора —
 жёсткий trimming и событие `context.compaction_failed`, run продолжается; исчерпание квоты и ошибки
 авторизации паркуют run как обычно. Вручную — `jarvis context`, `jarvis compact`, `jarvis reset-context`
 ([cli.md](cli.md#контекст-агента)).

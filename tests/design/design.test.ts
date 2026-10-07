@@ -232,6 +232,13 @@ ${withFigma ? 'egressExceptions:\n  - server: design\n    reason: "frames of the
       .list({ runId: run.run.id, kind: "tool.call" })
       .map((e) => e.payload?.capability);
     expect(calls).toEqual(["jira.get", "confluence.get", "figma.get", "figma.get"]);
+    // the issue and its page as read: an input of the agents, so they do not read them again
+    const sources = runtime.artifacts.listLatest(run.run.id, "sources")[0];
+    expect(sources?.provenance).toMatchObject({ kind: "tool", capability: "design.collect" });
+    const read = runtime.artifacts.text(sources as never);
+    expect(read).toContain("## Issue ABC-42");
+    expect(read).toContain("(77770077)");
+    expect(read).not.toContain("[jira.get] ok");
     // the egress exception is on the record of the frame calls
     expect(runtime.events.list({ runId: run.run.id, kind: "tool.call" })[2]?.payload).toMatchObject({
       egressException: "frames of the team's designs",
@@ -276,10 +283,14 @@ ${withFigma ? 'egressExceptions:\n  - server: design\n    reason: "frames of the
     expect(text.match(/— the Figma API's rate limit until \d{4}-/g)).toHaveLength(2);
   });
 
-  it("without figma.get the step reads nothing and leaves no artifact", async () => {
+  it("without figma.get: the issue and its page still go to the agents, no design artifact", async () => {
     const { run } = await setup(false);
     expect(run.run.state).toBe("COMPLETED");
-    expect((rt as Runtime).artifacts.listLatest(run.run.id, "design")).toEqual([]);
-    expect((rt as Runtime).events.list({ runId: run.run.id, kind: "tool.call" })).toEqual([]);
+    const runtime = rt as Runtime;
+    expect(runtime.artifacts.listLatest(run.run.id, "design")).toEqual([]);
+    expect(runtime.artifacts.listLatest(run.run.id, "sources")).toHaveLength(1);
+    expect(
+      runtime.events.list({ runId: run.run.id, kind: "tool.call" }).map((e) => e.payload?.capability),
+    ).toEqual(["jira.get", "confluence.get"]);
   });
 });

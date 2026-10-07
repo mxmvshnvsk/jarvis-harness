@@ -13,6 +13,7 @@ import {
   isSourceResult,
   levelOf,
   resolveThresholds,
+  type Summary,
   splitBlocks,
   TRIMMED_MARKER,
   trimToolResults,
@@ -133,6 +134,76 @@ describe("transcript trimming and compaction", () => {
     expect(contents).toEqual([false, false, false, true, false]);
     // under heavy pressure they go too
     expect(trimToolResults(transcript, { keepRecent: 1, store }).trimmed).toBe(4);
+  });
+
+  it("a summary that comes back empty or cut off never leaves the agent with nothing", async () => {
+    const options = (summary: Summary) => ({
+      keepBlocks: 1,
+      kind: "compact" as const,
+      estimate: (ms: readonly Message[]) => ms.reduce((n, m) => n + m.content.length / 4, 0),
+      store: () => "orig",
+      summarize: async () => summary,
+    });
+    const issue: Message[] = [
+      {
+        role: "assistant",
+        content: "",
+        toolCalls: [{ id: "j", name: "jira.get", arguments: '{"key":"CONF-12"}' }],
+      },
+      {
+        role: "tool",
+        toolCallId: "j",
+        content: "[jira.get] ok\nOrders: show the delivery date on the order card",
+      },
+    ];
+    const trimmed: Message[] = [
+      {
+        role: "assistant",
+        content: "",
+        toolCalls: [{ id: "t", name: "repo.read", arguments: '{"path":"src/orders/card.tsx"}' }],
+      },
+      {
+        role: "tool",
+        toolCallId: "t",
+        content: `[repo.read] ok\nexport…\n${TRIMMED_MARKER} 9000 chars; original: blob:abc123 — read it]`,
+      },
+    ];
+    const history = [...issue, ...issue, ...trimmed, ...block(1), ...block(2)];
+    // pilot: a reasoning model spent its whole output thinking — the handoff was empty
+    const empty = await compactTranscript(history, options({ text: "", truncated: true }));
+    expect(empty?.fallback).toBe("empty");
+    const handoff = empty?.transcript[0]?.content ?? "";
+    expect(handoff).toContain("came back empty");
+    expect(handoff).toContain('- jira.get({"key":"CONF-12"}) — result in the originals');
+    expect(handoff).toContain('- repo.read({"path":"src/orders/card.tsx"}) — result: blob:abc123');
+    expect(handoff).toContain("- noted: step 1");
+    // the issue as it was read, once
+    expect(handoff.split("Orders: show the delivery date").length).toBe(2);
+    expect(handoff).toContain("Originals: blob:orig");
+
+    const cut = await compactTranscript(
+      history,
+      options({ text: "## Goal\n- delivery date on the order card; next: read", truncated: true }),
+    );
+    expect(cut?.fallback).toBe("truncated");
+    expect(cut?.transcript[0]?.content).toContain("## Goal");
+    expect(cut?.transcript[0]?.content).toContain("cut off at the model's output limit");
+    expect(cut?.transcript[0]?.content).toContain("### Calls made");
+
+    const whole = await compactTranscript(
+      history,
+      options("## Goal\n- delivery date on the order card, all read"),
+    );
+    expect(whole?.fallback).toBeUndefined();
+    expect(whole?.transcript[0]?.content).not.toContain("### Calls made");
+
+    // an empty summary after an earlier handoff carries that handoff forward
+    const again = await compactTranscript(
+      [...(whole?.transcript ?? []), ...block(3), ...block(4)],
+      options(""),
+    );
+    expect(again?.transcript[0]?.content).toContain("delivery date on the order card, all read");
+    expect(again?.transcript[0]?.content.match(/## Context handoff/g)).toHaveLength(1);
   });
 
   it("compacts older blocks into one handoff, keeps the tail verbatim and the originals referenced", async () => {

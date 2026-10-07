@@ -106,9 +106,12 @@ export interface CompactOptions {
   /** Stores the original of the compacted part; returns a reference. */
   readonly store: (json: string) => string;
   /** Produces the structured summary of the rendered head. */
-  readonly summarize: (rendered: string, previousHandoff?: string) => Promise<string>;
+  readonly summarize: (rendered: string, previousHandoff?: string) => Promise<Summary>;
   readonly kind: "compact" | "reset";
 }
+
+/** What the summarizer gave: its text, and whether the model stopped at its output limit. */
+export type Summary = string | { readonly text: string; readonly truncated?: boolean };
 
 export interface CompactResult {
   readonly transcript: Message[];
@@ -116,7 +119,20 @@ export interface CompactResult {
   readonly original: string;
   readonly originals: string[];
   readonly summary: string;
+  /** The summary came back empty or cut off: the handoff carries the record of the calls as well. */
+  readonly fallback?: "empty" | "truncated";
 }
+
+/**
+ * Output for a summary: a reasoning model thinks before it writes, and its thinking counts against
+ * the limit (pilot: at 2000 one handoff came back empty, the next cut off mid-sentence).
+ */
+export const SUMMARY_MAX_OUTPUT = 8000;
+
+/** Shorter than this, a summary says nothing (pilot: a reasoning model spent its whole output thinking). */
+const MIN_SUMMARY_CHARS = 40;
+/** The task's sources carried verbatim into a handoff whose summary failed, at most this much. */
+const SOURCES_CHARS = 12_000;
 
 /** Plain-text rendering of messages for the summarizer; long tool results are shortened (originals stay in the blob). */
 export function renderForSummary(messages: readonly Message[], perResultChars = 1500): string {
@@ -177,13 +193,40 @@ export async function compactTranscript(
   const toSummarize = previous ? head.slice(1) : head;
   const original = options.store(JSON.stringify(head));
   const originals = [...earlierOriginals(previous), original];
-  const summary = await options.summarize(renderForSummary(toSummarize), previous);
+  const got = await options.summarize(renderForSummary(toSummarize), previous);
+  const text = (typeof got === "string" ? got : got.text).trim();
+  const fallback =
+    text.length < MIN_SUMMARY_CHARS
+      ? "empty"
+      : typeof got !== "string" && got.truncated
+        ? "truncated"
+        : undefined;
+  // A summary that failed never replaces the history with nothing (pilot: an empty handoff, and the
+  // agent read the issue, the pages and the files all over again): the earlier handoff, what was
+  // written, the record of the calls with their originals, and the task's sources as they were.
+  const summary =
+    fallback === undefined
+      ? text
+      : [
+          fallback === "empty"
+            ? [
+                "(The summary of this part came back empty: below is what was carried and the record of the calls.)",
+                previous ? handoffBody(previous) : "",
+              ]
+                .filter(Boolean)
+                .join("\n\n")
+            : `${text}\n\n(The summary above was cut off at the model's output limit: the record of the calls below is complete.)`,
+          callsRecord(toSummarize),
+          sourcesOf(toSummarize),
+        ]
+          .filter(Boolean)
+          .join("\n\n");
   const handoff: Message = {
     role: "user",
     content: [
       `${HANDOFF_HEADING} (${options.kind === "reset" ? "reset" : "compacted"})`,
       "",
-      summary.trim(),
+      summary,
       "",
       `Originals: ${originals.map((o) => `blob:${o}`).join(", ")}`,
       "The originals hold the full tool results and reasoning of the part summarised above; read them with knowledge.read when an exact detail matters.",
@@ -195,8 +238,65 @@ export async function compactTranscript(
     original,
     originals,
     summary,
+    ...(fallback ? { fallback } : {}),
   };
 }
+
+/** An earlier handoff without its heading and its references (they are written again below it). */
+function handoffBody(handoff: string): string {
+  return handoff
+    .split("\n")
+    .filter(
+      (line) =>
+        !line.startsWith(HANDOFF_HEADING) &&
+        !line.startsWith("Originals: ") &&
+        !line.startsWith("The originals hold the full tool results"),
+    )
+    .join("\n")
+    .trim();
+}
+
+/**
+ * The calls of a part, recorded rather than summarised: each with its arguments and where its result
+ * is — the blob of a trimmed result, else the originals of this part.
+ */
+export function callsRecord(messages: readonly Message[]): string {
+  const results = new Map(messages.filter((m) => m.role === "tool").map((m) => [m.toolCallId, m.content]));
+  const lines: string[] = [];
+  for (const m of messages) {
+    if (m.role === "assistant" && m.content.trim()) lines.push(`- noted: ${oneLine(m.content, 300)}`);
+    for (const c of m.role === "assistant" ? (m.toolCalls ?? []) : []) {
+      const result = results.get(c.id) ?? "";
+      const blob = /original: (blob:[0-9a-f]+)/.exec(result)?.[1];
+      const failed = /^\[[^\]]+\] (?:error|failed|denied)/.test(result);
+      lines.push(
+        `- ${c.name}(${oneLine(c.arguments, 200)})${failed ? " — failed" : ""}${blob ? ` — result: ${blob}` : result ? " — result in the originals" : ""}`,
+      );
+    }
+  }
+  return lines.length > 0 ? `### Calls made (recorded, not summarised)\n${lines.join("\n")}` : "";
+}
+
+/** The task's own sources (the issue, its pages, its frames) as read, newest last, within a budget. */
+function sourcesOf(messages: readonly Message[]): string {
+  const sources = messages.filter((m) => m.role === "tool" && isSourceResult(m.content));
+  const seen = new Set<string>();
+  const kept: string[] = [];
+  let left = SOURCES_CHARS;
+  for (const m of [...sources].reverse()) {
+    // the same page read twice: once is enough
+    if (seen.has(m.content) || m.content.includes(TRIMMED_MARKER) || m.content.length > left) continue;
+    seen.add(m.content);
+    kept.unshift(m.content);
+    left -= m.content.length;
+  }
+  return kept.length > 0 ? `### The task's sources, as read\n\n${kept.join("\n\n")}` : "";
+}
+
+const oneLine = (text: string, max: number): string => {
+  const flat = text.replace(/\s+/g, " ").trim();
+  return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
+};
 
 export const SUMMARIZER_SYSTEM = `You compress the working history of an engineering agent into a handoff note. The agent continues from your note, so anything you leave out is lost to it (the originals stay on disk but the agent will not remember them).
 Preserve, as short bullet lists under these headings: Goal; Requirements; Decisions; Business rules and constraints; Progress (what was done, which files were read or modified, with paths and line numbers); Unresolved questions; Next actions; Sources (file paths, artifact and blob references exactly as written).

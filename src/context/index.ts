@@ -19,6 +19,8 @@ export {
   isHandoff,
   isSourceResult,
   renderForSummary,
+  SUMMARY_MAX_OUTPUT,
+  type Summary,
   splitBlocks,
   summarizerMessages,
   TRIMMED_MARKER,
