@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { clock } from "../../app/activity.ts";
+import { nextWorkflowOf } from "../../app/continuation.ts";
 import { awaitedArtifact, DecisionTakenError, recordDecision } from "../../app/decide.ts";
 import { createEngine } from "../../app/engine.ts";
 import { canForget, forgetRuns } from "../../app/forget.ts";
@@ -518,15 +519,6 @@ async function startContinuation(
     );
   else ctx.out.line(st.warn("  works in your checkout: changes land in your working tree"));
   return runtime.runs.get(run.id);
-}
-
-/** The workflow a finished run goes on as (`next:` of its definition), if any. */
-function nextWorkflowOf(engine: LocalWorkflowEngine, run: Run): string | undefined {
-  try {
-    return engine.workflow(run.workflow).next;
-  } catch {
-    return undefined;
-  }
 }
 
 /** What the rest of the work is, for the question. */

@@ -356,4 +356,90 @@ describe("New task on the page", () => {
     rt.runs.transition(failed.id, "FAILED", { reason: "boom" });
     expect(resumableOf(rt, rt.runs.get(failed.id) ?? failed)).toBeUndefined();
   });
+
+  /** A research of ABC-42 that has ended: sdd can go on from it. */
+  const finishedResearch = () => {
+    const run = rt.runs.create({
+      task: "ABC-42: Delivery slots on the order form",
+      workflow: "research",
+      owner: DEV,
+      workspace: { mode: "cwd", repoRoot: sb.project, path: sb.project, baseRef: "HEAD" },
+      dataClass: "internal",
+    });
+    rt.events.emit({
+      kind: "agent.finish",
+      runId: run.id,
+      stepId: "research",
+      payload: { contradictions: 7 },
+    });
+    rt.runs.update(run.id, { currentStep: "research", currentIteration: 1 });
+    rt.runs.transition(run.id, "RUNNING");
+    rt.runs.transition(run.id, "COMPLETED");
+    return { run, short: run.id.replace(/^run_/, "").slice(0, 8) };
+  };
+
+  it("Continue to sdd on a finished research: `jarvis continue` in the background, once", async () => {
+    const token = await serve();
+    const { run, short } = finishedResearch();
+    const before = await page(`/runs/${short}`);
+    expect(before).toContain("Take it into the full cycle");
+    expect(before).toContain(`action="/runs/${short}/continue"`);
+    expect(before).toContain("7 contradictions");
+    const first = await post(`/runs/${short}/continue`, { t: token });
+    expect(first.location).toMatch(/^\/launches\/[0-9a-f]{12}$/);
+    expect((await calls(1))[0]).toBe(`${sb.project}|off|continue ${run.id}`);
+    // a second click while the first prepares its checkout joins it
+    expect((await post(`/runs/${short}/continue`, { t: token })).location).toBe(first.location);
+    // the CLI made the sdd run from it: the research says where it went on, the new run where it came from
+    const to = rt.runs.create({
+      task: run.task,
+      workflow: "sdd",
+      owner: DEV,
+      workspace: run.workspace,
+      dataClass: "internal",
+    });
+    rt.events.emit({ kind: "run.created", runId: to.id, payload: { continuedFrom: run.id } });
+    launcher.tend();
+    expect(launcher.list()[0]?.runId).toBe(to.id);
+    const after = await page(`/runs/${short}`);
+    expect(after).toContain("→ continued in sdd");
+    expect(after).not.toContain("Take it into the full cycle");
+    const toShort = to.id.replace(/^run_/, "").slice(0, 8);
+    expect(await page(`/runs/${toShort}`)).toContain(
+      `continued from <a href="/runs/${short}">research ${short}</a> · 7 contradictions carried over`,
+    );
+    // gone on already: the button's address leads to that run
+    expect((await post(`/runs/${short}/continue`, { t: token })).location).toBe(`/runs/${toShort}`);
+  });
+
+  it("New task with sdd offers the research of the same issue to start from", async () => {
+    const token = await serve();
+    const { run } = finishedResearch();
+    const from = (q: Record<string, string>) =>
+      page(`/runs/from?${new URLSearchParams({ repo: sb.project, ...q })}`);
+    expect(await page("/")).toContain("data-from");
+    const offered = await from({ task: "ABC-42", workflow: "sdd" });
+    expect(offered).toContain(`name="from" value="${run.id}" checked`);
+    expect(offered).toContain("Start from the research of");
+    // no base commit to compare with: said, not guessed
+    expect(offered).toContain("tell whether the code changed since");
+    expect(await from({ task: "ABC-43", workflow: "sdd" })).toContain("No finished research of ABC-43");
+    expect(await from({ task: "ABC-42", workflow: "research" })).toBe("");
+    expect(await from({ task: "ABC-42", workflow: "sdd", repo: "/etc" })).toBe("");
+    // Start with the box ticked: the research goes on
+    const started = await post("/runs/new", {
+      t: token,
+      task: "ABC-42",
+      workflow: "sdd",
+      repo: sb.project,
+      from: run.id,
+    });
+    expect(started.location).toMatch(/^\/launches\/[0-9a-f]{12}$/);
+    expect((await calls(1))[0]).toBe(`${sb.project}|off|continue ${run.id}`);
+    // a research that can't go on as fix
+    expect(
+      (await post("/runs/new", { t: token, task: "ABC-42", workflow: "fix", repo: sb.project, from: run.id }))
+        .location,
+    ).toContain("notice=cannot-continue");
+  });
 });

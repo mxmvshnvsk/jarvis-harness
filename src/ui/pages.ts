@@ -1,6 +1,7 @@
 import { type Activity, clock, compactingText, kilo, type ToolBatch } from "../app/activity.ts";
 import { type BudgetStop, sourceOf, unitOf } from "../app/budgetStop.ts";
 import { type BudgetWait, whenText } from "../app/budgetWait.ts";
+import { isStale, issueKeyOf, type StartPoint } from "../app/continuation.ts";
 import { duration } from "../app/journey.ts";
 import type { McpHealth, McpServerHealth } from "../app/mcpHealth.ts";
 import type { HealthState, ModelHealth, ModelPerf, ModelsHealth, Unlimited } from "../app/modelHealth.ts";
@@ -39,7 +40,11 @@ import { RECENT_PAGE, RECENT_SIZES } from "./model.ts";
  */
 export interface Actions {
   readonly token: string;
+  /** Tasks can be started from the page (a launcher): "Continue to sdd" goes on in the background. */
+  readonly canLaunch?: boolean;
 }
+
+const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
 
 /** A POST form with the session token: a foreign page cannot make one (ADR-0023 §5). */
 function form(actions: Actions, action: string, body: Part, attrs: Part = ""): Html {
@@ -399,10 +404,61 @@ ${form(
 ${repoField}
 <button type="submit" class="btn primary">Start</button>
 </div>
+<div class="startfrom" data-from aria-live="polite"></div>
 <label class="check"><input type="checkbox" name="fresh" value="design"> Read the Figma frames again <span class="meta">— the design changed at the same link; past Jarvis's one-day cache, each frame is a Figma API call</span></label>
 <p class="hint">Runs in the background, as <code>jarvis research "…"</code> (or the workflow chosen) would without a terminal; where it needs you, it waits here — decide on the page and it goes on.</p>`,
 )}
 </section>`;
+}
+
+/** `20:35` today, `Oct 3, 14:10` before. */
+function whenShort(iso: string, now: number): string {
+  const d = new Date(iso);
+  const hm = wallClock(iso).slice(0, 5);
+  return d.toDateString() === new Date(now).toDateString()
+    ? hm
+    : `${d.toLocaleString("en-US", { month: "short", day: "numeric" })}, ${hm}`;
+}
+
+/**
+ * Under "New task", for a workflow a finished run can go on as (sdd): the research of the same issue
+ * in the same repository to start from — ticked when the code it read has not changed since
+ * (src/app/continuation.ts). Fetched as the task is typed (`GET /runs/from`).
+ */
+export function startFromHtml(
+  point: StartPoint | undefined,
+  input: { readonly task: string; readonly workflow: string; readonly targets: ReadonlySet<string> },
+  now: number,
+): Html {
+  if (!input.targets.has(input.workflow) || !input.task.trim()) return html``;
+  const key = issueKeyOf(input.task);
+  if (!point)
+    return html`<p class="hint">No finished research of ${key ?? "this task"} in this repository — ${input.workflow} runs from the start.</p>`;
+  const r = point.run;
+  const stale = isStale(point);
+  const facts = [
+    shortRunId(r.id),
+    ...(point.contradictions > 0 ? [plural(point.contradictions, "contradiction")] : []),
+    ...(point.since && !stale
+      ? [
+          point.since.commits === 0
+            ? "no new commits since"
+            : `${plural(point.since.commits, "commit")} since, none touch what it read`,
+        ]
+      : []),
+    ...(point.since ? [] : ["can't tell whether the code changed since"]),
+  ];
+  const touched = point.since?.touched ?? [];
+  const shown = touched.slice(0, 3);
+  return html`<div class="from">
+<label class="check"><input type="checkbox" name="from" value="${r.id}"${stale ? "" : " checked"}> <span><b>Start from the ${r.workflow} of ${whenShort(r.updatedAt, now)}</b> <span class="meta">— ${facts.join(" · ")}</span></span></label>
+${
+  stale
+    ? html`<p class="sub warn">⚠ code changed since: ${plural(point.since?.commits ?? 0, "commit")}, ${plural(touched.length, "file")} it read among them (${shown.map((f, i) => html`${i > 0 ? ", " : ""}<code>${f}</code>`)}${touched.length > shown.length ? ", …" : ""}) — a new research is safer</p>`
+    : ""
+}
+<p class="sub hint">${stale ? `Unchecked: ${input.workflow} runs from the start, with a new research.` : `${input.workflow} begins at ${point.continuation.startAt} with it; the steps it did are not run again.`} <a href="/runs/${shortRunId(r.id)}" target="_blank" rel="noopener">Open the ${r.workflow}</a></p>
+</div>`;
 }
 
 function launchHtml(l: LaunchView, now: number, homeDir: string): Html {
@@ -883,6 +939,7 @@ export function runContent(page: RunPage, now: number, actions?: Actions, notice
 <h1>${firstLine(r.task, 300)}</h1>
 ${rest ? html`<p class="muted" style="white-space:pre-wrap">${cut(rest, 600)}</p>` : ""}
 ${r.stateReason && r.state !== "RUNNING" && r.state !== "WAITING_BUDGET" ? html`<p class="muted">${r.stateReason}</p>` : ""}
+${page.continuedFrom ? continuedFromHtml(page.continuedFrom) : ""}
 </div>
 ${actions && !isTerminal(r.state) ? cancelHtml(r, actions) : ""}
 </div>
@@ -894,7 +951,7 @@ ${notice ?? ""}
 <ol style="margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:2px">${page.steps.map((s) => stepRow(s, now))}</ol>
 </section>
 <div class="mainc">
-${card ? (card.kind === "loop" ? loopCardHtml(card, page, actions) : card.kind === "approval" ? approvalCardHtml(card, page, actions) : card.kind === "budget" ? budgetCardHtml(card, page, actions) : otherCardHtml(card.what, page)) : page.wait ? waitHtml(page, page.wait, now, actions) : nowHtml(page, now, actions)}
+${card ? (card.kind === "loop" ? loopCardHtml(card, page, actions) : card.kind === "approval" ? approvalCardHtml(card, page, actions) : card.kind === "budget" ? budgetCardHtml(card, page, actions) : otherCardHtml(card.what, page)) : page.wait ? waitHtml(page, page.wait, now, actions) : page.next || page.continuedBy ? continuationHtml(page, actions) : nowHtml(page, now, actions)}
 ${feedHtml(page.feed)}
 <section class="panel arts" aria-labelledby="artifacts" data-live="arts">
 <h2 id="artifacts">Artifacts</h2>
@@ -909,6 +966,57 @@ ${
 </section>
 </div>
 </div>`;
+}
+
+/** The new run's line: where it came from and what it brought. */
+function continuedFromHtml(from: NonNullable<RunPage["continuedFrom"]>): Html {
+  const carried =
+    from.contradictions > 0 ? ` · ${plural(from.contradictions, "contradiction")} carried over` : "";
+  return html`<p class="muted">continued from <a href="/runs/${shortRunId(from.id)}">${from.workflow} ${shortRunId(from.id)}</a>${carried}</p>`;
+}
+
+/**
+ * A finished research/spec: "Continue to sdd" (as `jarvis continue <run>`), or where it went on.
+ * Pilot: a research ended and going on took a terminal.
+ */
+function continuationHtml(page: RunPage, actions?: Actions): Html {
+  const r = page.run;
+  const by = page.continuedBy;
+  if (by) {
+    const where =
+      by.state === "COMPLETED"
+        ? "completed"
+        : by.step
+          ? `${by.step} · ${by.state.toLowerCase().replace("_", " ")}`
+          : by.state.toLowerCase();
+    return html`<section class="panel card" aria-label="Continued" data-live="card">
+<div class="row"><span class="pill info">→ continued in ${by.workflow}</span><span class="meta">run ${shortRunId(by.id)} · started ${wallClock(by.createdAt).slice(0, 5)} · ${where}</span></div>
+<p>This ${r.workflow} is the input of that run; it can't be continued twice.</p>
+<div class="actions"><a class="btn primary" href="/runs/${shortRunId(by.id)}">Open the ${by.workflow} run</a></div>
+</section>`;
+  }
+  const next = page.next;
+  if (!next) return html`<div data-live="card" hidden></div>`;
+  const cmd = `jarvis continue ${shortRunId(r.id)}`;
+  const carried = [
+    "its findings",
+    ...(next.contradictions > 0 ? [plural(next.contradictions, "contradiction")] : []),
+    "the dependencies",
+  ];
+  const approval = next.rest.includes("spec")
+    ? "; the spec waits for your approval before any code is written"
+    : "";
+  return html`<section class="panel decision" aria-labelledby="decision" data-live="card">
+<span class="ok" style="font-size:13px;font-weight:500">${r.workflow === "spec" ? "The spec is approved" : "Research is done"}</span>
+<h2 id="decision">Take it into the full cycle</h2>
+<p>${next.workflow} starts at <b>${next.startAt}</b> with this ${r.workflow}: ${carried.join(", ")} go in as they are — the steps done here do not run again.</p>
+<p>Then ${next.rest.join(" → ")}${approval}.</p>
+<div class="actions">${
+    actions?.canLaunch
+      ? html`${form(actions, `/runs/${shortRunId(r.id)}/continue`, html`<button type="submit" class="btn primary big">Continue to ${next.workflow}</button>`)}<span class="hint">same as <code>${cmd}</code></span>`
+      : html`<span class="hint">Go on with <code>${cmd}</code></span><button type="button" class="btn" data-copy="${cmd}">Copy command</button>`
+  }</div>
+</section>`;
 }
 
 function otherCardHtml(what: string, page: RunPage): Html {

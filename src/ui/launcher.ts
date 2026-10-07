@@ -45,6 +45,8 @@ export interface Launch {
   /** Module research: the folder it maps, and what matters to the person who asked. */
   readonly module?: string;
   readonly note?: string;
+  /** Goes on from this finished run (`jarvis continue <run>`): its research is the start. */
+  readonly from?: string;
   /** Waits for the research in front of it; no process yet. */
   queued?: boolean;
   readonly repoRoot: string;
@@ -58,6 +60,8 @@ export interface Launch {
 export interface Launcher {
   /** `freshDesign`: the Figma frames read again past the cache (`--fresh design`). */
   start(input: { task: string; workflow: Workflow; repoRoot: string; freshDesign?: boolean }): Launch;
+  /** A finished research/spec goes on as its next workflow: `jarvis continue <run>` in the background. */
+  continueRun(from: Run, workflow: Workflow): Launch;
   /** Research one module (or a folder): now, or after the research in front of it. */
   startModule(input: { module: string; note?: string; repoRoot: string }): Launch;
   /** Takes a research out of the queue; false when it has started already. */
@@ -211,6 +215,25 @@ export function createLauncher(options: LauncherOptions): Launcher {
       });
       return launch;
     },
+    continueRun(from, workflow) {
+      const id = randomBytes(6).toString("hex");
+      const launch: Launch = {
+        id,
+        task: from.task,
+        workflow,
+        from: from.id,
+        repoRoot: from.workspace.repoRoot,
+        startedAt: new Date().toISOString(),
+        log: join(options.logDir, `launch-${id}.log`),
+        exitCode: null,
+      };
+      launches.unshift(launch);
+      spawnCli(["continue", from.id], from.workspace.repoRoot, launch.log, (code) => {
+        launch.exitCode = code ?? 1;
+        if (launch.runId) busy.delete(launch.runId);
+      });
+      return launch;
+    },
     list: () => launches,
     get: (id) => launches.find((l) => l.id === id),
     drives,
@@ -231,7 +254,7 @@ export function createLauncher(options: LauncherOptions): Launcher {
               r.createdAt >= l.startedAt.slice(0, 19) &&
               (l.module
                 ? r.workflow === "onboard-module" && moduleOfRun(runtime, r.id)?.module === l.module
-                : r.task === l.task),
+                : r.task === l.task && (!l.from || (r.id !== l.from && r.workflow === l.workflow))),
           );
         if (!run) continue;
         l.runId = run.id;

@@ -341,6 +341,11 @@ h2.ask-sec{font-size:15px;margin:4px 0 -4px}
 .field select{height:44px;width:100%;text-overflow:ellipsis}
 .newtask .row{align-items:flex-end}
 .newtask .row .field{flex:1 1 240px;max-width:520px}
+.startfrom:empty{display:none}
+.from{border:1px solid var(--line);border-radius:8px;padding:12px 14px;display:flex;flex-direction:column;gap:6px;background:var(--ground)}
+.from .check{margin:0}
+.from .sub{margin:0 0 0 22px;font-size:13px;line-height:19px}
+.from .sub code{font-size:12px}
 .launch .what b{font-size:16px;font-weight:600;overflow-wrap:anywhere}
 .launch .spin{margin-left:auto}
 .launch.failed{border-color:var(--bad)}
@@ -522,6 +527,40 @@ export const SCRIPT = `
         refresh();
       }, 250);
     });
+  }
+
+  // "New task" for a workflow a research goes on as (sdd): the finished research of the same issue
+  // to start from, looked up as the task is typed (GET /runs/from)
+  const startFrom = document.querySelector('[data-from]');
+  const newForm = startFrom && startFrom.closest('form');
+  if (newForm) {
+    let timer;
+    let asked = '';
+    const look = () => {
+      const field = (name) => {
+        const el = newForm.elements.namedItem(name);
+        return el && 'value' in el ? el.value : '';
+      };
+      const q = new URLSearchParams({ task: field('task'), workflow: field('workflow'), repo: field('repo') }).toString();
+      if (q === asked) return;
+      asked = q;
+      fetch('/runs/from?' + q, { headers: { Accept: 'text/html' } })
+        .then((res) => (res.ok ? res.text() : ''))
+        .then((text) => {
+          if (asked === q) startFrom.innerHTML = text;
+        })
+        .catch(() => {});
+    };
+    newForm.addEventListener('input', (e) => {
+      const name = e.target && e.target.name;
+      if (name !== 'task' && name !== 'workflow' && name !== 'repo') return;
+      clearTimeout(timer);
+      timer = setTimeout(look, name === 'task' ? 300 : 0);
+    });
+    newForm.addEventListener('change', (e) => {
+      if (e.target && (e.target.name === 'workflow' || e.target.name === 'repo')) look();
+    });
+    look();
   }
 
   // the rows of Recent a person picked stay for the next visit, like the theme

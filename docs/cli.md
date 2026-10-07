@@ -404,6 +404,8 @@ to the implementation? impact → plan → implementation → …» и по `Y` 
 `research` — `sdd`). Прогон `sdd` работает в своём worktree (`workspace.mode: worktree`, с `workspace.setup`),
 ваша копия не меняется до `jarvis apply`. Без терминала итог подсказывает `jarvis continue <run>`;
 `jarvis continue` без id находит одобренные за последние три дня spec, которые ещё не продолжены.
+В `jarvis ui` то же делают кнопка **Continue to sdd** на странице завершённого прогона и галочка «Start from the
+research…» в New task (см. ниже).
 
 ### `jarvis resume <run> [--steal]`
 
@@ -584,6 +586,22 @@ denied / unmapped / «not allowed», как `jarvis mcp list`; за 30 мину�
 со ссылкой на лог; упал до прогона — хвост лога там же. Такой прогон **ведёт страница**: где он ждёт
 человека, решаешь на странице, и он идёт дальше сам (`jarvis resume` в фоне); ждал модель или окно квоты —
 продолжается, когда ожидание кончилось, пока открыт `jarvis ui`.
+
+**Продолжение research в sdd.** На странице завершённого `research` (или `spec`), который ещё никто не продолжил,
+вместо пустой карточки — «Take it into the full cycle»: с какого шага начнёт `sdd`, что переносится (выводы,
+противоречия, зависимости) и какие шаги дальше. **Continue to sdd** — то же, что `jarvis continue <run>`, в фоне;
+повторный клик, пока готовится рабочая копия, ведёт к тому же запуску. После — отметка «→ continued in sdd» со
+ссылкой на новый прогон, а у нового под заголовком «continued from research …». Без лаунчера (`jarvis ui` только
+для чтения) карточка подсказывает команду.
+
+В New task, когда выбран workflow, в который продолжаются другие (`sdd`), Jarvis по мере ввода ищет завершённый
+и не продолжённый прогон той же задачи в том же репозитории: по ключу (`ABC-42`), а без ключа — по тому же тексту.
+Найденный предлагается галочкой «Start from the research of 20:35 — id · N contradictions»; с ней Start запускает
+`jarvis continue <run>` вместо нового прогона. Галочка стоит, если код, который research читал (`repo.read`), с тех
+пор не менялся: Jarvis смотрит коммиты от базы research до `HEAD` репозитория. Если хоть один прочитанный файл
+изменён — «⚠ code changed since: N commits, M files it read among them (…)», и галочка снята: безопаснее новый
+research. Без базового коммита Jarvis так и пишет — «can't tell whether the code changed since». Ничего не
+нашлось — строка «No finished research of ABC-42 in this repository».
 
 **Cancel run…** на странице прогона (красная кнопка справа от заголовка, пока прогон не закончился) — то же, что
 `jarvis cancel`: прогон, который сейчас никто не исполняет (ждёт человека, окно квоты, прерван), отменяется сразу;

@@ -3,7 +3,9 @@ import { type Activity, activityOf, compactingText, noticeOf } from "../app/acti
 import { type BudgetGrant, type BudgetStop, budgetGranted, budgetStopOf } from "../app/budgetStop.ts";
 import { type BudgetWait, budgetWaitOf } from "../app/budgetWait.ts";
 import { candidatesOf } from "../app/candidates.ts";
+import { type Continuation, continuationOf, continuedFromOf, contradictionsOf } from "../app/continuation.ts";
 import { awaitedArtifact, type Decision, decisionOn, rerunRequested, waitingCard } from "../app/decide.ts";
+import { continuedBy } from "../app/handoff.ts";
 import { Journey, type LoopReport, type StepReport } from "../app/journey.ts";
 import { type Resumable, resumableOf } from "../app/resumable.ts";
 import type { Runtime } from "../app/runtime.ts";
@@ -464,7 +466,29 @@ export interface RunPage {
   readonly feed: readonly FeedItem[];
   readonly artifacts: ReadonlyArray<ArtifactVersion & { readonly state: string }>;
   readonly leaseLive: boolean;
+  /** A finished research/spec that can go on (src/app/continuation.ts): "Continue to sdd". */
+  readonly next?: Continuation & { readonly contradictions: number };
+  /** The run that went on from this one. */
+  readonly continuedBy?: RunLink;
+  /** The run this one went on from. */
+  readonly continuedFrom?: RunLink & { readonly contradictions: number };
 }
+
+export interface RunLink {
+  readonly id: string;
+  readonly workflow: string;
+  readonly state: Run["state"];
+  readonly step?: string;
+  readonly createdAt: string;
+}
+
+const linkOf = (r: Run): RunLink => ({
+  id: r.id,
+  workflow: r.workflow,
+  state: r.state,
+  createdAt: r.createdAt,
+  ...(r.currentStep ? { step: r.currentStep } : {}),
+});
 
 const str = (v: unknown): string | undefined => (typeof v === "string" && v.length > 0 ? v : undefined);
 
@@ -694,6 +718,27 @@ export async function runPage(
       return wait ? { wait } : {};
     })(),
     ...((r) => (r ? { resumable: r } : {}))(resumableOf(runtime, run, now.getTime())),
+    ...continuationLinks(runtime, engine, run),
+  };
+}
+
+/** Where a run came from and where it went on (src/app/continuation.ts). */
+function continuationLinks(
+  runtime: Runtime,
+  engine: LocalWorkflowEngine,
+  run: Run,
+): Pick<RunPage, "next" | "continuedBy" | "continuedFrom"> {
+  const fromId = continuedFromOf(runtime, run);
+  const from = fromId ? runtime.runs.get(fromId) : undefined;
+  const byId = run.state === "COMPLETED" ? continuedBy(runtime, run) : undefined;
+  const by = byId ? runtime.runs.get(byId) : undefined;
+  const next = by ? undefined : continuationOf(runtime, engine, run);
+  return {
+    ...(next ? { next: { ...next, contradictions: contradictionsOf(runtime, run.id) } } : {}),
+    ...(by ? { continuedBy: linkOf(by) } : {}),
+    ...(from
+      ? { continuedFrom: { ...linkOf(from), contradictions: contradictionsOf(runtime, from.id) } }
+      : {}),
   };
 }
 

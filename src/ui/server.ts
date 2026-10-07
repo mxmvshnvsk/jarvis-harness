@@ -14,6 +14,7 @@ import {
   rejectCandidate,
   targetOf,
 } from "../app/candidates.ts";
+import { continuationOf, startPointOf } from "../app/continuation.ts";
 import {
   awaitedArtifact,
   DecisionTakenError,
@@ -23,6 +24,7 @@ import {
   rerunRequested,
   waitingCard,
 } from "../app/decide.ts";
+import { continuedBy } from "../app/handoff.ts";
 import {
   addGlossaryTerm,
   checkSymbols,
@@ -69,7 +71,7 @@ import {
   skillsContent,
   standardsContent,
 } from "./knowledge.ts";
-import { type Launcher, WORKFLOWS } from "./launcher.ts";
+import { type Launch, type Launcher, WORKFLOWS, type Workflow } from "./launcher.ts";
 import { artifactPage, runPage, runsPage } from "./model.ts";
 import {
   type Draft,
@@ -98,6 +100,7 @@ import {
   repoPicker,
   runContent,
   runsContent,
+  startFromHtml,
 } from "./pages.ts";
 
 /**
@@ -398,7 +401,9 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
     return { files: parseDiff(r.stdout) };
   };
 
-  const actions: Actions | undefined = options.readOnly ? undefined : { token };
+  const actions: Actions | undefined = options.readOnly
+    ? undefined
+    : { token, ...(options.launcher ? { canLaunch: true } : {}) };
 
   /** What a POST came back with, as a fixed message: nothing from the address is shown as markup. */
   const noticeOf = (r: Request): Html | undefined => {
@@ -422,6 +427,7 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
       "no-launcher": html`<div class="banner bad">This page cannot start runs: resume it with <code>jarvis resume</code></div>`,
       started: html`<div class="banner ok">Started — it prepares its checkout and shows up under Running; where it needs you, it waits here</div>`,
       "no-task": html`<div class="banner bad">Say what to do and pick a workflow</div>`,
+      "cannot-continue": html`<div class="banner bad">This run cannot go on: it has not finished, has nowhere to go or went on already</div>`,
       "no-repo": html`<div class="banner bad">Not a repository this page knows: start <code>jarvis ui</code> in it</div>`,
     };
     return n ? notices[n] : undefined;
@@ -1031,6 +1037,39 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
     return redirect(r, `/knowledge/ask?run=${encodeURIComponent(first.replace(/^run_/, "").slice(0, 8))}`);
   };
 
+  /** One launch per run gone on: a second click while the first prepares its checkout joins it. */
+  const continueFrom = (launcher: Launcher, from: Run, workflow: Workflow): Launch =>
+    launcher.list().find((l) => l.from === from.id && (l.exitCode === null || l.runId)) ??
+    launcher.continueRun(from, workflow);
+
+  /** Workflows a finished run goes on as (`next:`): "New task" offers a research to start them from. */
+  const targets = (): Set<string> =>
+    new Set(
+      WORKFLOWS.map((w) => {
+        try {
+          return engine.workflow(w.id).next;
+        } catch {
+          return undefined;
+        }
+      }).filter((w): w is string => w !== undefined),
+    );
+
+  /** `GET /runs/from?task=&workflow=&repo=`: the box under "New task" (src/app/continuation.ts). */
+  const startFrom = async (r: Request): Promise<void> => {
+    if (!options.launcher || !actions) return notFound(r, "Starting tasks is off here.");
+    const q = r.url.searchParams;
+    const task = (q.get("task") ?? "").slice(0, 4000);
+    const workflow = q.get("workflow") ?? "";
+    const repo = q.get("repo") || options.projectRoot || "";
+    const known = knownRepos().includes(repo);
+    const point =
+      known && task.trim()
+        ? await startPointOf(runtime, engine, { task, workflow, repoRoot: repo })
+        : undefined;
+    const body = known ? startFromHtml(point, { task, workflow, targets: targets() }, Date.now()) : "";
+    return send(r, 200, String(body), "text/html; charset=utf-8", { "Cache-Control": "no-store" });
+  };
+
   /** "New task": the CLI started in the background, driven by the page (src/ui/launcher.ts). */
   const startTask = async (r: Request): Promise<void> => {
     const launcher = options.launcher;
@@ -1043,6 +1082,15 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
     const repo = form.get("repo") ?? options.projectRoot ?? "";
     if (!task || !workflow) return redirect(r, "/?notice=no-task#new");
     if (!knownRepos().includes(repo) || !existsSync(repo)) return redirect(r, "/?notice=no-repo#new");
+    const fromRef = form.get("from");
+    if (fromRef) {
+      // started from a finished research (the box under the form): `jarvis continue <run>`
+      const from = resolveRun(fromRef);
+      const next = from ? continuationOf(runtime, engine, from) : undefined;
+      if (!from || next?.workflow !== workflow || from.workspace.repoRoot !== repo)
+        return redirect(r, "/?notice=cannot-continue#new");
+      return redirect(r, `/launches/${continueFrom(launcher, from, workflow).id}`);
+    }
     const freshDesign = form.get("fresh") === "design";
     const launch = launcher.start({
       task,
@@ -1067,7 +1115,7 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
         "Cache-Control": "no-store",
       });
     }
-    const m = /^\/runs\/([^/]+)\/(decide|rerun|open|budget|resume|cancel)$/.exec(r.url.pathname);
+    const m = /^\/runs\/([^/]+)\/(decide|rerun|open|budget|resume|cancel|continue)$/.exec(r.url.pathname);
     const run = m ? resolveRun(m[1] as string) : undefined;
     if (!m || !run || !actions) return notFound(r, `Nothing to do at ${r.url.pathname}.`);
     const form = await formOf(r.req);
@@ -1080,6 +1128,17 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
     const goOn = (r: Run): void => {
       if (options.launcher && !waitingCard(runtime, r.id)) options.launcher.adopt(r);
     };
+    if (m[2] === "continue") {
+      // "Continue to sdd" on a finished research/spec: as `jarvis continue <run>`, in the background
+      if (!options.launcher) return redirect(r, `/runs/${short}?notice=no-launcher`);
+      const next = continuationOf(runtime, engine, run);
+      const workflow = WORKFLOWS.find((w) => w.id === next?.workflow)?.id;
+      if (!workflow) {
+        const by = continuedBy(runtime, run);
+        return redirect(r, by ? `/runs/${shortRunId(by)}` : `/runs/${short}?notice=cannot-continue`);
+      }
+      return redirect(r, `/launches/${continueFrom(options.launcher, run, workflow).id}`);
+    }
     if (m[2] === "open") {
       if (!existsSync(run.workspace.path)) return redirect(r, `/runs/${short}?notice=no-checkout`);
       // the files the loop's reasons name first, at their lines, then what the run changed (as `o`)
@@ -1270,6 +1329,7 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
     }
     if (path === "/knowledge/modules") return modulesPageOf(r);
     if (path === "/knowledge" || path.startsWith("/knowledge/")) return knowledgeGet(r);
+    if (path === "/runs/from") return startFrom(r);
     const runMatch = /^\/runs\/([^/]+)$/.exec(path);
     if (runMatch) {
       const run = resolveRun(runMatch[1] as string);
