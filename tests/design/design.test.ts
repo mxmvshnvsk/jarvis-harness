@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Runtime } from "../../src/app/runtime.ts";
+import type { RunOptions } from "../../src/core/domain/run.ts";
 import { describeFrame, type FigmaDesign, figmaLinksIn, parseFigmaDesign } from "../../src/design/figma.ts";
 import { McpResultStore } from "../../src/mcp/client/results.ts";
 import { createRun, engineFor, testRuntime, workflowOf } from "../helpers/engine.ts";
@@ -208,8 +209,12 @@ ${withFigma ? 'egressExceptions:\n  - server: design\n    reason: "frames of the
         },
       ],
     });
-    const run = createRun(rt, "d", "ABC-42: order form phone mask");
-    return { run: await engineFor(rt, [wf]).execute(run.id, { owner: "cli:t" }) };
+    const runtime = rt;
+    const go = async (options?: RunOptions) => {
+      const run = createRun(runtime, "d", "ABC-42: order form phone mask", options);
+      return engineFor(runtime, [wf]).execute(run.id, { owner: "cli:t" });
+    };
+    return { run: await go(), again: go };
   }
 
   it("issue → its page → every frame there, described; what failed is listed; all through the router", async () => {
@@ -270,6 +275,26 @@ ${withFigma ? 'egressExceptions:\n  - server: design\n    reason: "frames of the
     const blocked = await runtime.mcp.provider.invoke("figma.get", { url: link, fresh: true });
     expect(blocked.result.text).toMatch(/^rate limit of MCP server "design": not called before /);
     expect(reads()).toEqual(["12-345", "66-77", "12-345", "88-99"]);
+  });
+
+  it("a task that asks for the frames again (--fresh design) reads them past the cache and refreshes it", async () => {
+    const { again } = await setup(true);
+    const runtime = rt as Runtime;
+    expect(reads()).toEqual(["12-345", "66-77"]);
+    // the next task: the frame read today comes from the cache (66-77 failed, so it is asked again)
+    await again();
+    expect(reads()).toEqual(["12-345", "66-77", "66-77"]);
+    // the design changed at the same link: the task says so, every frame is read from Figma
+    const fresh = await again({ fresh: ["design"] });
+    expect(fresh.run.options).toEqual({ fresh: ["design"] });
+    expect(reads()).toEqual(["12-345", "66-77", "66-77", "12-345", "66-77"]);
+    const text = runtime.artifacts.text(runtime.artifacts.listLatest(fresh.run.id, "design")[0] as never);
+    expect(text).toContain("1 frame read again from Figma, past Jarvis's cache, 1 not");
+    const finished = runtime.events.list({ runId: fresh.run.id, kind: "step.finish" })[0];
+    expect(JSON.stringify(finished?.payload)).toContain("read again from Figma, past the cache");
+    // what it read is the cache now: the task after it does not ask for that frame
+    await again();
+    expect(reads()).toEqual(["12-345", "66-77", "66-77", "12-345", "66-77", "66-77"]);
   });
 
   it("the step under a rate limit: nothing asked, every frame listed with until when", async () => {

@@ -1,6 +1,7 @@
 import { createRuntime, type Runtime } from "../../src/app/runtime.ts";
 import { loadConfig } from "../../src/core/config/load.ts";
 import type { Actor } from "../../src/core/domain/actor.ts";
+import type { RunOptions } from "../../src/core/domain/run.ts";
 import { type WorkflowDefinition, WorkflowDefinitionSchema } from "../../src/core/domain/workflow.ts";
 import {
   AgenticExecutor,
@@ -58,13 +59,14 @@ export function engineFor(
   });
 }
 
-export function createRun(runtime: Runtime, workflow: string, task = "ABC-1") {
+export function createRun(runtime: Runtime, workflow: string, task = "ABC-1", options?: RunOptions) {
   return runtime.runs.create({
     task,
     workflow,
     owner: ACTOR,
     workspace: { mode: "cwd", repoRoot: "/r", path: "/r", baseRef: "HEAD" },
     dataClass: runtime.loaded.config.dataClass,
+    ...(options ? { options } : {}),
   });
 }
 

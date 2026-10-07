@@ -252,6 +252,14 @@ CREATE TABLE knowledge_vectors (
 );
 `,
   },
+  {
+    version: 5,
+    name: "run_options",
+    sql: `
+-- What the task asked of the run beyond its text: e.g. read the design frames again, past the cache.
+ALTER TABLE runs ADD COLUMN options_json TEXT;
+`,
+  },
 ];
 
 export const LATEST_SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]?.version ?? 0;

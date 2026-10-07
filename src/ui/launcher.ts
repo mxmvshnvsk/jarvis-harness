@@ -56,7 +56,8 @@ export interface Launch {
 }
 
 export interface Launcher {
-  start(input: { task: string; workflow: Workflow; repoRoot: string }): Launch;
+  /** `freshDesign`: the Figma frames read again past the cache (`--fresh design`). */
+  start(input: { task: string; workflow: Workflow; repoRoot: string; freshDesign?: boolean }): Launch;
   /** Research one module (or a folder): now, or after the research in front of it. */
   startModule(input: { module: string; note?: string; repoRoot: string }): Launch;
   /** Takes a research out of the queue; false when it has started already. */
@@ -203,7 +204,8 @@ export function createLauncher(options: LauncherOptions): Launcher {
         exitCode: null,
       };
       launches.unshift(launch);
-      spawnCli([COMMAND[input.workflow], input.task], input.repoRoot, log, (code) => {
+      const args = [COMMAND[input.workflow], input.task, ...(input.freshDesign ? ["--fresh", "design"] : [])];
+      spawnCli(args, input.repoRoot, log, (code) => {
         launch.exitCode = code ?? 1;
         if (launch.runId) busy.delete(launch.runId);
       });

@@ -1,5 +1,6 @@
-import { Command } from "commander";
+import { Command, InvalidArgumentError } from "commander";
 import { ConfigError } from "../core/config/errors.ts";
+import { type FreshSource, FreshSourceSchema } from "../core/domain/run.ts";
 import { errorFields } from "../telemetry/log.ts";
 import { staleBuild, versionText } from "../version.ts";
 import { cliLogger } from "./cliLog.ts";
@@ -60,6 +61,24 @@ export interface RunOptions {
 }
 
 /** node:sqlite still prints an ExperimentalWarning; it is not actionable for users. */
+const FRESH_HELP =
+  'read these sources again, past Jarvis\'s cache: "design" — the Figma frames (changed at the same link); each read spends a Figma API call';
+
+/** `--fresh design`: the sources a run reads again past the cache. */
+function parseFresh(value: string): FreshSource[] {
+  const asked = value
+    .split(",")
+    .map((v) => v.trim())
+    .filter(Boolean);
+  const parsed = asked.map((v) => FreshSourceSchema.safeParse(v));
+  const bad = asked.filter((_, i) => !parsed[i]?.success);
+  if (bad.length > 0 || asked.length === 0)
+    throw new InvalidArgumentError(
+      `expected ${FreshSourceSchema.options.join(", ")}; got ${bad.join(", ") || "nothing"}`,
+    );
+  return [...new Set(asked as FreshSource[])];
+}
+
 function silenceSqliteWarning(): void {
   const listeners = process.listeners("warning");
   process.removeAllListeners("warning");
@@ -148,20 +167,32 @@ export function buildProgram(options: RunOptions = {}): Command {
     .option("--workflow <name>", "workflow definition to use", "sdd")
     .option("--base <ref>", "base ref for the run's worktree (default: HEAD)")
     .option("--no-run", "only create the run")
-    .action(async (task: string, opts: { workflow: string; run: boolean; base?: string }) => {
-      await runWork(ctxFor(), task, {
-        workflow: opts.workflow,
-        noRun: !opts.run,
-        ...(opts.base ? { base: opts.base } : {}),
-      });
-    });
+    .option("--fresh <sources>", FRESH_HELP, parseFresh)
+    .action(
+      async (
+        task: string,
+        opts: { workflow: string; run: boolean; base?: string; fresh?: FreshSource[] },
+      ) => {
+        await runWork(ctxFor(), task, {
+          workflow: opts.workflow,
+          noRun: !opts.run,
+          ...(opts.base ? { base: opts.base } : {}),
+          ...(opts.fresh ? { fresh: opts.fresh } : {}),
+        });
+      },
+    );
 
   program
     .command("research <task>")
     .description("run only the research step for a task (built-in workflow `research`)")
     .option("--base <ref>", "base ref for the run's worktree (default: HEAD)")
-    .action(async (task: string, opts: { base?: string }) => {
-      await runWork(ctxFor(), task, { workflow: "research", ...(opts.base ? { base: opts.base } : {}) });
+    .option("--fresh <sources>", FRESH_HELP, parseFresh)
+    .action(async (task: string, opts: { base?: string; fresh?: FreshSource[] }) => {
+      await runWork(ctxFor(), task, {
+        workflow: "research",
+        ...(opts.base ? { base: opts.base } : {}),
+        ...(opts.fresh ? { fresh: opts.fresh } : {}),
+      });
     });
   program
     .command("fix <task>")
@@ -169,15 +200,25 @@ export function buildProgram(options: RunOptions = {}): Command {
       "a bug fix, the short way: research, a spec to approve, the change with its test, the project's checks, review (built-in workflow `fix`)",
     )
     .option("--base <ref>", "base ref for the run's worktree (default: HEAD)")
-    .action(async (task: string, opts: { base?: string }) => {
-      await runWork(ctxFor(), task, { workflow: "fix", ...(opts.base ? { base: opts.base } : {}) });
+    .option("--fresh <sources>", FRESH_HELP, parseFresh)
+    .action(async (task: string, opts: { base?: string; fresh?: FreshSource[] }) => {
+      await runWork(ctxFor(), task, {
+        workflow: "fix",
+        ...(opts.base ? { base: opts.base } : {}),
+        ...(opts.fresh ? { fresh: opts.fresh } : {}),
+      });
     });
   program
     .command("spec <task>")
     .description("research, requirements and a specification up to its approval (built-in workflow `spec`)")
     .option("--base <ref>", "base ref for the run's worktree (default: HEAD)")
-    .action(async (task: string, opts: { base?: string }) => {
-      await runWork(ctxFor(), task, { workflow: "spec", ...(opts.base ? { base: opts.base } : {}) });
+    .option("--fresh <sources>", FRESH_HELP, parseFresh)
+    .action(async (task: string, opts: { base?: string; fresh?: FreshSource[] }) => {
+      await runWork(ctxFor(), task, {
+        workflow: "spec",
+        ...(opts.base ? { base: opts.base } : {}),
+        ...(opts.fresh ? { fresh: opts.fresh } : {}),
+      });
     });
 
   program

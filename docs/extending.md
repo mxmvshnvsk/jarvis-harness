@@ -92,7 +92,7 @@ parameters, args(a) → аргументы сервера, markerArg?, verify?, 
 ## Миграции схемы
 
 `src/storage/migrations/index.ts` — массив миграций вперёд (`0001` init, `0002` interactions,
-`0003` graph, `0004` knowledge index). Новая миграция = следующий номер + SQL; `jarvis db migrate`
+`0003` graph, `0004` knowledge index, `0005` run options). Новая миграция = следующий номер + SQL; `jarvis db migrate`
 применяет с бэкапом; тесты `tests/storage/migrate.test.ts` и `tests/cli/cli.test.ts` фиксируют
 ожидаемую версию.
 

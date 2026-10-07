@@ -80,6 +80,11 @@ export const collectDesign: DeterministicTool = async (ctx, args) => {
     }
   if (found.length === 0) return done("no design frame links in the task, its issues or pages");
 
+  // the task asked for the frames as they are now (a design changed at the same link): past the cache,
+  // and what is read replaces the cached frame for the tasks after it
+  const fresh = ctx.run.options?.fresh?.includes("design") === true;
+  const readFrame = (args: Record<string, unknown>) =>
+    ctx.tools.invoke("figma.get", fresh ? { ...args, fresh: true } : args);
   const frames: Array<{ link: string; from: string; text: string }> = [];
   const missed: Array<{ link: string; from: string; why: string }> = [];
   let limited: string | undefined;
@@ -89,10 +94,9 @@ export const collectDesign: DeterministicTool = async (ctx, args) => {
       missed.push({ ...f, why: limited });
       continue;
     }
-    let r = await ctx.tools.invoke("figma.get", { url: f.link });
+    let r = await readFrame({ url: f.link });
     // a whole screen may not fit the time: its upper levels still tell the structure and the texts
-    if (!r.ok && /time(d)? ?out/i.test(r.error ?? r.text))
-      r = await ctx.tools.invoke("figma.get", { url: f.link, depth: 4 });
+    if (!r.ok && /time(d)? ?out/i.test(r.error ?? r.text)) r = await readFrame({ url: f.link, depth: 4 });
     if (r.ok) {
       frames.push({ ...f, text: withoutHead(r.text) });
       continue;
@@ -110,7 +114,7 @@ export const collectDesign: DeterministicTool = async (ctx, args) => {
   const doc = [
     "# Design frames of the task",
     "",
-    `Read by Jarvis from the task, its issues and their Confluence pages, without a model: ${frames.length} frame${frames.length === 1 ? "" : "s"} read${missed.length > 0 ? `, ${missed.length} not` : ""}. Texts, layout, components and spacing come from Figma as they are; map them to the code with the project's design-system knowledge — the colours and fonts of the designs may be newer than the code's theme.`,
+    `Read by Jarvis from the task, its issues and their Confluence pages, without a model: ${frames.length} frame${frames.length === 1 ? "" : "s"} read${fresh ? " again from Figma, past Jarvis's cache" : ""}${missed.length > 0 ? `, ${missed.length} not` : ""}. Texts, layout, components and spacing come from Figma as they are; map them to the code with the project's design-system knowledge — the colours and fonts of the designs may be newer than the code's theme.`,
     ...frames.flatMap((f, i) => [
       "",
       `## ${i + 1}. ${(/^### (.+)$/m.exec(f.text)?.[1] ?? "frame").trim()}`,
@@ -131,7 +135,15 @@ export const collectDesign: DeterministicTool = async (ctx, args) => {
     stepId: ctx.step.id,
     iteration: ctx.iteration,
   });
-  return { status: "success", outputs: [...outputs, `${artifact.artifactId}@${artifact.version}`] };
+  return {
+    status: "success",
+    ...(fresh
+      ? {
+          reason: `${frames.length} design frame${frames.length === 1 ? "" : "s"} read again from Figma, past the cache`,
+        }
+      : {}),
+    outputs: [...outputs, `${artifact.artifactId}@${artifact.version}`],
+  };
 };
 
 /** A tool's answer without its `[jira.get] ok` line. */

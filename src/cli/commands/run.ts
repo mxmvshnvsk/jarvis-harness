@@ -13,7 +13,7 @@ import type { Approval } from "../../artifacts/store.ts";
 import { resolveActor } from "../../core/actor/resolve.ts";
 import type { Actor } from "../../core/domain/actor.ts";
 import type { ApprovalDecision } from "../../core/domain/artifact.ts";
-import type { Run, WorkspaceRef } from "../../core/domain/run.ts";
+import type { FreshSource, Run, WorkspaceRef } from "../../core/domain/run.ts";
 import { removeMarkers } from "../../interaction/review/collector.ts";
 import { daemonTick } from "../../orchestration/daemon.ts";
 import { interruption } from "../../orchestration/interrupt.ts";
@@ -547,7 +547,7 @@ function restOf(engine: LocalWorkflowEngine, from: Run): string | undefined {
 export async function runWork(
   ctx: CliContext,
   task: string,
-  options: { workflow?: string; noRun?: boolean; base?: string },
+  options: { workflow?: string; noRun?: boolean; base?: string; fresh?: readonly FreshSource[] },
 ): Promise<void> {
   const loaded = await loadForCli(ctx);
   const runtime = createRuntime(loaded, { env: ctx.env });
@@ -578,12 +578,13 @@ export async function runWork(
       workspace,
       dataClass: loaded.config.dataClass,
       ...(loaded.config.profile ? { profile: loaded.config.profile } : {}),
+      ...(options.fresh?.length ? { options: { fresh: [...options.fresh] } } : {}),
     });
     runtime.events.emit({
       kind: "run.created",
       runId: run.id,
       actor: `${actor.kind}:${actor.id}`,
-      payload: { task, workflow: workflowName },
+      payload: { task, workflow: workflowName, ...(run.options ? { options: run.options } : {}) },
     });
     if (options.noRun) {
       ctx.out.result({ id: run.id, state: run.state }, () =>

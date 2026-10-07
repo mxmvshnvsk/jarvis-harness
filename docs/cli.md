@@ -191,7 +191,7 @@ Jarvis как MCP-сервер на stdio (только чтение) для IDE
 
 ## Запуск и жизнь run
 
-### `jarvis work <task> [--workflow <name>] [--base <ref>] [--no-run]`
+### `jarvis work <task> [--workflow <name>] [--base <ref>] [--no-run] [--fresh design]`
 
 Preflight (все MCP-серверы, до которых могут дотянуться агенты workflow, должны ответить на
 `tools/list`), создание run, рабочая копия по `workspace.mode`: worktree от `--base` (по умолчанию `HEAD`) или
@@ -199,7 +199,7 @@ Preflight (все MCP-серверы, до которых могут дотян�
 завершения или остановки. Коды выхода — [overview.md](overview.md#коды-выхода). Workflow по умолчанию
 `sdd`; `smoke` проверяет сам движок.
 
-### `jarvis fix <task> [--base <ref>]`
+### `jarvis fix <task> [--base <ref>] [--fresh design]`
 
 Короткий путь для бага (встроенный workflow `fix`): `discover → design → research → spec → approve-spec →
 implementation → verify (standards, checks) → review → approve-impl`. Без анализа требований, impact, плана,
@@ -210,7 +210,7 @@ implementation → verify (standards, checks) → review → approve-impl`. Бе
 jest — только связанные тесты (`--findRelatedTests`). Упавшая проверка — возврат в implementation с командой и
 хвостом вывода. Для фич — `jarvis work` (`sdd`).
 
-### `jarvis research <task> [--base <ref>]` / `jarvis spec <task> [--base <ref>]`
+### `jarvis research <task> [--base <ref>] [--fresh design]` / `jarvis spec <task> [--base <ref>] [--fresh design]`
 
 Частичные прогоны: `research` выполняет только `discover → design → research`; `spec` — исследование, анализ
 требований и спецификацию до её утверждения (выход 10 на гейте; `jarvis approve <run> --resume` завершает run).
@@ -220,6 +220,12 @@ jest — только связанные тесты (`--findRelatedTests`). Уп
 Шаг `design` модель не вызывает: читает задачу из Jira по ключу (`ABC-123`) и связанные страницы Confluence и
 пишет артефакт `sources`; если доступен `figma.get` — описывает макеты в артефакте `design`. Агенты research и
 requirements получают оба на вход и задачу со страницами заново не читают.
+
+Макеты Jarvis хранит сутки (см. [integrations.md](integrations.md)): если дизайн поменяли по той же ссылке, следующая
+задача в течение суток получит старый. `--fresh design` (у `work`, `fix`, `spec`, `research`; в UI — галочка «Read
+the Figma frames again» в New task) читает все фреймы задачи из Figma заново, мимо кэша, и кладёт новые версии в
+кэш — следующие задачи получат уже их. Флаг хранится в run: resume и повтор шага тоже читают заново. Каждый фрейм —
+запрос к Figma API; строка шага `design` и `design.md` пишут «read again from Figma, past the cache».
 
 Противоречия в требованиях research не разрешает молча, а выносит отдельным списком `contradictions`. Это два
 источника, которые спорят, одно правило, дающее разным веткам одно и то же условие, текст против макета. Код, который
@@ -564,7 +570,8 @@ denied / unmapped / «not allowed», как `jarvis mcp list`; за 30 мину�
 **New task** (кнопка в шапке, форма вверху Runs): что сделать, workflow (`research` — разобраться и записать,
 ничего не меняя, выбран по умолчанию; `fix` — короткий путь для бага; `sdd` — полный со спекой на одобрение;
 `spec`) и репозиторий (тот, где запущен `jarvis ui`, или
-любой с прогонами). Start запускает тот же CLI, что набрал бы человек (`jarvis research "…"`, `jarvis fix "…"`), в фоне и без
+любой с прогонами). Галочка «Read the Figma frames again» — то же, что `--fresh design`: макет поменяли по той же
+ссылке. Start запускает тот же CLI, что набрал бы человек (`jarvis research "…"`, `jarvis fix "…"`), в фоне и без
 терминала, вывод — в `~/.jarvis/cache/launches/`. Пока готовится рабочая копия, запуск виден в Running
 со ссылкой на лог; упал до прогона — хвост лога там же. Такой прогон **ведёт страница**: где он ждёт
 человека, решаешь на странице, и он идёт дальше сам (`jarvis resume` в фоне); ждал модель или окно квоты —

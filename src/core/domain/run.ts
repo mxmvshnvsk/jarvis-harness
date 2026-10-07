@@ -101,6 +101,15 @@ export const WaitingForSchema = z.strictObject({
 });
 export type WaitingFor = z.infer<typeof WaitingForSchema>;
 
+/** What a task asks of its run beyond its text; kept with the run, so a resume keeps it too. */
+export const FreshSourceSchema = z.enum(["design"]);
+export type FreshSource = z.infer<typeof FreshSourceSchema>;
+export const RunOptionsSchema = z.strictObject({
+  /** Sources read again past Jarvis's cache: "design" — the Figma frames (a frame changed at the same link). */
+  fresh: z.array(FreshSourceSchema).optional(),
+});
+export type RunOptions = z.infer<typeof RunOptionsSchema>;
+
 export const RunSchema = z.strictObject({
   id: z.string().min(1),
   task: z.string().min(1),
@@ -114,6 +123,7 @@ export const RunSchema = z.strictObject({
   iterations: z.record(z.string(), z.int().nonnegative()).default({}),
   dataClass: z.enum(["public", "internal", "confidential"]),
   profile: z.string().min(1).optional(),
+  options: RunOptionsSchema.optional(),
   lease: LeaseSchema.optional(),
   cancelRequested: z.boolean().default(false),
   stateReason: z.string().optional(),

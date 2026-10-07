@@ -942,7 +942,13 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
     const repo = form.get("repo") ?? options.projectRoot ?? "";
     if (!task || !workflow) return redirect(r, "/?notice=no-task#new");
     if (!knownRepos().includes(repo) || !existsSync(repo)) return redirect(r, "/?notice=no-repo#new");
-    const launch = launcher.start({ task, workflow, repoRoot: repo });
+    const freshDesign = form.get("fresh") === "design";
+    const launch = launcher.start({
+      task,
+      workflow,
+      repoRoot: repo,
+      ...(freshDesign ? { freshDesign } : {}),
+    });
     // straight to the launch: it becomes the run's page as soon as the run begins
     return redirect(r, `/launches/${launch.id}`);
   };

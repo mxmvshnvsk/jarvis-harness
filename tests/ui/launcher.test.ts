@@ -95,6 +95,26 @@ describe("the launcher", () => {
   });
 });
 
+describe("a task whose design changed at the same link", () => {
+  it("the box on the page starts the CLI with --fresh design", async () => {
+    launcher.start({ task: "ABC-42", workflow: "research", repoRoot: sb.project, freshDesign: true });
+    expect((await calls(1))[0]).toBe(`${sb.project}|off|research ABC-42 --fresh design`);
+  });
+
+  it("the run keeps what the task asked: a resume reads the frames again too", () => {
+    const run = rt.runs.create({
+      task: "ABC-42",
+      workflow: "research",
+      owner: DEV,
+      workspace: { mode: "cwd", repoRoot: sb.project, path: sb.project, baseRef: "HEAD" },
+      dataClass: "internal",
+      options: { fresh: ["design"] },
+    });
+    expect(rt.runs.get(run.id)?.options).toEqual({ fresh: ["design"] });
+    expect(createRun("Order form: phone number mask").options).toBeUndefined();
+  });
+});
+
 describe("module research from the page", () => {
   it("runs one research at a time: the rest wait in a queue, in order, and can be taken out", async () => {
     const first = launcher.startModule({

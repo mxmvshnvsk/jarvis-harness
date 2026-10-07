@@ -253,6 +253,8 @@ tr:last-child td{border-bottom:0}
 .field{display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--muted)}
 .field textarea{padding:10px 12px;border-radius:8px;resize:vertical;min-height:72px;font-size:15px;line-height:1.45}
 .field{min-width:0}
+.check{display:flex;align-items:baseline;gap:8px;margin-top:10px;font-size:14px;cursor:pointer}
+.check input{margin:0;accent-color:var(--accent)}
 .field select{height:44px;width:100%;text-overflow:ellipsis}
 .newtask .row{align-items:flex-end}
 .newtask .row .field{flex:1 1 240px;max-width:520px}

@@ -384,6 +384,7 @@ ${form(
 ${repoField}
 <button type="submit" class="btn primary">Start</button>
 </div>
+<label class="check"><input type="checkbox" name="fresh" value="design"> Read the Figma frames again <span class="meta">— the design changed at the same link; past Jarvis's one-day cache, each frame is a Figma API call</span></label>
 <p class="hint">Runs in the background, as <code>jarvis research "…"</code> (or the workflow chosen) would without a terminal; where it needs you, it waits here — decide on the page and it goes on.</p>`,
 )}
 </section>`;

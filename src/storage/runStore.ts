@@ -7,6 +7,7 @@ import {
   isTerminal,
   type Lease,
   type Run,
+  type RunOptions,
   RunSchema,
   type RunState,
   type WaitingFor,
@@ -22,6 +23,7 @@ export interface CreateRunInput {
   readonly workspace: WorkspaceRef;
   readonly dataClass: Run["dataClass"];
   readonly profile?: string;
+  readonly options?: RunOptions;
 }
 
 export interface RunFilter {
@@ -72,6 +74,7 @@ interface RunRow {
   iterations_json: string;
   data_class: Run["dataClass"];
   profile: string | null;
+  options_json: string | null;
   lock_owner: string | null;
   lock_epoch: number;
   lock_until: string | null;
@@ -81,7 +84,7 @@ interface RunRow {
 }
 
 const COLUMNS =
-  "id, task, workflow, state, state_reason, waiting_for_json, owner_json, workspace_json, current_step, current_iteration, iterations_json, data_class, profile, lock_owner, lock_epoch, lock_until, cancel_requested, created_at, updated_at";
+  "id, task, workflow, state, state_reason, waiting_for_json, owner_json, workspace_json, current_step, current_iteration, iterations_json, data_class, profile, options_json, lock_owner, lock_epoch, lock_until, cancel_requested, created_at, updated_at";
 
 function rowToRun(row: RunRow): Run {
   return RunSchema.parse({
@@ -96,6 +99,7 @@ function rowToRun(row: RunRow): Run {
     iterations: JSON.parse(row.iterations_json),
     dataClass: row.data_class,
     ...(row.profile ? { profile: row.profile } : {}),
+    ...(row.options_json ? { options: JSON.parse(row.options_json) } : {}),
     ...(row.lock_owner && row.lock_until
       ? { lease: { owner: row.lock_owner, epoch: row.lock_epoch, until: row.lock_until } }
       : {}),
@@ -106,6 +110,9 @@ function rowToRun(row: RunRow): Run {
     updatedAt: row.updated_at,
   });
 }
+
+const hasOptions = (o: RunOptions | undefined): o is RunOptions =>
+  o !== undefined && Object.values(o).some((v) => v !== undefined && (!Array.isArray(v) || v.length > 0));
 
 export function newRunId(): string {
   return `run_${randomUUID().replace(/-/g, "").slice(0, 20)}`;
@@ -129,8 +136,8 @@ export class SqliteRunStore {
     const id = input.id ?? newRunId();
     this.db
       .prepare(
-        `INSERT INTO runs (id, task, workflow, state, owner_json, workspace_json, current_iteration, iterations_json, data_class, profile, created_at, updated_at)
-         VALUES (?, ?, ?, 'CREATED', ?, ?, 1, '{}', ?, ?, ?, ?)`,
+        `INSERT INTO runs (id, task, workflow, state, owner_json, workspace_json, current_iteration, iterations_json, data_class, profile, options_json, created_at, updated_at)
+         VALUES (?, ?, ?, 'CREATED', ?, ?, 1, '{}', ?, ?, ?, ?, ?)`,
       )
       .run(
         id,
@@ -140,6 +147,7 @@ export class SqliteRunStore {
         JSON.stringify(input.workspace),
         input.dataClass,
         input.profile ?? null,
+        hasOptions(input.options) ? JSON.stringify(input.options) : null,
         now,
         now,
       );
