@@ -181,16 +181,13 @@ humanGate: artifact            # fail | artifact | skip-if-approved — что �
                                # (неинтерактивный режим, ADR-0009 §2)
 
 human:                         # ADR-0019 §9
-  mode: balanced               # autonomous | balanced | strict
   gates:
     spec: { required: true }
     implementation: { required: true }   # required: false — гейт проходится молча
   review:
     sourceMarkers: true                  # // REVIEW: в коде
     removeMarkersAfterApproval: true
-    knowledgePromotion: confirm          # confirm | never — кандидаты требуют решения человека
   clarification: { multiTurn: true, maxTurns: 8 }
-  manualEdits: { enabled: true }         # правки в worktree становятся checkpoint human edit
 
 knowledge:                     # ADR-0020 §3, §5; ADR-0015
   maxSkills: 2                 # навыков на вызов агента; остальные — «по запросу»

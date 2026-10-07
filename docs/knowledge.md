@@ -222,5 +222,5 @@ flowchart LR
 
 Команды: `jarvis candidates list|show`, `promote <имя> [--id file-id] [--replace]`, `reject <имя>`. Файл,
 сгенерированный Jarvis (с маркером), заменяется без вопросов; написанный человеком — только с `--replace`. То же
-решение — на странице Knowledge → Modules в `jarvis ui`. `human.review.knowledgePromotion` пока не действует:
-кандидаты сохраняются всегда.
+решение — на странице Knowledge → Modules в `jarvis ui`. Кандидаты сохраняются всегда: принять или отклонить
+их решает человек.

@@ -350,14 +350,12 @@ export type KnowledgeConfig = z.infer<typeof KnowledgeConfigSchema>;
 
 /** ADR-0019 §9 — how and when humans take part. Narrow-only along the precedence chain. */
 export const HumanConfigSchema = z.strictObject({
-  mode: z.enum(["autonomous", "balanced", "strict"]).default("balanced"),
   /** Keyed by the artifact type an approval step gates: `required: false` passes the gate silently. */
   gates: z.record(z.string(), z.strictObject({ required: z.boolean().default(true) })).prefault({}),
   review: z
     .strictObject({
       sourceMarkers: z.boolean().default(true),
       removeMarkersAfterApproval: z.boolean().default(true),
-      knowledgePromotion: z.enum(["confirm", "never"]).default("confirm"),
     })
     .prefault({}),
   clarification: z
@@ -366,7 +364,6 @@ export const HumanConfigSchema = z.strictObject({
       maxTurns: z.int().positive().default(8),
     })
     .prefault({}),
-  manualEdits: z.strictObject({ enabled: z.boolean().default(true) }).prefault({}),
 });
 export type HumanConfig = z.infer<typeof HumanConfigSchema>;
 

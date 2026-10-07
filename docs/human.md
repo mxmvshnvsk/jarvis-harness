@@ -34,9 +34,7 @@ jarvis approve <run> --reject --comment "…"          # run → FAILED
 jarvis approve <run> --commit                        # + .jarvis/approvals/<task>/<type>.json для CI
 ```
 
-`human.gates.<type>.required: false` проходит гейт молча с событием `approval.skipped`. `human.mode`
-(`autonomous`, `balanced`, `strict`) схема принимает, но пока он на поведение не влияет: гейты задаёт
-`human.gates`.
+`human.gates.<type>.required: false` проходит гейт молча с событием `approval.skipped`.
 
 ![work](assets/work.gif)
 
@@ -99,8 +97,8 @@ open ──analysis──▶ acknowledged ──implementation──▶ applied 
 
 Пока run ждёт, можно править файлы в его worktree. При `jarvis resume` они фиксируются как checkpoint
 `human edit` (`Jarvis-Kind: human-edit`) — не сбрасываются, попадают в diff и к агентам. Правка
-артефакта (spec и др.) — новая версия с unified diff и provenance «human». `human.manualEdits.enabled` пока не
-действует: правки всегда фиксируются как checkpoint.
+артефакта (spec и др.) — новая версия с unified diff и provenance «human». Правки фиксируются всегда:
+отключать это нельзя.
 
 ## Что видит человек
 

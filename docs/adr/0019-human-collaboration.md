@@ -185,7 +185,6 @@ R-3 → SPEC_CORRECTION
 
 ```yaml
 human:
-  mode: balanced            # autonomous | balanced | strict
   gates:
     requirements: { onBlockingIssue: true }
     specification: { required: true }
@@ -194,10 +193,12 @@ human:
   review:
     sourceMarkers: true
     removeMarkersAfterApproval: true
-    knowledgePromotion: confirm   # confirm | never
   clarification: { multiTurn: true, maxTurns: 8 }
-  manualEdits: { enabled: true }
 ```
+
+Убрано в пилоте (2026-10-07), потому что не понадобилось и кода под них не было: `mode` (`autonomous | balanced |
+strict` — пресет поверх `gates`, которые задают то же явно), `review.knowledgePromotion` (кандидаты не мешали;
+вернуть, если появится шум), `manualEdits.enabled` (ручные правки фиксируются всегда, отбрасывать их не нужно).
 
 CI-профиль (ADR-0009) не может отвечать на треды: `needs_clarification` в CI = exit 10 с экспортом
 треда; ответ даётся локально через `jarvis answer`.

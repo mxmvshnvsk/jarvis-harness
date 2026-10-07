@@ -68,16 +68,13 @@ mcp:
   #   profile: bitbucket
 
 human:                       # ADR-0019 §9 — how people take part (narrow-only)
-  mode: balanced             # autonomous | balanced | strict
   gates:
     spec: { required: true }
     implementation: { required: true }
   review:
     sourceMarkers: true            # "// REVIEW: ..." in the code → jarvis review submit
     removeMarkersAfterApproval: true
-    knowledgePromotion: confirm    # confirm | never
   clarification: { multiTurn: true, maxTurns: 8 }
-  manualEdits: { enabled: true }
 
 tools:
   local: {}
