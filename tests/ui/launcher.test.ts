@@ -196,7 +196,9 @@ describe("New task on the page", () => {
     const runs = await page("/");
     expect(runs).toContain('<a class="btn primary small" href="/#new">New task</a>');
     expect(runs).toContain('action="/runs/new"');
-    expect(runs).toContain('<option value="fix" selected>fix — a short way for a bug');
+    // research first and chosen: find out before changing anything
+    expect(runs).toContain('<option value="research" selected>research — find out and write it down');
+    expect(runs).toContain('<option value="fix">fix — a short way for a bug');
     expect((await post("/runs/new", { task: "x", workflow: "fix" })).status).toBe(403); // no token
     const token = ui.token;
     expect((await post("/runs/new", { t: token, task: " ", workflow: "fix" })).location).toContain(

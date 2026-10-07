@@ -25,6 +25,8 @@ export const WORKFLOWS: ReadonlyArray<{
   readonly label: string;
   readonly about: string;
 }> = [
+  // first and selected: find out before changing anything
+  { id: "research", label: "research", about: "find out and write it down, nothing changed" },
   { id: "fix", label: "fix", about: "a short way for a bug: spec, implementation, checks, review" },
   {
     id: "sdd",
@@ -32,7 +34,6 @@ export const WORKFLOWS: ReadonlyArray<{
     about: "the full way: requirements, spec to approve, impact, plan, implementation",
   },
   { id: "spec", label: "spec", about: "up to an approved spec, nothing implemented" },
-  { id: "research", label: "research", about: "find out and write it down, nothing changed" },
 ];
 
 const COMMAND: Record<Workflow, string> = { fix: "fix", sdd: "work", spec: "spec", research: "research" };

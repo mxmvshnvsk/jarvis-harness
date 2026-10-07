@@ -366,7 +366,7 @@ export interface StartForm {
 const home = (path: string, dir: string) =>
   dir && path.startsWith(`${dir}/`) ? `~${path.slice(dir.length)}` : path;
 
-/** "New task": what to do, which workflow, which repository — started as `jarvis fix "…"` would be. */
+/** "New task": what to do, which workflow (research first), which repository — started as the CLI would be. */
 function startHtml(start: StartForm, actions: Actions): Html {
   const repoField =
     start.repos.length > 1
@@ -377,13 +377,13 @@ ${form(
   actions,
   "/runs/new",
   html`<h2 id="new-title">New task</h2>
-<label class="field grow">What to do<textarea name="task" rows="3" required maxlength="4000" placeholder="Bug: on the compact form the upload toggle hides attached files — find the cause and fix it"></textarea></label>
+<label class="field grow">What to do<textarea name="task" rows="3" required maxlength="4000" placeholder="ABC-123 — or in words: what to find out, or the bug to fix"></textarea></label>
 <div class="row">
-<label class="field">Workflow<select name="workflow">${start.workflows.map((w) => html`<option value="${w.id}"${w.id === "fix" ? " selected" : ""}>${w.label} — ${w.about}</option>`)}</select></label>
+<label class="field">Workflow<select name="workflow">${start.workflows.map((w) => html`<option value="${w.id}"${w.id === start.workflows[0]?.id ? " selected" : ""}>${w.label} — ${w.about}</option>`)}</select></label>
 ${repoField}
 <button type="submit" class="btn primary">Start</button>
 </div>
-<p class="hint">Runs in the background, as <code>jarvis fix "…"</code> without a terminal; where it needs you, it waits here — decide on the page and it goes on.</p>`,
+<p class="hint">Runs in the background, as <code>jarvis research "…"</code> (or the workflow chosen) would without a terminal; where it needs you, it waits here — decide on the page and it goes on.</p>`,
 )}
 </section>`;
 }
