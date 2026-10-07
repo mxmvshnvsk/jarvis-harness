@@ -111,7 +111,7 @@ jarvis review submit <run> --resume # маркеры → review-package → revi
 
 ```sh
 jarvis diff <run>                   # что изменилось относительно базового коммита
-jarvis apply <run>                  # squash-merge в текущую ветку
+jarvis apply <run>                  # изменения прогона одним коммитом в текущую ветку
 jarvis candidates list              # что review предложил записать как стандарт/знание
 jarvis candidates promote <id>      # файл в .jarvis/standards или knowledge — в обычный code review
 jarvis gc                           # старые worktree

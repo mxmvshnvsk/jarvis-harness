@@ -136,6 +136,20 @@ describe("worktree workspace end to end (ADR-0003)", () => {
     expect(sh(sb.project, ["status", "--porcelain"]).trim()).toBe("");
   });
 
+  it("applies the run's own changes even when the branch's commit was amended after the run started (pilot)", async () => {
+    const r = await jarvis(["--json", "work", "ABC-11", "--workflow", "touch"]);
+    const detail = JSON.parse(r.out) as { run: { id: string } };
+    // the person amends the commit the run started from: the run's base is no longer in the branch
+    writeFileSync(join(sb.project, "README.md"), "# demo, amended\n");
+    sh(sb.project, ["commit", "-q", "-a", "--amend", "--no-edit"]);
+    const apply = await jarvis(["apply", detail.run.id]);
+    expect(apply.err).toBe("");
+    expect(apply.code).toBe(0);
+    expect(existsSync(join(sb.project, "src", "generated.ts"))).toBe(true);
+    expect(readFileSync(join(sb.project, "README.md"), "utf8")).toBe("# demo, amended\n");
+    expect(sh(sb.project, ["status", "--porcelain"]).trim()).toBe("");
+  });
+
   it("says what it prepares, and a failed setup leaves no worktree or branch behind (pilot)", async () => {
     sb.write("project/.jarvis/project.yaml", "version: 1\nworkspace:\n  setup: 'echo boom >&2; exit 3'\n");
     sh(sb.project, ["add", "-A"]);

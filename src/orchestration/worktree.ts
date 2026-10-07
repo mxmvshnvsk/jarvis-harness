@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import type { WorkspaceRef } from "../core/domain/run.ts";
 import { git, runShell } from "../tools/local/exec.ts";
@@ -282,30 +283,47 @@ export class WorktreeWorkspace implements Workspace {
   }
 
   /** ADR-0003 §4: squash the run branch onto the branch checked out in the main repository. */
+  /**
+   * ADR-0003 §4: the run's own changes — `base..branch`, not the branch — as one commit on the
+   * branch checked out in the main repository. Pilot: the main branch's last commit was amended after
+   * the run started; a squash merge of the run branch then carried the old commit too and collided
+   * with its new version (`CONFLICT (add/add)` on a file the run never touched).
+   */
   async apply(message: string): Promise<{ commit: string; files: string[] }> {
     const files = await this.changedFiles();
     if (files.length === 0) throw new WorktreeError("nothing to apply: the run produced no changes");
-    if (await WorktreeWorkspace.isDirty(this.ref.repoRoot)) {
+    const repo = this.ref.repoRoot;
+    if (await WorktreeWorkspace.isDirty(repo)) {
       throw new WorktreeError(
         "the main working tree has uncommitted changes; commit or stash them before `jarvis apply`",
       );
     }
-    const merge = await git(
-      ["merge", "--squash", "--no-commit", this.ref.branch as string],
-      this.ref.repoRoot,
-    );
-    if (merge.code !== 0) {
-      await git(["merge", "--abort"], this.ref.repoRoot);
-      await git(["reset", "-q", "--hard"], this.ref.repoRoot);
-      throw new WorktreeError(
-        `squash merge conflicts: ${merge.stderr.trim() || merge.stdout.trim()}; rebase the run branch ${this.ref.branch} manually`,
-      );
+    const base = this.ref.baseCommit ?? this.ref.baseRef;
+    const branch = this.ref.branch as string;
+    // the raw output: a trailing context line of a single space is part of the patch
+    const diff = await git(["diff", "--binary", "--full-index", `${base}..${branch}`], repo);
+    if (diff.code !== 0) throw new WorktreeError(`git diff: ${diff.stderr.trim() || `exit ${diff.code}`}`);
+    const patch = diff.stdout;
+    const dir = mkdtempSync(join(tmpdir(), "jarvis-apply-"));
+    const file = join(dir, "run.patch");
+    try {
+      writeFileSync(file, patch.endsWith("\n") ? patch : `${patch}\n`);
+      const applied = await git(["apply", "--3way", "--index", file], repo);
+      if (applied.code !== 0) {
+        const unmerged = (await git(["diff", "--name-only", "--diff-filter=U"], repo)).stdout
+          .split("\n")
+          .filter(Boolean);
+        // leave the main checkout as it was: the person decides how to resolve
+        await git(["reset", "-q", "--hard"], repo);
+        throw new WorktreeError(
+          `the run's changes conflict with your branch${unmerged.length > 0 ? ` in ${unmerged.join(", ")}` : ""}: ${applied.stderr.trim().split("\n").slice(-2).join(" ")}; to resolve by hand: git diff ${base.slice(0, 8)}..${branch} | git apply --3way, fix the conflict markers, commit`,
+        );
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
-    await must(
-      git(["commit", "-q", "--no-verify", "-m", message], this.ref.repoRoot, { env: this.env }),
-      "git commit",
-    );
-    const commit = await must(git(["rev-parse", "HEAD"], this.ref.repoRoot), "rev-parse");
+    await must(git(["commit", "-q", "--no-verify", "-m", message], repo, { env: this.env }), "git commit");
+    const commit = await must(git(["rev-parse", "HEAD"], repo), "rev-parse");
     return { commit, files };
   }
 
