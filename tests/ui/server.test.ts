@@ -235,11 +235,63 @@ describe("jarvis ui: pages", () => {
       payload: { stepId: "research", iteration: 1, kind: "agentic" },
     });
     rt.events.emit({ kind: "agent.start", runId: run.id, payload: { agent: "research", maxToolCalls: 500 } });
-    const page = await get(`/runs/${run.id.replace(/^run_/, "").slice(0, 8)}`, authed());
-    expect(page.body).toContain('class="panel now"');
-    // the step's time, the wait for the model and the tool line's time: three running clocks
-    expect(page.body.match(/<span data-ms="\d+">\d+:\d\d<\/span>/g)?.length).toBeGreaterThanOrEqual(3);
-    expect(page.body).toMatch(/model call 1, waiting <span data-ms=/);
+    // the answer of model call 1 asked for two reads: they ran side by side, one still runs
+    const at = { runId: run.id, stepId: "research", iteration: 1 };
+    rt.events.emit({
+      kind: "tool.batch",
+      ...at,
+      payload: {
+        modelCall: 1,
+        size: 2,
+        parallel: true,
+        calls: [
+          { capability: "repo.read", args: '{"path":"src/orders/card.tsx"}' },
+          { capability: "repo.search", args: '{"pattern":"deliveryDate"}' },
+        ],
+      },
+    });
+    rt.events.emit({
+      kind: "tool.call",
+      ...at,
+      payload: {
+        capability: "repo.read",
+        ok: true,
+        durationMs: 40,
+        batch: 1,
+        slot: 0,
+        args: '{"path":"src/orders/card.tsx"}',
+      },
+    });
+    const short = run.id.replace(/^run_/, "").slice(0, 8);
+    const page = await get(`/runs/${short}`, authed());
+    expect(page.body).toContain("<b>⇉ 2 in parallel</b>");
+    expect(page.body).toMatch(
+      /class="lane"><span class="ok">✓<\/span><span class="k">read<\/span><span class="p">src\/orders\/card.tsx<\/span>/,
+    );
+    expect(page.body).toMatch(
+      /class="lane"><span class="spin" aria-label="running"><\/span><span class="k">search<\/span>/,
+    );
+    // while its tools run, the model is not asked yet
+    expect(page.body).toContain("model call 1 asked for 2 tools · running them");
+    expect(page.body).toContain("model call 1 · ⇉ 2 tools in parallel · running");
+    expect(page.body).toContain('<span class="sub">read src/orders/card.tsx · 40ms</span>');
+    // the batch done: the next model call is waited for, its clock and the step's count on in the page
+    rt.events.emit({
+      kind: "tool.call",
+      ...at,
+      payload: {
+        capability: "repo.search",
+        ok: true,
+        durationMs: 90,
+        batch: 1,
+        slot: 1,
+        args: '{"pattern":"deliveryDate"}',
+      },
+    });
+    const after = await get(`/runs/${short}`, authed());
+    expect(after.body).toContain("the last batch, model call 1");
+    expect(after.body.match(/<span data-ms="\d+">\d+:\d\d<\/span>/g)?.length).toBeGreaterThanOrEqual(3);
+    expect(after.body).toMatch(/model call 1, waiting <span data-ms=/);
     const js = (await get("/assets/app.js")).body;
     expect(js).toContain("setInterval(countOn, 1000)");
     // a region with something changed and not sent (ticked boxes of a module's review) is not re-rendered

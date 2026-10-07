@@ -152,7 +152,15 @@ export class BoundTools {
     return this.router.allowed(this.agentCapabilities).map(describeCapability);
   }
 
-  async invoke(name: string, args: Record<string, unknown> = {}): Promise<ToolResult> {
+  /**
+   * `batch`: the call is one of several an agent asked for in one answer (its model call and its place
+   * there) — on the record, so a page draws them as one batch.
+   */
+  async invoke(
+    name: string,
+    args: Record<string, unknown> = {},
+    batch?: { readonly batch: number; readonly slot: number },
+  ): Promise<ToolResult> {
     const started = Date.now();
     const capability = this.registry.get(name);
     const base = { runId: this.ctx.run.id, stepId: this.ctx.stepId, iteration: this.ctx.iteration };
@@ -247,6 +255,7 @@ export class BoundTools {
         ...(decision.exception ? { network: capability.network, egressException: decision.exception } : {}),
         // what the agent asked for, redacted and cut (`jarvis explain` and `jarvis logs` name the call)
         args: this.ctx.redactor.redact(safeJson(args)).text.slice(0, 600),
+        ...(batch ? { batch: batch.batch, slot: batch.slot } : {}),
       },
     });
     this.rt.log.debug("tool.result", {

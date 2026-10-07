@@ -365,6 +365,85 @@ export interface FeedItem {
   readonly ts: string;
   readonly text: string;
   readonly tone?: "ok" | "warn" | "bad";
+  /** The calls of a batch under its line. */
+  readonly sub?: ReadonlyArray<{ readonly text: string; readonly tone?: "bad" }>;
+}
+
+/** `read src/a.ts`: a call of a batch, with what it was asked. */
+function callLine(capability: string, args: unknown): string {
+  let detail = "";
+  if (typeof args === "string")
+    try {
+      const a = JSON.parse(args) as Record<string, unknown>;
+      const v = a.path ?? a.pattern ?? a.query ?? a.ref ?? a.key ?? a.id ?? a.url;
+      if (typeof v === "string" || typeof v === "number") detail = String(v);
+    } catch {
+      // not JSON: the capability alone
+    }
+  return `${capability.replace(/^repo\./, "")}${detail ? ` ${detail}` : ""}`;
+}
+
+const quickMs = (ms: number) => (ms < 100 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}s`);
+
+/**
+ * The feed of a run: its events as lines, and every batch of tools an agent asked for in one answer as
+ * one line with its calls under it, how long each took, and the batch from start to its last end.
+ */
+export function feedOf(events: readonly StoredEvent[]): FeedItem[] {
+  const out: FeedItem[] = [];
+  const open = new Map<
+    string,
+    {
+      at: number;
+      start: number;
+      size: number;
+      parallel: boolean;
+      modelCall: number;
+      sub: Array<{ text: string; tone?: "bad"; end?: number }>;
+    }
+  >();
+  for (const e of events) {
+    const p = (e.payload ?? {}) as Record<string, unknown>;
+    const key = `${e.stepId ?? ""}#${e.iteration ?? 1}#${String(p.modelCall ?? p.batch)}`;
+    if (e.kind === "tool.batch" && Array.isArray(p.calls)) {
+      open.set(key, {
+        at: out.length,
+        start: Date.parse(e.ts),
+        size: Number(p.size) || p.calls.length,
+        parallel: p.parallel === true,
+        modelCall: Number(p.modelCall) || 0,
+        sub: (p.calls as Array<Record<string, unknown>>).map((c) => ({
+          text: callLine(String(c.capability ?? "?"), c.args),
+        })),
+      });
+      out.push({ ts: e.ts, text: "" });
+      continue;
+    }
+    if (e.kind === "tool.call" && typeof p.batch === "number") {
+      const b = open.get(key);
+      const line = b?.sub[Number(p.slot) || 0];
+      if (b && line) {
+        line.text = `${line.text} · ${quickMs(Number(p.durationMs) || 0)}${p.ok === false ? " ✗" : ""}`;
+        if (p.ok === false) line.tone = "bad";
+        line.end = Date.parse(e.ts);
+      }
+      continue;
+    }
+    const item = feedItem(e);
+    if (item) out.push(item);
+  }
+  for (const b of open.values()) {
+    const ends = b.sub.map((s) => s.end ?? b.start);
+    const span = Math.max(0, Math.max(...ends) - b.start);
+    const head = b.parallel ? `⇉ ${b.size} tools in parallel` : `${b.size} tools in a row`;
+    out[b.at] = {
+      ts: (out[b.at] as FeedItem).ts,
+      // a call still out: the batch runs, its length is not known yet
+      text: `model call ${b.modelCall} · ${head} · ${b.sub.some((x) => x.end === undefined) ? "running" : quickMs(span)}`,
+      sub: b.sub.map((s) => ({ text: s.text, ...(s.tone ? { tone: s.tone } : {}) })),
+    };
+  }
+  return out;
 }
 
 export interface RunPage {
@@ -596,7 +675,7 @@ export async function runPage(
     .filter(([id]) => !children.has(id))
     .flatMap(([, rs]) => rs)
     .reduce((sum, r) => sum + r.durationMs, 0);
-  const feed = events.map(feedItem).filter((f): f is FeedItem => f !== undefined);
+  const feed = feedOf(events);
   return {
     run,
     plan,

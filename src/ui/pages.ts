@@ -1,4 +1,4 @@
-import { type Activity, clock, compactingText, kilo } from "../app/activity.ts";
+import { type Activity, clock, compactingText, kilo, type ToolBatch } from "../app/activity.ts";
 import { type BudgetStop, sourceOf, unitOf } from "../app/budgetStop.ts";
 import { type BudgetWait, whenText } from "../app/budgetWait.ts";
 import { duration } from "../app/journey.ts";
@@ -298,6 +298,9 @@ function ticking(ms: number): Html {
 function callText(a: Activity): Html {
   const step = a.step;
   if (!step) return html`starting…`;
+  // the tools of the last answer still run: the model is not asked yet
+  if (a.batch?.running)
+    return html`model call ${a.batch.modelCall} asked for ${a.batch.size} tools · running them`;
   if (a.waitingMs === undefined)
     return html`${step.modelCalls} model call${step.modelCalls === 1 ? "" : "s"}`;
   const coming = a.receiving
@@ -326,7 +329,7 @@ function toolBudget(a: Activity | undefined, now: number): Html {
   const pct = max ? Math.min(100, Math.round((used / max) * 100)) : 0;
   const since = step ? ticking(now - Date.parse(step.startedAt)) : "";
   return html`<div class="bar" role="img" aria-label="${max ? `${used} of ${max} tool calls used` : `${used} tool calls`}"><span style="width:${pct}%"></span></div>
-<span class="meta">tools ${max ? `${used}/${max}` : used}${since ? html` · ${since}` : ""}</span>`;
+<span class="meta">tools ${max ? `${used}/${max}` : used}${since ? html` · ${since}` : ""}${step && step.modelCalls > 1 && used > 0 ? html` · ${perCall(used, step.modelCalls, "tools per model call")}` : ""}</span>`;
 }
 
 function recentState(run: Run): Html {
@@ -537,6 +540,45 @@ export function marked(text: string, terms: readonly string[]): Html {
   return join(parts);
 }
 
+/** `⇉ 2.6 tools per model call`: how much an agent asks for at once (the fewer model calls, the faster). */
+function perCall(tools: number, calls: number, label: string): Html {
+  return html`<span class="kpi" title="tool calls per model call: independent reads in one turn">⇉ ${(tools / calls).toFixed(1)} ${label}</span>`;
+}
+
+/** `repo.read` → `read`, `confluence.get` → `confluence`: what a lane did, short. */
+function verbOf(capability: string): string {
+  return capability.replace(/^repo\./, "").replace(/\.get$/, "");
+}
+
+/** `12ms`, `0.4s`, `3.1s`. */
+function quick(ms: number): string {
+  return ms < 100 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}s`;
+}
+
+/** The tools of one answer as lanes on one clock: which ran side by side, which held the batch up. */
+function batchHtml(b: ToolBatch): Html {
+  const total = Math.max(1, b.ms);
+  const done = b.calls.filter((c) => c.ok !== undefined).length;
+  const head = b.parallel ? `⇉ ${b.size} in parallel` : `${b.size} in a row`;
+  const state = b.running
+    ? `· ${quick(b.ms)} so far · ${done} done`
+    : `· the last batch, model call ${b.modelCall} · ${quick(b.ms)}`;
+  return html`<div class="batch${b.running ? "" : " past"}" role="group" aria-label="${head}">
+<div class="bh"><b>${head}</b><span>${state}</span></div>
+${b.calls.slice(0, 12).map((c) => {
+  const left = Math.min(100, (c.startMs / total) * 100);
+  const width = Math.max(2, Math.min(100 - left, (c.ms / total) * 100));
+  const mark =
+    c.ok === undefined
+      ? html`<span class="spin" aria-label="running"></span>`
+      : c.ok
+        ? html`<span class="ok">✓</span>`
+        : html`<span class="bad">✗</span>`;
+  return html`<div class="lane">${mark}<span class="k">${verbOf(c.capability)}</span><span class="p">${c.detail ?? ""}</span><span class="track"><span${c.ok === undefined ? html` class="run"` : ""} style="left:${left.toFixed(1)}%;width:${width.toFixed(1)}%"></span></span><span class="t">${quick(c.ms)}${c.ok === undefined ? "…" : ""}</span></div>`;
+})}
+</div>`;
+}
+
 /* ---- one run ---- */
 
 function stepRow(s: StepRow, now: number): Html {
@@ -556,6 +598,8 @@ function stepRow(s: StepRow, now: number): Html {
     else if (r.agent) notes.push(r.agent);
     if (r.modelCalls > 0) notes.push(`${r.modelCalls} call${r.modelCalls === 1 ? "" : "s"}`);
     if (r.tools && Object.keys(r.tools).length > 0) notes.push(toolMix(r.tools));
+    const tools = r.tools ? Object.values(r.tools).reduce((n, k) => n + k, 0) : 0;
+    if (tools > 0 && r.modelCalls > 1) notes.push(`⇉ ${(tools / r.modelCalls).toFixed(1)} per call`);
     if (r.contradictions)
       notes.push(
         `⚠ ${r.contradictions} contradiction${r.contradictions === 1 ? "" : "s"} in the requirements`,
@@ -781,6 +825,7 @@ function nowHtml(page: RunPage, now: number, actions?: Actions): Html {
     : "";
   return html`<section class="panel now" aria-label="Now" data-live="card">
 <div class="row"><span class="spin" aria-hidden="true"></span><b>${a.step.id}${a.step.iteration > 1 ? `#${a.step.iteration}` : ""}${a.step.agent && a.step.agent !== a.step.id ? ` · ${a.step.agent}` : ""}</b><span class="meta">${ticking(now - Date.parse(a.step.startedAt))} · ${callText(a)}</span></div>
+${a.batch ? batchHtml(a.batch) : ""}
 ${toolBudget(a, now)}
 ${last ? html`<span class="meta">${last}</span>` : ""}
 </section>`;
@@ -791,7 +836,11 @@ function feedHtml(feed: readonly FeedItem[]): Html {
 <h2 id="activity">Activity</h2>
 ${
   feed.length > 0
-    ? html`<ol>${feed.map((f) => html`<li><time datetime="${f.ts}">${wallClock(f.ts)}</time><span${f.tone ? html` class="${f.tone}"` : ""}>${f.text}</span></li>`)}</ol>`
+    ? html`<ol>${feed.map((f) =>
+        f.sub
+          ? html`<li><time datetime="${f.ts}">${wallClock(f.ts)}</time><div class="grp"><span>${f.text}</span>${f.sub.map((c) => html`<span class="sub${c.tone ? ` ${c.tone}` : ""}">${c.text}</span>`)}</div></li>`
+          : html`<li><time datetime="${f.ts}">${wallClock(f.ts)}</time><span${f.tone ? html` class="${f.tone}"` : ""}>${f.text}</span></li>`,
+      )}</ol>`
     : html`<p class="muted">Nothing yet.</p>`
 }
 </section>`;

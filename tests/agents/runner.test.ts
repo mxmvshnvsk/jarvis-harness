@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { BUILTIN_AGENTS } from "../../src/agents/builtin/index.ts";
 import { AgentRegistry } from "../../src/agents/definition.ts";
-import { AgentRuntimeRunner } from "../../src/agents/runner.ts";
+import { AgentRuntimeRunner, inParallel } from "../../src/agents/runner.ts";
 import { type BudgetStop, budgetGranted, budgetStopOf, grantBudget } from "../../src/app/budgetStop.ts";
 import type { Runtime } from "../../src/app/runtime.ts";
 import { AgenticExecutor, DeterministicExecutor } from "../../src/orchestration/executors.ts";
@@ -129,6 +129,23 @@ function lastUserContent(req: CapturedRequest): string {
   const messages = req.body.messages as Array<{ role: string; content: string | null }>;
   return [...messages].reverse().find((m) => m.role === "user")?.content ?? "";
 }
+
+describe("inParallel", () => {
+  it("runs at most `limit` at once and every item once", async () => {
+    let now = 0;
+    let peak = 0;
+    const done: number[] = [];
+    await inParallel([1, 2, 3, 4, 5, 6, 7], 3, async (n) => {
+      now += 1;
+      peak = Math.max(peak, now);
+      await new Promise((r) => setTimeout(r, 5 + (n % 3) * 5));
+      now -= 1;
+      done.push(n);
+    });
+    expect(peak).toBe(3);
+    expect(done.sort()).toEqual([1, 2, 3, 4, 5, 6, 7]);
+  });
+});
 
 describe("AgentRuntimeRunner", () => {
   it("builds layered context, runs the tool loop, finalizes a structured artifact", async () => {
@@ -541,6 +558,67 @@ context: { maxContext: 8000 }
       path: "src/onboarding.ts",
       kind: "unchanged",
     });
+  });
+
+  it("the calls of one answer: reads side by side, a batch on the record, answers in the order asked", async () => {
+    sb.write("project/.jarvis/project.yaml", "version: 1\nworkspace: { mode: cwd }\n");
+    sb.write("project/src/billing.ts", "export const invoiceTotal = 1;\n");
+    rt = await testRuntime(sb, { PATH: process.env.PATH ?? "" });
+    let turn = 0;
+    const calls = [
+      ["repo.read", { path: "src/onboarding.ts" }],
+      ["repo.search", { pattern: "invoiceTotal" }],
+      ["repo.read", { path: "src/billing.ts" }],
+    ] as const;
+    server.respond((req) => {
+      if (!req.body.tools) return completion(JSON.stringify(RESEARCH_DOC));
+      turn += 1;
+      if (turn > 1) return completion(JSON.stringify(RESEARCH_DOC));
+      return {
+        body: {
+          id: "chatcmpl-3",
+          model: "fake-model",
+          choices: [
+            {
+              index: 0,
+              finish_reason: "tool_calls",
+              message: {
+                role: "assistant",
+                content: null,
+                tool_calls: calls.map(([name, args], i) => ({
+                  id: `call_${i}`,
+                  type: "function",
+                  function: { name, arguments: JSON.stringify(args) },
+                })),
+              },
+            },
+          ],
+          usage: { prompt_tokens: 30, completion_tokens: 5 },
+        },
+      };
+    });
+    const run = createRun(rt, "r");
+    await engineWith(rt, researchOnly).execute(run.id, { owner: "cli:t" });
+    const batch = rt.events.list({ runId: run.id, kind: "tool.batch" });
+    expect(batch).toHaveLength(1);
+    expect(batch[0]?.payload).toMatchObject({ modelCall: 1, size: 3, parallel: true });
+    expect(
+      ((batch[0]?.payload?.calls ?? []) as Array<{ capability: string }>).map((c) => c.capability),
+    ).toEqual(["repo.read", "repo.search", "repo.read"]);
+    const recorded = rt.events.list({ runId: run.id, kind: "tool.call" }).map((e) => e.payload);
+    expect(recorded.map((p) => [p?.batch, p?.slot]).sort()).toEqual([
+      [1, 0],
+      [1, 1],
+      [1, 2],
+    ]);
+    // the model gets its answers in the order it asked, whatever order they finished in
+    const second = server.requests.filter((r) => r.body.tools)[1];
+    const answers = (
+      (second?.body.messages ?? []) as Array<{ role: string; tool_call_id?: string; content: string }>
+    )
+      .filter((m) => m.role === "tool")
+      .map((m) => m.tool_call_id);
+    expect(answers).toEqual(["call_0", "call_1", "call_2"]);
   });
 
   it("in the pool's unlimited hours the agent's limits grow unlimitedScale times", async () => {

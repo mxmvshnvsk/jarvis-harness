@@ -202,6 +202,23 @@ tr:last-child td{border-bottom:0}
 .feed li{display:flex;gap:14px;font-size:13px;line-height:19px;align-items:baseline}
 .feed time{font-family:var(--mono);color:var(--muted);width:64px;flex-shrink:0}
 .feed li span{flex:1;min-width:0;overflow-wrap:anywhere}
+.feed .grp{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.feed .grp .sub{font-family:var(--mono);font-size:12px;color:var(--ink-2);padding-left:12px;border-left:2px solid var(--line);margin-left:2px;overflow-wrap:anywhere}
+.feed .grp .sub.bad{color:var(--bad)}
+.batch{display:flex;flex-direction:column;gap:6px;padding:10px 12px;border-radius:8px;background:var(--sunken);border:1px solid var(--line-soft)}
+.batch.past{opacity:.75}
+.batch .bh{display:flex;gap:8px;align-items:baseline;font-size:13px;color:var(--ink-2);flex-wrap:wrap}
+.batch .bh b{color:var(--ink);font-weight:600}
+.lane{display:grid;grid-template-columns:16px 84px minmax(0,1fr) minmax(60px,150px) 52px;gap:10px;align-items:center;font-family:var(--mono);font-size:12px}
+.lane .spin{width:10px;height:10px;border-width:2px}
+.lane .k{color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lane .p{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl;text-align:left;color:var(--ink)}
+.lane .t{color:var(--muted);text-align:right;font-variant-numeric:tabular-nums}
+.track{position:relative;height:6px;border-radius:3px;background:var(--track)}
+.track span{position:absolute;top:0;bottom:0;border-radius:3px;background:var(--accent)}
+.track span.run{background:repeating-linear-gradient(90deg,var(--accent) 0 6px,transparent 6px 10px);opacity:.8}
+.kpi{display:inline-flex;gap:4px;align-items:center;padding:1px 8px;border-radius:999px;background:var(--accent-soft);color:var(--accent);font-size:12px;font-weight:600;white-space:nowrap}
+@media (max-width:640px){.lane{grid-template-columns:16px 64px minmax(0,1fr) 44px}.lane .track{display:none}}
 .arts{padding:18px 20px}
 .arts ul{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:6px}
 .arts li{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:14px;align-items:baseline}

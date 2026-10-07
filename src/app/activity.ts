@@ -49,6 +49,11 @@ export interface Activity {
   /** A streamed answer on its way: characters of the answer and of the reasoning so far. */
   readonly receiving?: { readonly outputChars: number; readonly reasoningChars: number };
   /**
+   * The tools the step's agent asked for in one answer, the batch in flight or the last one: each call
+   * on one clock from the batch's start (lanes), what is still running, and how long the batch took.
+   */
+  readonly batch?: ToolBatch;
+  /**
    * The conversation is being compacted now: a summary of its older part is asked for (a model call of
    * its own; pilot: 49 s that looked like the agent thinking).
    */
@@ -60,6 +65,67 @@ export interface Activity {
   };
 }
 
+export interface ToolBatch {
+  /** The model call of the step that asked for it. */
+  readonly modelCall: number;
+  readonly size: number;
+  /** Reads without effects ran side by side; otherwise one after another. */
+  readonly parallel: boolean;
+  readonly running: boolean;
+  /** From the batch's start to its last call's end (or now, while running). */
+  readonly ms: number;
+  readonly calls: ReadonlyArray<{
+    readonly capability: string;
+    readonly detail?: string;
+    /** Undefined while the call runs. */
+    readonly ok?: boolean;
+    /** Its start and its length, from the batch's start. */
+    readonly startMs: number;
+    readonly ms: number;
+  }>;
+}
+
+interface LiveBatch {
+  modelCall: number;
+  size: number;
+  parallel: boolean;
+  startedAt: string;
+  calls: Array<{ capability: string; detail?: string; ok?: boolean; endAt?: string; ms?: number }>;
+}
+
+function batchOf(b: LiveBatch, now: Date): ToolBatch {
+  const start = Date.parse(b.startedAt);
+  const running = b.calls.some((c) => c.ok === undefined);
+  const end = running
+    ? now.getTime()
+    : Math.max(start, ...b.calls.map((c) => Date.parse(c.endAt ?? b.startedAt)));
+  return {
+    modelCall: b.modelCall,
+    size: b.size,
+    parallel: b.parallel,
+    running,
+    ms: Math.max(0, end - start),
+    calls: b.calls.map((c) => {
+      if (c.ok === undefined)
+        return {
+          capability: c.capability,
+          ...(c.detail ? { detail: c.detail } : {}),
+          startMs: 0,
+          ms: Math.max(0, now.getTime() - start),
+        };
+      const finished = Date.parse(c.endAt ?? b.startedAt);
+      const ms = c.ms ?? 0;
+      return {
+        capability: c.capability,
+        ...(c.detail ? { detail: c.detail } : {}),
+        ok: c.ok,
+        startMs: Math.max(0, finished - ms - start),
+        ms,
+      };
+    }),
+  };
+}
+
 const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
 const str = (v: unknown): string | undefined => (typeof v === "string" && v.length > 0 ? v : undefined);
 
@@ -68,7 +134,18 @@ function detailOf(args: unknown): string | undefined {
   if (typeof args !== "string") return undefined;
   try {
     const a = JSON.parse(args) as Record<string, unknown>;
-    return str(a.path) ?? str(a.file) ?? str(a.pattern) ?? str(a.query) ?? str(a.ref) ?? str(a.args);
+    const id = typeof a.id === "number" ? String(a.id) : str(a.id);
+    return (
+      str(a.path) ??
+      str(a.file) ??
+      str(a.pattern) ??
+      str(a.query) ??
+      str(a.ref) ??
+      str(a.key) ??
+      id ??
+      str(a.url) ??
+      str(a.args)
+    );
   } catch {
     return undefined;
   }
@@ -91,6 +168,7 @@ export function activityOf(events: readonly StoredEvent[], now: Date = new Date(
     retrying?: { attempt: number; reason: string } | undefined;
     receiving?: { outputChars: number; reasoningChars: number } | undefined;
     compacting?: { kind: string; tokens: number; blocks: number; since: string } | undefined;
+    batch?: LiveBatch | undefined;
   }
   const open = new Map<string, Live>();
   let last: Live | undefined;
@@ -201,7 +279,28 @@ export function activityOf(events: readonly StoredEvent[], now: Date = new Date(
           };
         }
         break;
+      case "tool.batch":
+        if (live && Array.isArray(p.calls))
+          live.batch = {
+            modelCall: num(p.modelCall),
+            size: num(p.size),
+            parallel: p.parallel === true,
+            startedAt: e.ts,
+            calls: (p.calls as Array<Record<string, unknown>>).map((c) => {
+              const detail = detailOf(c.args);
+              return { capability: str(c.capability) ?? "?", ...(detail ? { detail } : {}) };
+            }),
+          };
+        break;
       case "tool.call": {
+        if (live?.batch && typeof p.batch === "number" && p.batch === live.batch.modelCall) {
+          const slot = live.batch.calls[num(p.slot)];
+          if (slot) {
+            slot.ok = p.ok !== false;
+            slot.endAt = e.ts;
+            slot.ms = num(p.durationMs);
+          }
+        }
         toolCalls += 1;
         const capability = str(p.capability) ?? "?";
         const detail = detailOf(p.args);
@@ -259,6 +358,7 @@ export function activityOf(events: readonly StoredEvent[], now: Date = new Date(
     ...(lastRetry ? { lastRetry } : {}),
     ...(current?.retrying && waitingMs !== undefined ? { retrying: current.retrying } : {}),
     ...(current?.receiving && waitingMs !== undefined ? { receiving: current.receiving } : {}),
+    ...(current?.batch && !finished ? { batch: batchOf(current.batch, now) } : {}),
     ...(current?.compacting && !finished
       ? {
           compacting: {
@@ -355,7 +455,9 @@ export function formatRecent(a: Activity, options: FormatOptions = {}): string |
     const detail = t.detail ? ` ${tail(t.detail, 36)}` : "";
     return `${name}${detail}${t.ok ? "" : ` ${st.bad("✗")}`}`;
   });
-  return `  ${st.muted("↳")} ${st.muted(calls.join(" · "))}`;
+  // the last answer asked for several at once: say so, they ran side by side
+  const batch = a.batch && a.batch.size > 1 && a.batch.parallel ? `⇉${a.batch.size} ` : "";
+  return `  ${st.muted("↳")} ${st.muted(`${batch}${calls.join(" · ")}`)}`;
 }
 
 /**

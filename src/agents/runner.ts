@@ -25,6 +25,26 @@ import type { AgentRegistry } from "./definition.ts";
 import { packageForStep } from "./knowledge.ts";
 import { ReadLedger, readKey } from "./rereads.ts";
 
+/** Calls of one answer that run at once at most (reads without effects). */
+export const PARALLEL_TOOLS = 6;
+
+/** Runs `work` over the items, at most `limit` at a time; settles when all have. */
+export async function inParallel<T>(
+  items: readonly T[],
+  limit: number,
+  work: (item: T, index: number) => Promise<void>,
+): Promise<void> {
+  let next = 0;
+  const lane = async () => {
+    while (next < items.length) {
+      const k = next;
+      next += 1;
+      await work(items[k] as T, k);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, lane));
+}
+
 /**
  * AgentRuntime (ADR-0001 §6): runs one agent for one step — context assembly, the tool-calling
  * loop through the policy-filtered BoundTools, intra-step checkpoints of the transcript
@@ -108,6 +128,11 @@ export class AgentRuntimeRunner implements AgentRunner {
       env: rt.env,
     });
     const toolDescriptors = bound.list();
+    // reads without effects may run side by side; a write, a command, an effect runs alone and in order
+    const readOnly = new Set(
+      toolDescriptors.filter((t) => t.access === "read" && !t.effect).map((t) => t.name),
+    );
+    const parallelOk = (name: string) => readOnly.has(name);
     const toolDefs: ToolDefinition[] = toolDescriptors.map((t) => ({
       name: t.name,
       description: t.description,
@@ -345,21 +370,14 @@ export class AgentRuntimeRunner implements AgentRunner {
         { role: "assistant", content: response.text, toolCalls: response.toolCalls },
       ];
       const callsBefore = toolCalls;
-      for (const call of response.toolCalls) {
-        // several calls in one answer may overrun the limit (pilot: 41/40): each needs an answer,
-        // the ones past the limit get "skipped" instead of running
+      // 1. what runs: in order, past the limit "skipped" (pilot: 41/40 — several calls in one answer may
+      //    overrun it, and each needs an answer); arguments that are not a JSON object are answered as such
+      const planned = response.toolCalls.map((call) => {
         if (toolCalls >= limits.maxToolCalls) {
           budgetExhausted = "tools";
-          transcript = [
-            ...transcript,
-            {
-              role: "tool",
-              toolCallId: call.id,
-              content: `[${call.name}] skipped: the tool budget for this step is used up`,
-            },
-          ];
-          continue;
+          return { call, args: {} as Record<string, unknown>, skipped: true as const };
         }
+        toolCalls += 1;
         let args: Record<string, unknown> = {};
         let parseError: string | undefined;
         try {
@@ -370,14 +388,67 @@ export class AgentRuntimeRunner implements AgentRunner {
         } catch (error) {
           parseError = `arguments are not valid JSON: ${error instanceof Error ? error.message : String(error)}`;
         }
-        const result: ToolResult | undefined = parseError ? undefined : await bound.invoke(call.name, args);
-        toolCalls += 1;
+        return { call, args, ...(parseError ? { parseError } : {}) };
+      });
+      // 2. the calls of one answer at once: reads without effects side by side (a few at a time), the rest
+      //    alone and in order; their answers go into the transcript in the order asked, as before
+      const runnable = planned
+        .map((p, i) => ({ p, i }))
+        .filter(({ p }) => !("skipped" in p) && !("parseError" in p && p.parseError));
+      const results: Array<ToolResult | undefined> = planned.map(() => undefined);
+      const batch = modelCalls;
+      if (runnable.length > 1)
+        emit("tool.batch", {
+          modelCall: batch,
+          size: runnable.length,
+          parallel: runnable.filter(({ p }) => parallelOk(p.call.name)).length > 1,
+          calls: runnable.map(({ p }) => ({
+            capability: p.call.name,
+            args: rt.redactor.redact(JSON.stringify(p.args)).text.slice(0, 600),
+          })),
+        });
+      const invoke = async ({ p, i }: (typeof runnable)[number], slot: number) => {
+        results[i] = await bound.invoke(
+          p.call.name,
+          p.args,
+          runnable.length > 1 ? { batch, slot } : undefined,
+        );
+      };
+      for (let at = 0; at < runnable.length; ) {
+        const group: Array<(typeof runnable)[number]> = [];
+        while (at < runnable.length && parallelOk((runnable[at] as (typeof runnable)[number]).p.call.name)) {
+          group.push(runnable[at] as (typeof runnable)[number]);
+          at += 1;
+        }
+        if (group.length === 0) {
+          await invoke(runnable[at] as (typeof runnable)[number], at);
+          at += 1;
+          continue;
+        }
+        const start = at - group.length;
+        await inParallel(group, PARALLEL_TOOLS, (item, k) => invoke(item, start + k));
+      }
+      // 3. the answers, in the order the model asked
+      for (const [i, p] of planned.entries()) {
+        const { call, args } = p;
+        if ("skipped" in p) {
+          transcript = [
+            ...transcript,
+            {
+              role: "tool",
+              toolCallId: call.id,
+              content: `[${call.name}] skipped: the tool budget for this step is used up`,
+            },
+          ];
+          continue;
+        }
+        const parseError = "parseError" in p ? p.parseError : undefined;
         // the same file again: a pointer while its text is still above, else the text kept this time
         const key = parseError ? undefined : readKey(call.name, args);
         const answered = reads.answer(
           key,
           call.id,
-          formatToolResult(call.name, result, parseError),
+          formatToolResult(call.name, results[i], parseError),
           transcript,
         );
         if (answered.kind !== "first")
