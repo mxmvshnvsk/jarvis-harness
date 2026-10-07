@@ -40,8 +40,10 @@ function form(actions: Actions, action: string, body: Part, attrs: Part = ""): H
 }
 
 /** After a decision on the page: who goes on with it. */
-function goesOn(terminal: boolean, run: Run): Html {
+function goesOn(terminal: boolean, run: Run, driven = false): Html {
   const cmd = `jarvis continue ${shortRunId(run.id)}`;
+  if (driven && !terminal)
+    return html`<span class="hint">Started from this page: it goes on in the background.</span>`;
   return terminal
     ? html`<span class="hint">The terminal waiting at the card goes on with it.</span>`
     : html`<span class="hint">No terminal waits at this run: it goes on with <code>${cmd}</code></span><button type="button" class="btn" data-copy="${cmd}">Copy command</button>`;
@@ -58,6 +60,8 @@ export interface Chrome {
   readonly tick?: number;
   /** The person's pick from the header's switch; none — the system's (prefers-color-scheme). */
   readonly theme?: "light" | "dark";
+  /** A task can be started from the page (`jarvis ui` with a launcher, not read-only). */
+  readonly canStart?: boolean;
 }
 
 export function layout(chrome: Chrome, content: Html): string {
@@ -81,6 +85,7 @@ export function layout(chrome: Chrome, content: Html): string {
 ${chrome.back ? html`<a class="back" href="${chrome.back.href}">← ${chrome.back.label}</a>` : ""}
 ${chrome.repos ?? ""}
 ${chrome.page === "runs" ? html`<nav aria-label="Pages"><a href="/" aria-current="page">Runs</a></nav>` : ""}
+${chrome.canStart ? html`<a class="btn primary small" href="/#new">New task</a>` : ""}
 <div class="status">
 <div class="models-wrap"><button type="button" class="models" data-models aria-expanded="false" aria-controls="models-pop" title="Models: checking…"><span class="dot" data-state="idle" aria-hidden="true"></span><span>models</span></button>
 <div id="models-pop" class="pop" role="dialog" aria-label="Models" hidden><div data-models-body><p class="muted">Checking the models…</p></div></div></div>
@@ -278,14 +283,73 @@ ${page.repos.map((r) => html`<option value="${r.root}"${r.root === page.repo ? h
 </select><button type="submit" class="btn sr">Show</button></form>`;
 }
 
-export function runsContent(page: RunsPage, now: number, actions?: Actions): Html {
+/** What the page started (src/ui/launcher.ts) and has no run of yet: preparing, or failed before one. */
+export interface LaunchView {
+  readonly id: string;
+  readonly task: string;
+  readonly workflow: string;
+  readonly startedAt: string;
+  readonly exitCode: number | null;
+  readonly log: string;
+  readonly tail?: string;
+}
+
+export interface StartForm {
+  readonly workflows: ReadonlyArray<{ readonly id: string; readonly label: string; readonly about: string }>;
+  readonly repos: readonly string[];
+  readonly current?: string;
+  readonly launches: readonly LaunchView[];
+  readonly homeDir: string;
+  readonly notice?: Html;
+}
+
+const home = (path: string, dir: string) =>
+  dir && path.startsWith(`${dir}/`) ? `~${path.slice(dir.length)}` : path;
+
+/** "New task": what to do, which workflow, which repository — started as `jarvis fix "…"` would be. */
+function startHtml(start: StartForm, actions: Actions): Html {
+  const repoField =
+    start.repos.length > 1
+      ? html`<label class="field">Repository<select name="repo">${start.repos.map((r) => html`<option value="${r}"${r === start.current ? " selected" : ""}>${home(r, start.homeDir)}</option>`)}</select></label>`
+      : html`<input type="hidden" name="repo" value="${start.repos[0] ?? ""}"><span class="meta">in ${home(start.repos[0] ?? "", start.homeDir)}</span>`;
+  return html`<section class="panel newtask" aria-labelledby="new-title" id="new">
+${form(
+  actions,
+  "/runs/new",
+  html`<h2 id="new-title">New task</h2>
+<label class="field grow">What to do<textarea name="task" rows="3" required maxlength="4000" placeholder="Bug: on the compact form the upload toggle hides attached files — find the cause and fix it"></textarea></label>
+<div class="row">
+<label class="field">Workflow<select name="workflow">${start.workflows.map((w) => html`<option value="${w.id}"${w.id === "fix" ? " selected" : ""}>${w.label} — ${w.about}</option>`)}</select></label>
+${repoField}
+<button type="submit" class="btn primary">Start</button>
+</div>
+<p class="hint">Runs in the background, as <code>jarvis fix "…"</code> without a terminal; where it needs you, it waits here — decide on the page and it goes on.</p>`,
+)}
+</section>`;
+}
+
+function launchHtml(l: LaunchView, now: number, homeDir: string): Html {
+  const age = clock(Math.max(0, now - Date.parse(l.startedAt)));
+  if (l.exitCode !== null)
+    return html`<div class="panel running launch failed">
+<div class="what"><b>${firstLine(l.task)}</b><span class="meta">${l.workflow} · ${l.exitCode === 0 ? "ended without a run" : `failed to start (exit ${l.exitCode})`} · log ${home(l.log, homeDir)}</span>
+${l.tail ? html`<pre class="tail">${l.tail}</pre>` : ""}</div></div>`;
+  return html`<div class="panel running launch">
+<div class="what"><b>${firstLine(l.task)}</b><span class="meta">${l.workflow} · starting ${age} · preparing the checkout (a workspace setup can take minutes) · log ${home(l.log, homeDir)}</span></div>
+<span class="spin" aria-hidden="true"></span></div>`;
+}
+
+export function runsContent(page: RunsPage, now: number, actions?: Actions, start?: StartForm): Html {
   const sum = [
     `${page.waiting.length} wait${page.waiting.length === 1 ? "s" : ""} for you`,
     `${page.running.length} running`,
     `${page.today.runs} today`,
     `${page.today.modelCalls} model call${page.today.modelCalls === 1 ? "" : "s"} today`,
   ].join(" · ");
+  const launches = start?.launches ?? [];
   return html`<div class="lede" data-live="lede"><h1>Runs</h1><span class="muted">${sum}</span></div>
+${start?.notice ?? ""}
+${start && actions ? startHtml(start, actions) : ""}
 <section class="group" aria-labelledby="waits" data-live="waiting">
 <h2 id="waits">Waits for you</h2>
 ${
@@ -296,8 +360,9 @@ ${
 </section>
 <section class="group" aria-labelledby="running" data-live="running">
 <h2 id="running">Running</h2>
+${launches.map((l) => launchHtml(l, now, start?.homeDir ?? ""))}
 ${
-  page.running.length > 0
+  page.running.length > 0 || launches.length > 0
     ? page.running.map(
         (r) => html`<div class="panel running">
 <div class="what"><a href="${runHref(r.run)}">${firstLine(r.run.task)}</a><span class="meta">${r.run.workflow} · ${shortRunId(r.run.id)} · ${activityText(r.activity, r.position)}</span></div>
@@ -394,7 +459,7 @@ ${
 </div>
 ${
   card.rerun
-    ? html`<div class="banner info">↻ ${card.step} runs again — asked${card.rerun.actor ? ` by ${card.rerun.actor}` : ""}${card.rerun.channel === "ui" ? " from the page" : card.rerun.channel === "cli" ? " in the terminal" : ""}</div><div class="actions">${goesOn(page.terminal, page.run)}</div>`
+    ? html`<div class="banner info">↻ ${card.step} runs again — asked${card.rerun.actor ? ` by ${card.rerun.actor}` : ""}${card.rerun.channel === "ui" ? " from the page" : card.rerun.channel === "cli" ? " in the terminal" : ""}</div><div class="actions">${goesOn(page.terminal, page.run, page.driven === true)}</div>`
     : actions
       ? html`<div class="actions">${form(actions, `${runHref(page.run)}/rerun`, html`<button type="submit" class="btn primary big">Run ${card.step} again</button>`)}<span class="hint">same as <code>r</code> on the terminal's card; ${page.terminal ? "the terminal waiting there goes on" : html`no terminal waits: <code>jarvis continue ${shortRunId(page.run.id)}</code> does it`}</span></div>`
       : terminalHint(card, page.terminal, page.run)
@@ -439,7 +504,7 @@ function approvalCardHtml(card: ApprovalCard, page: RunPage): Html {
 <span class="meta">${card.type}/${card.artifact.name}@${card.artifact.version}</span>
 </div>
 ${briefHtml(card)}
-${card.decision ? html`<div class="banner ok">${decisionText(card)}</div><div class="actions">${goesOn(page.terminal, page.run)}</div>` : ""}
+${card.decision ? html`<div class="banner ok">${decisionText(card)}</div><div class="actions">${goesOn(page.terminal, page.run, page.driven === true)}</div>` : ""}
 <div class="actions"><a class="btn primary big" href="${artifactHref(page.run, card.artifact)}">Review the ${card.type}</a></div>
 ${card.decision ? "" : terminalHint(card, page.terminal, page.run)}
 </section>`;
@@ -640,7 +705,7 @@ ${
     ? html`<div class="banner ${tone === "info" ? "info" : tone === "wait" ? "info" : tone}">${glyph} ${page.state} by ${page.decision.approval.actor.id}${page.decision.channel === "ui" ? " in the browser" : page.decision.channel === "cli" ? " in the terminal" : ""}${page.decision.approval.comment ? html`<br><span style="white-space:pre-wrap">${page.decision.approval.comment.length > 1200 ? `${page.decision.approval.comment.slice(0, 1199)}…` : page.decision.approval.comment}</span>` : ""}</div>`
     : ""
 }
-${page.decision && page.atGate ? html`<div class="decide">${goesOn(page.terminal, page.run)}</div>` : ""}
+${page.decision && page.atGate ? html`<div class="decide">${goesOn(page.terminal, page.run, page.driven === true)}</div>` : ""}
 ${
   page.awaited && extras.actions
     ? form(

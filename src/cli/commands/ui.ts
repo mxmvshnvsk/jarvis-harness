@@ -4,6 +4,7 @@ import { delimiter, join } from "node:path";
 import { createEngine } from "../../app/engine.ts";
 import { createRuntime } from "../../app/runtime.ts";
 import { resolveActor } from "../../core/actor/resolve.ts";
+import { createLauncher } from "../../ui/launcher.ts";
 import { startUiServer, type UiServer } from "../../ui/server.ts";
 import { systemOpener } from "../checkout.ts";
 import type { CliContext } from "../context.ts";
@@ -77,6 +78,13 @@ export async function runUi(ctx: CliContext, options: UiOptions = {}): Promise<v
       // decisions on the page are the CLI's, with its actor (ADR-0006); `channel: ui` tells them apart
       actor: async () => (await resolveActor(loaded.config, ctx.env, loaded.project?.root)).actor,
       open: systemOpener(ctx),
+      // "New task": the same CLI, started in the background and driven by the page
+      launcher: createLauncher({
+        runtime,
+        cli: [process.execPath, ...process.execArgv, process.argv[1] as string],
+        logDir: join(loaded.home.cacheDir, "launches"),
+        env: ctx.env,
+      }),
     };
     const wanted = options.port ?? 4317;
     try {

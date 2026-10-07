@@ -19,6 +19,7 @@ import { shortRunId } from "../storage/runStore.ts";
 import { git } from "../tools/local/exec.ts";
 import { SCRIPT, STYLE } from "./assets.ts";
 import { type DiffFile, type Html, html, parseDiff } from "./html.ts";
+import { type Launcher, WORKFLOWS } from "./launcher.ts";
 import { artifactPage, runPage, runsPage } from "./model.ts";
 import {
   type Actions,
@@ -59,6 +60,8 @@ export interface UiServerOptions {
   readonly open?: OpenIn;
   /** Pages only: no forms, no POST. */
   readonly readOnly?: boolean;
+  /** Starts runs from the page and drives them (src/ui/launcher.ts); none — no "New task". */
+  readonly launcher?: Launcher;
 }
 
 export interface UiServer {
@@ -140,6 +143,18 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
     }
   };
 
+  // runs the page started: match them to their launches, go on after a wait (src/ui/launcher.ts)
+  const tender = options.launcher
+    ? setInterval(() => {
+        try {
+          options.launcher?.tend();
+        } catch {
+          // a busy database: the next tick tries again
+        }
+      }, 2000)
+    : undefined;
+  tender?.unref?.();
+
   /* ---- answers ---- */
   const send = (r: Request, status: number, body: string, type = "text/html; charset=utf-8", extra = {}) => {
     r.res.writeHead(status, { ...SECURITY_HEADERS, "Content-Type": type, ...extra });
@@ -156,7 +171,12 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
       r,
       status,
       layout(
-        { ...chrome, address: address(), ...(theme === "light" || theme === "dark" ? { theme } : {}) },
+        {
+          ...chrome,
+          address: address(),
+          ...(theme === "light" || theme === "dark" ? { theme } : {}),
+          ...(options.launcher && actions ? { canStart: true } : {}),
+        },
         content,
       ),
     );
@@ -210,6 +230,9 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
       stale: html`<div class="banner bad">The run no longer waits for this version: nothing recorded</div>`,
       empty: html`<div class="banner bad">Say what to change — a comment, or comments on lines of the diff</div>`,
       "not-waiting": html`<div class="banner bad">The run no longer waits at this loop: nothing recorded</div>`,
+      started: html`<div class="banner ok">Started — it prepares its checkout and shows up under Running; where it needs you, it waits here</div>`,
+      "no-task": html`<div class="banner bad">Say what to do and pick a workflow</div>`,
+      "no-repo": html`<div class="banner bad">Not a repository this page knows: start <code>jarvis ui</code> in it</div>`,
     };
     return n ? notices[n] : undefined;
   };
@@ -252,8 +275,33 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
     }
   };
 
+  /** Repositories a task may be started in: the one `jarvis ui` runs in and those with runs. */
+  const knownRepos = (): string[] => [
+    ...new Set([
+      ...(options.projectRoot ? [options.projectRoot] : []),
+      ...runtime.runs.list({ includeTerminal: true, limit: 500 }).map((x) => x.workspace.repoRoot),
+    ]),
+  ];
+
+  /** "New task": the CLI started in the background, driven by the page (src/ui/launcher.ts). */
+  const startTask = async (r: Request): Promise<void> => {
+    const launcher = options.launcher;
+    if (!launcher || !actions) return notFound(r, "Starting tasks is off here.");
+    const form = await formOf(r.req);
+    const sent = form.get("t");
+    if (!sent || !same(sent, token)) return send(r, 403, forbiddenPage());
+    const task = (form.get("task") ?? "").trim().slice(0, 4000);
+    const workflow = WORKFLOWS.find((w) => w.id === form.get("workflow"))?.id;
+    const repo = form.get("repo") ?? options.projectRoot ?? "";
+    if (!task || !workflow) return redirect(r, "/?notice=no-task#new");
+    if (!knownRepos().includes(repo) || !existsSync(repo)) return redirect(r, "/?notice=no-repo#new");
+    launcher.start({ task, workflow, repoRoot: repo });
+    return redirect(r, `/?repo=${encodeURIComponent(repo)}&notice=started`);
+  };
+
   /** Accept / Send back / Run again / Open in editor: the same functions as the terminal's keys. */
   const post = async (r: Request): Promise<void> => {
+    if (r.url.pathname === "/runs/new") return startTask(r);
     const m = /^\/runs\/([^/]+)\/(decide|rerun|open)$/.exec(r.url.pathname);
     const run = m ? resolveRun(m[1] as string) : undefined;
     if (!m || !run || !actions) return notFound(r, `Nothing to do at ${r.url.pathname}.`);
@@ -297,6 +345,7 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
         if (!who) return redirect(r, `/runs/${short}?notice=actor`);
         requestRerun(runtime, run, who, "ui");
       }
+      options.launcher?.resume(run); // a run the page started goes on in the background
       return redirect(r, `/runs/${short}`);
     }
     // decide: only the version the run waits on now, once
@@ -335,6 +384,7 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
       if (!(error instanceof DecisionTakenError)) throw error;
       return redirect(r, back("taken"));
     }
+    options.launcher?.resume(run); // a run the page started goes on in the background
     return redirect(r, back());
   };
 
@@ -361,14 +411,44 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
           repos: repoPicker(model),
           ...(model.running.length > 0 ? { tick: 5000 } : {}),
         },
-        runsContent(model, now, actions),
+        runsContent(
+          model,
+          now,
+          actions,
+          options.launcher && actions
+            ? {
+                workflows: WORKFLOWS,
+                repos: knownRepos(),
+                ...(noticeOf(r) ? { notice: noticeOf(r) as Html } : {}),
+                ...((repo ?? options.projectRoot)
+                  ? { current: (repo ?? options.projectRoot) as string }
+                  : {}),
+                homeDir: options.homeDir,
+                launches: options.launcher
+                  .list()
+                  .filter((l) => !l.runId && (!repo || l.repoRoot === repo))
+                  .map((l) => ({
+                    id: l.id,
+                    task: l.task,
+                    workflow: l.workflow,
+                    startedAt: l.startedAt,
+                    exitCode: l.exitCode,
+                    log: l.log,
+                    ...(l.exitCode !== null ? { tail: options.launcher?.tail(l) ?? "" } : {}),
+                  })),
+              }
+            : undefined,
+        ),
       );
     }
     const runMatch = /^\/runs\/([^/]+)$/.exec(path);
     if (runMatch) {
       const run = resolveRun(runMatch[1] as string);
       if (!run) return notFound(r, `No run "${runMatch[1]}".`);
-      const model = await runPage(runtime, engine, run, { homeDir: options.homeDir });
+      const model = {
+        ...(await runPage(runtime, engine, run, { homeDir: options.homeDir })),
+        driven: options.launcher?.drives(run.id) === true,
+      };
       const ticking = run.state === "RUNNING" || model.card?.kind === "loop";
       return page(
         r,
@@ -390,7 +470,8 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
       const v = Number(r.url.searchParams.get("v"));
       const type = decodeURIComponent(artMatch[2] as string);
       const name = decodeURIComponent(artMatch[3] as string);
-      const model = artifactPage(runtime, run, type, name, Number.isInteger(v) && v > 0 ? v : undefined);
+      const found = artifactPage(runtime, run, type, name, Number.isInteger(v) && v > 0 ? v : undefined);
+      const model = found ? { ...found, driven: options.launcher?.drives(run.id) === true } : found;
       if (!model) return notFound(r, `Run ${shortRunId(run.id)} has no ${type}/${name}.`);
       const notice = noticeOf(r);
       const extras: ArtifactExtras = {
@@ -510,6 +591,7 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
     close: () =>
       new Promise<void>((resolve) => {
         if (poller) clearInterval(poller);
+        if (tender) clearInterval(tender);
         for (const c of clients) c.end();
         clients.clear();
         server.close(() => resolve());

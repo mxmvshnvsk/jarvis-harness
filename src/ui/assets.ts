@@ -114,6 +114,7 @@ p{margin:0}
 .btn.accept{background:var(--ok-fill);border-color:var(--ok-fill);color:var(--on-fill);font-weight:500}
 .btn.accept:hover{color:var(--on-fill);filter:brightness(1.08)}
 .btn.strong{border-color:var(--ink);font-weight:500}
+.btn.small{min-height:36px;padding:0 12px;font-size:13px}
 .btn.big{min-height:48px;font-size:15px;padding:0 22px}
 .btn[disabled]{opacity:.55;cursor:not-allowed}
 .hint{font-size:13px;color:var(--muted)}
@@ -223,6 +224,19 @@ tr:last-child td{border-bottom:0}
 .versions{display:flex;flex-wrap:wrap;gap:6px;font-size:13px;align-items:center}
 .versions a,.versions span{padding:2px 8px;border-radius:6px;font-family:var(--mono)}
 .versions span{background:var(--ink);color:var(--ground)}
+.newtask{padding:18px 20px}
+.newtask form{display:flex;flex-direction:column;gap:12px}
+.newtask h2{font-size:16px}
+.field{display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--muted)}
+.field textarea{padding:10px 12px;border-radius:8px;resize:vertical;min-height:72px;font-size:15px;line-height:1.45}
+.field{min-width:0}
+.field select{height:44px;width:100%;text-overflow:ellipsis}
+.newtask .row{align-items:flex-end}
+.newtask .row .field{flex:1 1 240px;max-width:520px}
+.launch .what b{font-size:16px;font-weight:600;overflow-wrap:anywhere}
+.launch .spin{margin-left:auto}
+.launch.failed{border-color:var(--bad)}
+.tail{margin:6px 0 0;padding:10px 12px;border-radius:8px;background:var(--sunken);border:1px solid var(--line);font-size:12px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere;max-height:240px;overflow:auto}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 @media (max-width:640px){
   .wrap{padding:0 16px}
@@ -420,6 +434,11 @@ export const SCRIPT = `
       if (modelsPop && !modelsPop.hidden && !e.target.closest('.models-wrap')) setPop(false);
     });
   }
+
+  // "New task" from the header: straight into the text box
+  const focusNew = () => { if (location.hash === '#new') document.querySelector('#new textarea')?.focus(); };
+  window.addEventListener('hashchange', focusNew);
+  focusNew();
 
   document.addEventListener('change', (e) => {
     if (e.target.matches('select[data-autosubmit]')) e.target.form.submit();

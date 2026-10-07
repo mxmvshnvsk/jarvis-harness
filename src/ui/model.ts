@@ -244,6 +244,8 @@ export interface RunPage {
   readonly activity?: Activity;
   readonly card?: WaitCard;
   readonly terminal: boolean;
+  /** Started from the page: it goes on in the background after a decision (src/ui/launcher.ts). */
+  readonly driven?: boolean;
   readonly feed: readonly FeedItem[];
   readonly artifacts: ReadonlyArray<ArtifactVersion & { readonly state: string }>;
   readonly leaseLive: boolean;
@@ -472,6 +474,7 @@ export interface ArtifactPage {
   /** The run still stands at this version's gate (decided or not): it goes on with `jarvis continue`. */
   readonly atGate: boolean;
   readonly terminal: boolean;
+  readonly driven?: boolean;
 }
 
 export function artifactPage(
