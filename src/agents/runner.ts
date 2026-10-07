@@ -35,6 +35,8 @@ export const PARALLEL_TOOLS = 6;
 
 /** Tools that change the workspace: an agent with them that only reads is nudged, then stopped. */
 const WRITE_TOOLS = new Set(["repo.write", "repo.edit"]);
+/** Answers cut at the output limit in a row the loop goes on after, asking for smaller ones. */
+const CUT_SHORT_MAX = 3;
 /** Model calls without an edit before the first nudge (the second at twice, the stop at three times). */
 export const IDLE_CALLS = 12;
 
@@ -331,6 +333,7 @@ export class AgentRuntimeRunner implements AgentRunner {
       def.output.type === "implementation" &&
       (toolDefs.some((t) => WRITE_TOOLS.has(t.name)) || def.capabilities.some((c) => WRITE_TOOLS.has(c)));
     let lastEdit = modelCalls;
+    let cutShort = 0;
     for (;;) {
       if (ctx.cancelRequested()) {
         checkpoint();
@@ -400,6 +403,24 @@ export class AgentRuntimeRunner implements AgentRunner {
         throw error;
       }
       modelCalls += 1;
+      // cut at the output limit before a whole call: a full-file write in one argument, or thinking that
+      // used the allowance up — not the end of the work (pilot: three empty answers ended a fix round
+      // that edited nothing)
+      if (response.toolCalls.length === 0 && response.finishReason === "length" && cutShort < CUT_SHORT_MAX) {
+        cutShort += 1;
+        emit("agent.cutShort", { modelCalls, times: cutShort });
+        transcript = [
+          ...transcript,
+          ...(response.text.trim() ? [{ role: "assistant" as const, content: response.text }] : []),
+          {
+            role: "user",
+            content:
+              "Your answer was cut at the output limit before a complete call. Keep each answer small: one change per call — repo.edit with a short exact fragment, never a whole file through repo.write unless the file is new and short; think briefly, then call.",
+          },
+        ];
+        continue;
+      }
+      if (response.toolCalls.length > 0) cutShort = 0;
       if (response.toolCalls.length === 0) {
         finalAnswer = response.text;
         break;

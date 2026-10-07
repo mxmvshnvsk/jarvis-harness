@@ -1016,6 +1016,53 @@ context: { maxContext: 8000 }
     expect(notesOf(rt, run.id)[0]?.delivered).toBe(true);
   });
 
+  it("an answer cut at the output limit before a call does not end the work: smaller calls are asked for", async () => {
+    sb.write("project/.jarvis/project.yaml", "version: 1\nworkspace: { mode: cwd }\n");
+    rt = await testRuntime(sb, { PATH: process.env.PATH ?? "" });
+    const wf = workflowOf({
+      name: "cut",
+      entry: "research",
+      steps: [
+        {
+          id: "research",
+          kind: "agentic",
+          agent: "research",
+          outputs: ["research"],
+          transitions: { onSuccess: "DONE" },
+        },
+      ],
+    });
+    const engine = engineWith(rt, wf);
+    const run = createRun(rt, "cut");
+    let round = 0;
+    const cut = {
+      body: {
+        id: "c",
+        model: "fake-model",
+        choices: [{ index: 0, finish_reason: "length", message: { role: "assistant", content: "" } }],
+        usage: { prompt_tokens: 42, completion_tokens: 2000 },
+      },
+    };
+    server.respond(() => {
+      round += 1;
+      if (round <= 2) return cut;
+      if (round === 3) return toolCallCompletion("repo.search", { pattern: "slots" });
+      return completion(JSON.stringify(RESEARCH_DOC));
+    });
+    await engine.execute(run.id, { owner: "cli:t" });
+    // two cut answers, then the work goes on with a call and ends with the document
+    expect(rt.events.list({ runId: run.id, kind: "agent.cutShort" })).toHaveLength(2);
+    expect(JSON.stringify(server.requests[1]?.body.messages)).toContain(
+      "cut at the output limit before a complete call",
+    );
+    expect(
+      rt.events
+        .list({ runId: run.id, kind: "tool.call" })
+        .some((e) => e.payload?.capability === "repo.search"),
+    ).toBe(true);
+    expect(rt.artifacts.listLatest(run.id, "research")).toHaveLength(1);
+  });
+
   it("gives the next agent the code earlier steps read, as it is now (pilot: the same file re-read by four agents)", async () => {
     sb.write("project/.jarvis/project.yaml", "version: 1\nworkspace: { mode: cwd }\n");
     rt = await testRuntime(sb, { PATH: process.env.PATH ?? "" });
