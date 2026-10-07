@@ -223,7 +223,43 @@ describe("AgentRuntimeRunner", () => {
       summary: RESEARCH_DOC.summary,
     });
     const finish = rt.events.list({ kind: "agent.finish" })[0]?.payload;
-    expect(finish).toMatchObject({ status: "success", modelCalls: 2, repairs: 0, finalizedFromLoop: true });
+    expect(finish).toMatchObject({
+      status: "success",
+      modelCalls: 2,
+      repairs: 0,
+      finalizedFromLoop: true,
+      endedWith: "document",
+    });
+  });
+
+  it("DONE ends the loop with a short answer; the document is asked for right after, with what stays unknown", async () => {
+    sb.write("project/.jarvis/project.yaml", "version: 1\nworkspace: { mode: cwd }\n");
+    rt = await testRuntime(sb, { PATH: process.env.PATH ?? "" });
+    server.respond((_req, i) => {
+      if (i === 0) return toolCallCompletion("repo.read", { path: "src/onboarding.ts" });
+      if (i === 1)
+        return completion("DONE — whether the restart keeps the old answers is not in the sources.");
+      return completion(JSON.stringify(RESEARCH_DOC));
+    });
+    const run = createRun(rt, "r");
+    const result = await engineWith(rt, researchOnly).execute(run.id, { owner: "cli:t" });
+    expect(result.run.state).toBe("COMPLETED");
+    expect(server.requests).toHaveLength(3);
+    // the system rule asks for it; the request for the document carries what the agent said is unknown
+    const system =
+      ((server.requests[0]?.body.messages ?? []) as Array<{ content: string }>)[0]?.content ?? "";
+    expect(system).toContain("reply without tool calls with one line: DONE");
+    const last = (server.requests[2]?.body.messages ?? []) as Array<{ role: string; content: string }>;
+    expect(last.at(-2)).toMatchObject({
+      role: "assistant",
+      content: expect.stringContaining("not in the sources"),
+    });
+    expect(last.at(-1)?.content).toContain('Produce the result document for artifact type "research" now.');
+    expect(rt.events.list({ kind: "agent.finish" })[0]?.payload).toMatchObject({
+      status: "success",
+      finalizedFromLoop: false,
+      endedWith: "done",
+    });
   });
 
   it("asks to fix a loop answer that misses the schema, keeping that answer in the request", async () => {

@@ -85,7 +85,9 @@ export function systemLayer(
     "- Tool calls that are denied by policy are final; do not retry them with other arguments.",
     "- Do not create scratch or probe files in the workspace: everything you write there becomes part of the change. Text files written with the tools end with a newline; do not try to fix line endings yourself.",
     "- Precedence of guidance: these rules and the agent instructions, then required standards, then skills, then recommended standards and project knowledge.",
-    "- When you are done, reply without tool calls with the result document itself (the JSON of the output contract); a prose reply makes the runtime ask for it again.",
+    // pilot: a reasoning model wrote the whole document in its head at the loop's end, spent its output
+    // limit on thinking (16k) and answered nothing — 143 s lost, then asked for the document anyway
+    '- When you have what you need (where your instructions say "produce the result document"), reply without tool calls with one line: DONE — and, if any, one sentence on what stays unknown. Do not write the document in that reply: the runtime asks you for it right after, as JSON.',
     ...(lang ? [lang] : []),
     "",
     `# Agent: ${def.id}`,

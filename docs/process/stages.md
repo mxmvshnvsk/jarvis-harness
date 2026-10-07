@@ -39,7 +39,8 @@ Remaining commands of ADR-0001 §15:
   canary 512 output tokens for a reasoning model, and reports a cut-off answer as inconclusive, not as drift
 - onboard --module: the evidence check finds symbols that start or end with punctuation (`@repo/shared`,
   `./eslint-config/*`); `\b` never matched them inside quotes
-- agent finalization: when the tool loop ends with an answer that already is a valid result document (fenced or bare
+- agent finalization: the loop ends with DONE (the document is asked for next, in JSON mode; `endedWith` on
+  `agent.finish`); when the tool loop ends with an answer that already is a valid result document (fenced or bare
   JSON), that is the result; otherwise the answer stays in the finalization request with its schema issues. The pilot
   paid two extra slow calls per step, and the re-asked model echoed the JSON Schema instead of filling it
 - redaction: a repository path made of words (`packages/shared/eslint-config/base`) is not a high-entropy secret;

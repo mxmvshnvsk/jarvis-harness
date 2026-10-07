@@ -25,6 +25,9 @@ import type { AgentRegistry } from "./definition.ts";
 import { packageForStep } from "./knowledge.ts";
 import { ReadLedger, readKey } from "./rereads.ts";
 
+/** The agent's "I have what I need": the document is asked for next (system rule in context.ts). */
+export const saidDone = (text: string): boolean => /^\s*\**DONE\b/i.test(text);
+
 /** Calls of one answer that run at once at most (reads without effects). */
 export const PARALLEL_TOOLS = 6;
 
@@ -464,9 +467,21 @@ export class AgentRuntimeRunner implements AgentRunner {
     // valid document, that is the result: asking again cost the pilot two slow calls, and the second
     // answer echoed the JSON Schema instead of filling it.
     const early =
-      finalAnswer !== undefined && finalAnswer.trim() !== ""
+      finalAnswer !== undefined && finalAnswer.trim() !== "" && !saidDone(finalAnswer)
         ? parseStructured(finalAnswer, def.output.schema)
         : undefined;
+    // how the loop ended: the agent said DONE (the document is asked for now), wrote the document anyway,
+    // answered in prose, or nothing (its output limit spent on thinking)
+    const endedWith =
+      finalAnswer === undefined
+        ? "limit"
+        : finalAnswer.trim() === ""
+          ? "empty"
+          : saidDone(finalAnswer)
+            ? "done"
+            : early?.ok
+              ? "document"
+              : "text";
     try {
       let result: { value: unknown; repairs: number; calls: number };
       if (early?.ok) {
@@ -478,19 +493,25 @@ export class AgentRuntimeRunner implements AgentRunner {
           ...base,
           ...transcript,
           // keep the answer the loop ended with: the model fixes it instead of writing it from scratch
-          ...(early && finalAnswer !== undefined
+          ...(endedWith === "done" && finalAnswer !== undefined
             ? [
-                { role: "assistant" as const, content: finalAnswer },
-                {
-                  role: "user" as const,
-                  // prose is just context; a document that misses the schema gets its issues
-                  content:
-                    extractJson(finalAnswer) === undefined
-                      ? produce
-                      : `${produce} Your answer above does not match the required schema:\n- ${early.issues.join("\n- ")}`,
-                },
+                // what the agent said is still unknown goes with the request
+                { role: "assistant" as const, content: finalAnswer.trim() },
+                { role: "user" as const, content: produce },
               ]
-            : [{ role: "user" as const, content: produce }]),
+            : early && finalAnswer !== undefined
+              ? [
+                  { role: "assistant" as const, content: finalAnswer },
+                  {
+                    role: "user" as const,
+                    // prose is just context; a document that misses the schema gets its issues
+                    content:
+                      extractJson(finalAnswer) === undefined
+                        ? produce
+                        : `${produce} Your answer above does not match the required schema:\n- ${early.issues.join("\n- ")}`,
+                  },
+                ]
+              : [{ role: "user" as const, content: produce }]),
         ];
         const generated = await generateStructured(ctx.gateway, {
           modelId: route.modelId,
@@ -535,6 +556,7 @@ export class AgentRuntimeRunner implements AgentRunner {
         modelCalls: modelCalls + result.calls,
         repairs: result.repairs,
         finalizedFromLoop: result.calls === 0,
+        endedWith,
         artifact: `${artifact.artifactId}@${artifact.version}`,
         ...(budgetExhausted ? { budgetExhausted } : {}),
         ...((n) => (n > 0 ? { contradictions: n } : {}))(contradictionsIn(result.value)),
