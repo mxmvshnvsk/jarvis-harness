@@ -1016,6 +1016,35 @@ context: { maxContext: 8000 }
     expect(notesOf(rt, run.id)[0]?.delivered).toBe(true);
   });
 
+  it("a note left while the run waited reaches the next agent through its context and counts as delivered", async () => {
+    sb.write("project/.jarvis/project.yaml", "version: 1\nworkspace: { mode: cwd }\n");
+    rt = await testRuntime(sb, { PATH: process.env.PATH ?? "" });
+    const wf = workflowOf({
+      name: "noted",
+      entry: "research",
+      steps: [
+        {
+          id: "research",
+          kind: "agentic",
+          agent: "research",
+          outputs: ["research"],
+          transitions: { onSuccess: "DONE" },
+        },
+      ],
+    });
+    const engine = engineWith(rt, wf);
+    const run = createRun(rt, "noted");
+    addNote(rt, run, "The slots method serves the courier app too", "dev@example.com");
+    expect(notesOf(rt, run.id)[0]?.delivered).toBe(false);
+    server.respond(() => completion(JSON.stringify(RESEARCH_DOC)));
+    await engine.execute(run.id, { owner: "cli:t" });
+    expect(JSON.stringify(server.requests[0]?.body.messages)).toContain(
+      "The slots method serves the courier app too",
+    );
+    expect(notesOf(rt, run.id)[0]?.delivered).toBe(true);
+    expect(rt.events.list({ runId: run.id, kind: "human.note.delivered" })).toHaveLength(1);
+  });
+
   it("an answer cut at the output limit before a call does not end the work: smaller calls are asked for", async () => {
     sb.write("project/.jarvis/project.yaml", "version: 1\nworkspace: { mode: cwd }\n");
     rt = await testRuntime(sb, { PATH: process.env.PATH ?? "" });

@@ -178,7 +178,17 @@ export class AgentRuntimeRunner implements AgentRunner {
       });
     let base = buildBase(charBudget);
     // a person's notes while the step works: the ones before it are in the base, the rest come live
-    const notesSeen = new Set(notesOf(rt, ctx.run.id).map((n) => n.seq));
+    const before = notesOf(rt, ctx.run.id);
+    const notesSeen = new Set(before.map((n) => n.seq));
+    // in the base means the agent has it: the page stops saying «goes with its next model call»
+    for (const n of before.filter((n) => !n.delivered)) {
+      rt.events.emit({
+        kind: NOTE_DELIVERED,
+        runId: ctx.run.id,
+        stepId: ctx.step.id,
+        payload: { seq: n.seq, agent: def.id, via: "context" },
+      });
+    }
 
     const restored = ctx.restored as Partial<TranscriptState> | undefined;
     let transcript: Message[] = restored?.transcriptRef
