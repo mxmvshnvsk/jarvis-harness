@@ -144,6 +144,7 @@ version: 1
 dataClass: confidential        # public | internal | confidential (по умолчанию). confidential →
                                # только egress: private модели и network ≤ intranet (ADR-0016)
 stack: [typescript, react]     # пусто = детекция по workspace (ADR-0021 §3)
+language: ru                   # на каком языке агенты пишут для людей (см. ниже); можно и в ~/.jarvis/config.yaml
 stackScopes:                   # полиглот: путь → стеки (ADR-0021 §9); иначе детекция по верхним каталогам
   "backend/**": [csharp, aspnet]
   "web/**": [typescript, react]
@@ -268,6 +269,15 @@ lockfile получает их до `setup`, и `setup` почти ничего 
 система умеет (APFS — `cp -c`, btrfs/xfs — `--reflink`), поэтому там она не стоит ни времени, ни места. Хранятся
 три последних ключа. Сломанный кэш стоит только времени полного `setup`. Строка прогресса пишет
 `◌ dependencies restored node_modules (key …)` или `kept … for the next run`.
+
+### Язык агентов (`language`)
+
+`language: ru` — агенты пишут по-русски всё, что читают люди: summary и находки research, требования и spec,
+вопросы и замечания ревью, ответы `jarvis ask`, карты модулей. Как есть остаются ключи JSON и значения `outcome`,
+имена из кода, пути, команды и цитаты из источников (на языке источника). Задаётся в `.jarvis/project.yaml` для
+команды (важнее) или в `~/.jarvis/config.yaml` для себя; `JARVIS_LANGUAGE` — на один запуск. Значение — код (`ru`,
+`en`, `uk`, `de` …) или название языка. Без настройки модели пишут на своё усмотрение, на практике по-английски.
+Надписи самого Jarvis (терминал, `jarvis ui`) и заготовки `jarvis onboard` остаются на английском.
 
 ### Политика egress (ADR-0016)
 

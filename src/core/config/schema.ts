@@ -443,6 +443,12 @@ export type ProfileOverlay = z.infer<typeof ProfileOverlaySchema>;
 
 export const CONFIG_VERSION = 1 as const;
 
+/**
+ * The language agents write in for people: documents, answers, comments (`ru`, `en`, …, or a name). Keys,
+ * code, paths and quotes stay as they are. Unset — the models' own choice (in practice English).
+ */
+export const LanguageSchema = z.string().min(2).max(40);
+
 /** `~/.jarvis/config.yaml` — the machine and the person (ADR-0017 §1). */
 export const UserConfigSchema = z.strictObject({
   version: z.literal(CONFIG_VERSION),
@@ -455,6 +461,7 @@ export const UserConfigSchema = z.strictObject({
   telemetry: TelemetryConfigSchema.optional(),
   agents: z.record(z.string(), AgentConfigSchema).optional(),
   modelWait: ModelWaitSchema.optional(),
+  language: LanguageSchema.optional(),
 });
 export type UserConfig = z.infer<typeof UserConfigSchema>;
 
@@ -481,6 +488,8 @@ export const ProjectConfigSchema = z.strictObject({
   stack: z.array(z.string().min(1)).optional(),
   /** ADR-0021 §9 polyglot: path glob → stacks, e.g. "backend/**": [csharp, aspnet]. */
   stackScopes: z.record(z.string().min(1), z.array(z.string().min(1))).optional(),
+  /** The team's language for what agents write (project over user). */
+  language: LanguageSchema.optional(),
 });
 export type ProjectConfig = z.infer<typeof ProjectConfigSchema>;
 
@@ -510,6 +519,7 @@ export const ResolvedConfigSchema = z.strictObject({
   modelWait: ModelWaitSchema.prefault({}),
   stack: z.array(z.string().min(1)).default([]),
   stackScopes: z.record(z.string().min(1), z.array(z.string().min(1))).prefault({}),
+  language: LanguageSchema.optional(),
   /** Capability patterns denied by the active profile (ADR-0009 §1); applied by the Tool Router. */
   deniedCapabilities: z.array(z.string().min(1)).default([]),
   /** Name of the applied profile, if any. */

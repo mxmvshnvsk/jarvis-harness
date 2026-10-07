@@ -45,7 +45,30 @@ export function incompleteNote(a: ArtifactVersion): string {
   return `> INCOMPLETE: agent ${p.agentId} ran out of ${what} while producing this; what it did not cover is unknown. Verify what you rely on.\n\n`;
 }
 
-export function systemLayer(def: AgentDefinition, tools: readonly CapabilityDescriptor[]): string {
+const LANGUAGES: Readonly<Record<string, string>> = {
+  ru: "Russian",
+  en: "English",
+  uk: "Ukrainian",
+  be: "Belarusian",
+  kk: "Kazakh",
+  de: "German",
+  fr: "French",
+  es: "Spanish",
+};
+
+/** The rule on the language of what the agent writes for people (`language` in the configuration). */
+export function languageRule(language: string | undefined): string | undefined {
+  if (!language) return undefined;
+  const name = LANGUAGES[language.toLowerCase()] ?? language;
+  return `- Write every text meant for people in ${name}: summaries, findings, requirements, questions, comments, answers, documents. Keep as they are: JSON keys and enum values of the output contract, identifiers, code, file paths, commands, and quotes from sources (quote them in their own language).`;
+}
+
+export function systemLayer(
+  def: AgentDefinition,
+  tools: readonly CapabilityDescriptor[],
+  language?: string,
+): string {
+  const lang = languageRule(language);
   const toolList = tools
     .map((t) => `- ${t.name}${t.access !== "read" ? ` (${t.access})` : ""}: ${t.description}`)
     .join("\n");
@@ -60,6 +83,7 @@ export function systemLayer(def: AgentDefinition, tools: readonly CapabilityDesc
     "- Do not create scratch or probe files in the workspace: everything you write there becomes part of the change. Text files written with the tools end with a newline; do not try to fix line endings yourself.",
     "- Precedence of guidance: these rules and the agent instructions, then required standards, then skills, then recommended standards and project knowledge.",
     "- When you are done, reply without tool calls with the result document itself (the JSON of the output contract); a prose reply makes the runtime ask for it again.",
+    ...(lang ? [lang] : []),
     "",
     `# Agent: ${def.id}`,
     def.description,
@@ -141,7 +165,7 @@ export function buildBaseMessages(input: BuildInput): Message[] {
     .join("\n\n");
 
   return [
-    { role: "system", content: systemLayer(def, input.tools) },
+    { role: "system", content: systemLayer(def, input.tools, ctx.runtime.loaded.config.language) },
     { role: "user", content: user },
   ];
 }

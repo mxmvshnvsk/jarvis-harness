@@ -39,6 +39,7 @@ version: 1
 
 # public | internal | confidential. Omitted means confidential (ADR-0016 §1).
 dataClass: confidential
+# language: ru               # what agents write for people (documents, answers); keys, code, quotes stay
 
 roles:
   # research:       { models: [deepseek-flash] }   # order = preference (ADR-0007 §3)
