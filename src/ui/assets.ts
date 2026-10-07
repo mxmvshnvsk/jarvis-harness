@@ -465,6 +465,15 @@ export const SCRIPT = `
   countOn();
   setInterval(countOn, 1000);
 
+  /** A field in the region differs from how the server rendered it. */
+  const edited = (region) =>
+    [...region.querySelectorAll('input, textarea, select')].some((f) => {
+      if (f.type === 'checkbox' || f.type === 'radio') return f.checked !== f.defaultChecked;
+      if (f.tagName === 'SELECT') return [...f.options].some((o) => o.selected !== o.defaultSelected);
+      if (f.type === 'hidden' || f.type === 'submit' || f.type === 'button') return false;
+      return f.value !== f.defaultValue;
+    });
+
   // replace the live regions with the server's fresh rendering; forms being typed in stay
   let busy = false, again = false;
   async function refresh() {
@@ -485,8 +494,9 @@ export const SCRIPT = `
           fresh.hidden = true;
         }
         if (el.contains(document.activeElement) && document.activeElement !== document.body) continue;
-        // something typed and not sent yet (a comment, an amount) stays: the refresh waits for it
-        if ([...el.querySelectorAll('textarea, input[type=number]')].some((t) => t.value)) continue;
+        // what a person changed and has not sent yet stays: the refresh waits for it — a comment, an amount,
+        // ticked boxes (pilot: a refresh while reviewing a module's claims cleared the ticks), a choice
+        if (edited(el)) continue;
         inPhase(fresh);
         el.replaceWith(fresh);
       }

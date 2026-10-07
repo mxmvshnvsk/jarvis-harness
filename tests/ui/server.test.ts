@@ -242,6 +242,9 @@ describe("jarvis ui: pages", () => {
     expect(page.body).toMatch(/model call 1, waiting <span data-ms=/);
     const js = (await get("/assets/app.js")).body;
     expect(js).toContain("setInterval(countOn, 1000)");
+    // a region with something changed and not sent (ticked boxes of a module's review) is not re-rendered
+    expect(js).toContain("return f.checked !== f.defaultChecked;");
+    expect(js).toContain("if (edited(el)) continue;");
     expect(js).toContain("inPhase(fresh)");
   });
 
