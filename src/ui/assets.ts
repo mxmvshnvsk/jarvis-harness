@@ -34,7 +34,7 @@ const DARK = `
 
 export const STYLE = `
 ${LIGHT}
-@media (prefers-color-scheme:dark){:root:not([data-theme=light]){${DARK}}}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){${DARK}}:root:not([data-theme=light]) .theme .sun{display:block}:root:not([data-theme=light]) .theme .moon{display:none}}
 :root[data-theme=dark]{${DARK}}
 :root[data-theme=light]{color-scheme:light}
 *{box-sizing:border-box}
@@ -61,9 +61,13 @@ select{height:36px;padding:0 8px;max-width:60vw}
 .dot{width:8px;height:8px;border-radius:4px;background:var(--faint)}
 .live[data-state=live] .dot{background:var(--ok)}
 .live[data-state=lost] .dot{background:var(--bad)}
-.theme{display:inline-flex;align-items:center;gap:6px;min-height:36px;padding:0 10px;border:1px solid var(--border-btn);border-radius:6px;background:var(--panel);color:var(--ink-2);font-family:inherit;font-size:13px;cursor:pointer}
+.theme{display:inline-flex;align-items:center;justify-content:center;min-height:36px;min-width:36px;padding:0 9px;border:1px solid var(--border-btn);border-radius:6px;background:var(--panel);color:var(--ink-2);font-family:inherit;font-size:13px;cursor:pointer}
 .theme:hover{border-color:var(--ink-2);color:var(--ink)}
-.theme svg{width:14px;height:14px}
+.theme svg{width:16px;height:16px}
+/* the switch shows where it goes: a moon on the light theme, a sun on the dark one */
+.theme .sun{display:none}
+:root[data-theme=dark] .theme .sun{display:block}
+:root[data-theme=dark] .theme .moon{display:none}
 .dot[data-state=ok]{background:var(--ok)}
 .dot[data-state=busy]{background:var(--warn-dot)}
 .dot[data-state=down]{background:var(--bad)}
@@ -369,76 +373,35 @@ export const SCRIPT = `
     if (btn) btn.textContent = n > 0 ? 'Send back with ' + n + ' comment' + (n === 1 ? '' : 's') : 'Send back';
   }
 
-  // the theme switch: auto (the system's) → dark → light; a cookie, so the server renders it next time
-  const THEMES = ['auto', 'dark', 'light'];
+  // the theme switch: the system's theme by default; a click flips light ↔ dark and remembers the
+  // pick in a cookie (the server renders it next time) — unless the pick is the system's own again
   const themeButton = document.querySelector('[data-theme-switch]');
-  const showTheme = (t) => {
+  const systemDark = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+  const effective = () => document.documentElement.dataset.theme || (systemDark && systemDark.matches ? 'dark' : 'light');
+  const labelTheme = () => {
     if (!themeButton) return;
-    themeButton.querySelector('.label').textContent = t === 'auto' ? 'Auto' : t === 'dark' ? 'Dark' : 'Light';
-    themeButton.setAttribute('aria-label', 'Theme: ' + t + ' (switch)');
+    const to = effective() === 'dark' ? 'light' : 'dark';
+    themeButton.setAttribute('aria-label', 'Switch to the ' + to + ' theme');
+    themeButton.title = 'Switch to the ' + to + ' theme';
   };
   if (themeButton) {
-    showTheme(document.documentElement.dataset.theme || 'auto');
+    labelTheme();
+    systemDark?.addEventListener?.('change', labelTheme);
     themeButton.addEventListener('click', () => {
-      const now = document.documentElement.dataset.theme || 'auto';
-      const next = THEMES[(THEMES.indexOf(now) + 1) % THEMES.length];
-      if (next === 'auto') {
+      const next = effective() === 'dark' ? 'light' : 'dark';
+      const system = systemDark && systemDark.matches ? 'dark' : 'light';
+      if (next === system) {
         delete document.documentElement.dataset.theme;
         document.cookie = 'jarvis_theme=; Path=/; SameSite=Strict; Max-Age=0';
       } else {
         document.documentElement.dataset.theme = next;
         document.cookie = 'jarvis_theme=' + next + '; Path=/; SameSite=Strict; Max-Age=31536000';
       }
-      showTheme(next);
+      const meta = document.querySelector('meta[name=color-scheme]');
+      if (meta) meta.setAttribute('content', document.documentElement.dataset.theme || 'light dark');
+      labelTheme();
     });
   }
-
-  // the models indicator: a dot that says how the models are doing; details in a popover on click
-  const modelsButton = document.querySelector('[data-models]');
-  const modelsPop = document.getElementById('models-pop');
-  let modelsBusy = false;
-  async function refreshModels() {
-    if (!modelsButton || modelsBusy) return;
-    modelsBusy = true;
-    try {
-      const res = await fetch('/models.json', { credentials: 'same-origin', cache: 'no-store' });
-      if (!res.ok) return;
-      const data = await res.json();
-      modelsButton.querySelector('.dot').dataset.state = data.state;
-      modelsButton.title = data.title;
-      modelsButton.setAttribute('aria-label', data.title);
-      const body = modelsPop && modelsPop.querySelector('[data-models-body]');
-      if (body) body.innerHTML = data.html;
-    } catch {
-      /* the next tick tries again */
-    } finally {
-      modelsBusy = false;
-    }
-  }
-  const setPop = (open) => {
-    if (!modelsButton || !modelsPop) return;
-    modelsPop.hidden = !open;
-    modelsButton.setAttribute('aria-expanded', String(open));
-    // on a phone the popover is fixed to the window's width, right under the button (the header wraps)
-    modelsPop.style.top = open && window.innerWidth <= 640 ? modelsButton.getBoundingClientRect().bottom + 8 + 'px' : '';
-    if (open) refreshModels();
-  };
-  if (modelsButton) {
-    refreshModels();
-    setInterval(refreshModels, 10000);
-    modelsButton.addEventListener('click', () => setPop(modelsPop.hidden));
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && modelsPop && !modelsPop.hidden) { setPop(false); modelsButton.focus(); }
-    });
-    document.addEventListener('click', (e) => {
-      if (modelsPop && !modelsPop.hidden && !e.target.closest('.models-wrap')) setPop(false);
-    });
-  }
-
-  // "New task" from the header: straight into the text box
-  const focusNew = () => { if (location.hash === '#new') document.querySelector('#new textarea')?.focus(); };
-  window.addEventListener('hashchange', focusNew);
-  focusNew();
 
   document.addEventListener('change', (e) => {
     if (e.target.matches('select[data-autosubmit]')) e.target.form.submit();

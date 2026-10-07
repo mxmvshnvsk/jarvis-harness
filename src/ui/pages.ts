@@ -90,7 +90,7 @@ ${chrome.canStart ? html`<a class="btn primary small" href="/#new">New task</a>`
 <div class="models-wrap"><button type="button" class="models" data-models aria-expanded="false" aria-controls="models-pop" title="Models: checking…"><span class="dot" data-state="idle" aria-hidden="true"></span><span>models</span></button>
 <div id="models-pop" class="pop" role="dialog" aria-label="Models" hidden><div data-models-body><p class="muted">Checking the models…</p></div></div></div>
 <span class="live" data-state="connecting" role="status"><span class="dot" aria-hidden="true"></span><span class="label">connecting…</span><span aria-hidden="true">·</span><span>${chrome.address}</span></span>
-<button type="button" class="theme" data-theme-switch aria-label="Theme (switch)"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.25" fill="none" stroke="currentColor" stroke-width="1.5"></circle><path d="M8 1.75a6.25 6.25 0 0 1 0 12.5z" fill="currentColor"></path></svg><span class="label">Auto</span></button>
+<button type="button" class="theme" data-theme-switch aria-label="Switch the theme" title="Switch the theme"><svg class="moon" viewBox="0 0 16 16" aria-hidden="true"><path d="M13.5 9.6A5.75 5.75 0 0 1 6.4 2.5a5.75 5.75 0 1 0 7.1 7.1z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"></path></svg><svg class="sun" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="3" fill="none" stroke="currentColor" stroke-width="1.5"></circle><path d="M8 1v1.75M8 13.25V15M1 8h1.75M13.25 8H15M3.05 3.05l1.24 1.24M11.71 11.71l1.24 1.24M3.05 12.95l1.24-1.24M11.71 4.29l1.24-1.24" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path></svg></button>
 </div>
 </div></header>
 <main id="main" class="wrap">
