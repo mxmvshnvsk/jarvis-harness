@@ -669,6 +669,7 @@ function stepRow(s: StepRow, now: number): Html {
     if (r.status !== "success" && r.reason) notes.push(cut(r.reason, 120));
   }
   if (s.status === "skipped" && r?.reason) notes.push(`skipped: ${r.reason}`);
+  if (s.carriedFrom) notes.unshift(`done in ${s.carriedFrom.workflow} ${shortRunId(s.carriedFrom.id)}`);
   const loop = s.loops.at(-1);
   if (loop)
     notes.push(

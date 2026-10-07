@@ -366,12 +366,12 @@ describe("New task on the page", () => {
       workspace: { mode: "cwd", repoRoot: sb.project, path: sb.project, baseRef: "HEAD" },
       dataClass: "internal",
     });
-    rt.events.emit({
-      kind: "agent.finish",
-      runId: run.id,
-      stepId: "research",
-      payload: { contradictions: 7 },
-    });
+    for (const stepId of ["discover", "sources", "research"]) {
+      rt.events.emit({ kind: "step.start", runId: run.id, stepId, payload: { stepId, iteration: 1 } });
+      if (stepId === "research")
+        rt.events.emit({ kind: "agent.finish", runId: run.id, stepId, payload: { contradictions: 7 } });
+      rt.events.emit({ kind: "step.finish", runId: run.id, stepId, payload: { stepId, status: "success" } });
+    }
     rt.runs.update(run.id, { currentStep: "research", currentIteration: 1 });
     rt.runs.transition(run.id, "RUNNING");
     rt.runs.transition(run.id, "COMPLETED");
@@ -405,9 +405,15 @@ describe("New task on the page", () => {
     expect(after).toContain("→ continued in sdd");
     expect(after).not.toContain("Take it into the full cycle");
     const toShort = to.id.replace(/^run_/, "").slice(0, 8);
-    expect(await page(`/runs/${toShort}`)).toContain(
+    const toPage = await page(`/runs/${toShort}`);
+    expect(toPage).toContain(
       `continued from <a href="/runs/${short}">research ${short}</a> · 7 contradictions carried over`,
     );
+    // the steps the research did are done here too, said where (pilot: they stood pending)
+    expect(toPage).toContain(
+      `<b>research<span class="sr"> — done</span></b><span class="note">done in research ${short}`,
+    );
+    expect(toPage).toContain('<li class="step pending">');
     // gone on already: the button's address leads to that run
     expect((await post(`/runs/${short}/continue`, { t: token })).location).toBe(`/runs/${toShort}`);
   });

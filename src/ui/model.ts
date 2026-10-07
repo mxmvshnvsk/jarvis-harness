@@ -361,6 +361,8 @@ export interface StepRow {
   readonly rounds: number;
   readonly loops: readonly LoopReport[];
   readonly startedAt?: string;
+  /** Done in the run this one went on from (`jarvis continue`): its report, not this run's. */
+  readonly carriedFrom?: { readonly id: string; readonly workflow: string };
 }
 
 export interface FeedItem {
@@ -642,9 +644,31 @@ export async function runPage(
       } else loops.set(line.report.from, [...(loops.get(line.report.from) ?? []), line.report]);
     }
   }
+  // steps done in the run this one went on from: shown done, with that run's reports
+  const fromId = continuedFromOf(runtime, run);
+  const fromRun = fromId ? runtime.runs.get(fromId) : undefined;
+  const carried = new Map<string, StepReport>();
+  if (fromRun) {
+    const theirs = new Journey(plan);
+    for (const e of runEvents(runtime, fromRun.id))
+      for (const line of theirs.push(e))
+        if (line.kind === "step" && !reports.has(line.report.stepId))
+          carried.set(line.report.stepId, line.report);
+  }
   const activity = activityOf(events, now);
   const leaseLive = run.lease !== undefined && Date.parse(run.lease.until) >= now.getTime();
   const row = (id: string): StepRow => {
+    const theirs = carried.get(id);
+    if (theirs && fromRun && !started.has(id))
+      return {
+        id,
+        child: children.has(id),
+        status: theirs.status === "skipped" ? "skipped" : "done",
+        last: theirs,
+        rounds: 1,
+        loops: [],
+        carriedFrom: { id: fromRun.id, workflow: fromRun.workflow },
+      };
     const all = reports.get(id) ?? [];
     const last = all.at(-1);
     const inFlight = started.has(id) && !finished.has(id);
