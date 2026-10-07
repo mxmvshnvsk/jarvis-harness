@@ -311,4 +311,66 @@ describe("jarvis onboard --module", () => {
     expect(task).toContain("## Knowledge documentation/orders/overview.md");
     expect(task).not.toContain("Invoices are monthly.");
   });
+
+  it("checks the claims in a step of the run: the note reaches the agent, the candidate keeps what was dropped", async () => {
+    mapper(GOOD);
+    const r = await jarvis([
+      "--json",
+      "onboard",
+      "--module",
+      "src/orders",
+      "--no-graph",
+      "--note",
+      "how totals are formatted",
+    ]);
+    expect(r.code).toBe(0);
+    const { runId } = JSON.parse(r.out) as { runId: string };
+    const first = server.requests[0] as CapturedRequest;
+    const task = (first.body.messages as Array<{ role: string; content: string }>)[1]?.content ?? "";
+    expect(task).toContain("What matters to the person who asked:\nhow totals are formatted");
+
+    const shown = JSON.parse((await jarvis(["--json", "candidates", "list"])).out) as {
+      candidates: Array<{ id: string }>;
+    };
+    expect(shown.candidates).toHaveLength(1);
+    const { createRuntime } = await import("../../src/app/runtime.ts");
+    const { loadConfig } = await import("../../src/core/config/load.ts");
+    const rt = createRuntime(await loadConfig({ cwd: sb.project, homeDir: sb.home, env: {} }), { env: {} });
+    try {
+      const candidate = rt.artifacts.listLatest(runId, "candidate")[0];
+      const doc = JSON.parse(rt.artifacts.text(candidate as never)) as {
+        dropped: Array<{ what: string }>;
+        note: string;
+      };
+      expect(doc.dropped.map((d) => d.what).sort()).toEqual(["Ghost", "Orders are cached per customer."]);
+      expect(doc.note).toBe("how totals are formatted");
+      expect(rt.artifacts.listLatest(runId, "module-check")).toHaveLength(1);
+      // written by the run's own `verify` step, not by the command that started it
+      expect(candidate?.stepId).toBe("verify");
+    } finally {
+      await rt.close();
+    }
+  });
+
+  it("promote replaces a document jarvis generated, and one a person wrote only with --replace", async () => {
+    mapper(GOOD);
+    expect((await jarvis(["onboard", "--module", "src/orders", "--no-graph"])).code).toBe(0);
+    const file = join(sb.project, ".jarvis/knowledge/module-orders.md");
+    put(".jarvis/knowledge/module-orders.md", "# Orders\n\nWritten by the team.\n");
+    const refused = await jarvis(["candidates", "promote", "orders"]);
+    expect(refused.code).not.toBe(0);
+    expect(refused.err).toContain("--replace replaces it");
+    expect(readFileSync(file, "utf8")).toContain("Written by the team.");
+    const replaced = await jarvis(["--json", "candidates", "promote", "orders", "--replace"]);
+    expect(replaced.code).toBe(0);
+    expect(JSON.parse(replaced.out).replaced).toBe("written by a person");
+    expect(readFileSync(file, "utf8")).toContain("# Module src/orders");
+
+    // a second research of the module: the generated document is replaced without asking
+    mapper(GOOD);
+    expect((await jarvis(["onboard", "--module", "src/orders", "--no-graph"])).code).toBe(0);
+    const again = await jarvis(["--json", "candidates", "promote", "orders"]);
+    expect(again.code).toBe(0);
+    expect(JSON.parse(again.out).replaced).toBe("generated");
+  });
 });

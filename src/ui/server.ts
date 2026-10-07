@@ -1,8 +1,19 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
+import { tmpdir } from "node:os";
+import { join as joinPath } from "node:path";
 import { budgetGranted, budgetStopOf, grantBudget } from "../app/budgetStop.ts";
+import {
+  CandidateTargetTaken,
+  candidatesOf,
+  contentOf,
+  existingAt,
+  promoteCandidate,
+  rejectCandidate,
+  targetOf,
+} from "../app/candidates.ts";
 import {
   awaitedArtifact,
   DecisionTakenError,
@@ -18,6 +29,9 @@ import type { Runtime } from "../app/runtime.ts";
 import { type OpenIn, reviewFiles } from "../cli/checkout.ts";
 import type { Actor } from "../core/domain/actor.ts";
 import type { Run } from "../core/domain/run.ts";
+import { knowledgeRootsOf } from "../knowledge/sources.ts";
+import { NOTE_MAX } from "../onboarding/deep.ts";
+import { findNode, type ModuleTree, moduleTree } from "../onboarding/tree.ts";
 import type { LocalWorkflowEngine } from "../orchestration/runtime.ts";
 import { egressNotices } from "../security/policy/egress.ts";
 import { shortRunId } from "../storage/runStore.ts";
@@ -26,6 +40,7 @@ import { SCRIPT, STYLE } from "./assets.ts";
 import { type DiffFile, type Html, html, parseDiff } from "./html.ts";
 import { type Launcher, WORKFLOWS } from "./launcher.ts";
 import { artifactPage, runPage, runsPage } from "./model.ts";
+import { type Draft, type ModulesPage, modulesContent, researchOf } from "./modules.ts";
 import {
   type Actions,
   type ArtifactExtras,
@@ -412,6 +427,227 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
     ]),
   ];
 
+  /* ---- Knowledge → Modules: research a module, review its candidate, commit the drafts ---- */
+  const root = options.projectRoot;
+  const roots = () => knowledgeRootsOf(runtime.loaded, root);
+  let treeCache: { key: string; tree: Promise<ModuleTree> } | undefined;
+  /** The tree for HEAD and the knowledge as it is now (an accepted draft changes the coverage). */
+  const treeOf = async (): Promise<ModuleTree> => {
+    const dir = root as string;
+    const head = (await git(["rev-parse", "HEAD"], dir)).stdout.trim();
+    const knowledge = await git(["status", "--porcelain", "--", ".jarvis/knowledge"], dir);
+    const key = `${head}|${knowledge.stdout}`;
+    if (treeCache?.key !== key) {
+      const tree = moduleTree(roots());
+      treeCache = { key, tree };
+      tree.catch(() => {
+        if (treeCache?.tree === tree) treeCache = undefined;
+      });
+    }
+    return treeCache.tree;
+  };
+  const draftsOf = async (): Promise<Draft[]> => {
+    const r = await git(
+      [
+        "status",
+        "--porcelain",
+        "--untracked-files=all",
+        "--",
+        ".jarvis/knowledge",
+        ".jarvis/standards",
+        ".jarvis/skills",
+      ],
+      root as string,
+    );
+    if (r.code !== 0) return [];
+    return r.stdout
+      .split("\n")
+      .filter((l) => l.length > 3)
+      .map((l) => ({ status: l.slice(0, 2).trim(), path: l.slice(3).replace(/^"|"$/g, "") }));
+  };
+  /** What replacing a person's document with the candidate changes, as a diff. */
+  const conflictOf = async (page: Pick<ModulesPage, "selected" | "research">) => {
+    const r = page.selected ? page.research.get(page.selected.path) : undefined;
+    if (!root || r?.kind !== "candidate") return undefined;
+    const file = targetOf(root, r.candidate, undefined);
+    const before = existingAt(file);
+    if (!before || before.generated) return undefined;
+    const dir = mkdtempSync(joinPath(tmpdir(), "jarvis-candidate-"));
+    try {
+      const next = joinPath(dir, "candidate.md");
+      const id = file.replace(/^.*[\\/]/, "").replace(/\.md$/, "");
+      writeFileSync(next, contentOf(r.candidate, id));
+      const d = await git(["diff", "--no-index", "--no-color", "--no-ext-diff", "--", file, next], dir, {
+        maxBytes: 2 * 1024 * 1024,
+      });
+      const rel = file.slice(root.length + 1);
+      return { file: rel, diff: parseDiff(d.stdout).map((f) => ({ ...f, path: rel })) };
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+  const knowledgeNotice = (r: Request): Html | undefined => {
+    const n = r.url.searchParams.get("notice");
+    const count = r.url.searchParams.get("count") ?? "";
+    const file = r.url.searchParams.get("file") ?? "";
+    const notices: Record<string, Html> = {
+      started: html`<div class="banner ok">Research started — it shows up under Runs too; the bell tells you when its candidate is ready</div>`,
+      queued: html`<div class="banner ok">${count || "1"} research${count && count !== "1" ? "es" : ""} queued — they run one after another</div>`,
+      unqueued: html`<div class="banner ok">Taken out of the queue</div>`,
+      "no-path": html`<div class="banner bad">Not a folder of a module here — pick one in the tree or from the path's suggestions</div>`,
+      "no-parts": html`<div class="banner bad">Pick at least one part</div>`,
+      "check-all": html`<div class="banner bad">Tick every statement under «Check these first» — or send it back with a note</div>`,
+      taken: html`<div class="banner bad">The target was written by a person: replace it, or write under another name</div>`,
+      accepted: html`<div class="banner ok">Written to <code>${file}</code> — not committed yet</div>`,
+      rejected: html`<div class="banner ok">Discarded — nothing written</div>`,
+      again: html`<div class="banner ok">Discarded, and researching again with your note</div>`,
+      decided: html`<div class="banner bad">This candidate was decided meanwhile (in a terminal or another window)</div>`,
+      committed: html`<div class="banner ok">Committed: ${file}</div>`,
+      "nothing-to-commit": html`<div class="banner bad">Nothing to commit under .jarvis/</div>`,
+      "commit-failed": html`<div class="banner bad">git commit failed — see <code>jarvis logs --event ui.commit</code></div>`,
+      opened: html`<div class="banner ok">↗ opened in ${r.url.searchParams.get("editor") ?? "your editor"}</div>`,
+      "no-editor": html`<div class="banner bad">No editor found — set JARVIS_EDITOR (code, idea, webstorm…) where you start <code>jarvis ui</code></div>`,
+      actor: html`<div class="banner bad">Cannot determine who decides: set JARVIS_ACTOR, actor.id or git config user.email (ADR-0006)</div>`,
+    };
+    return n ? notices[n] : undefined;
+  };
+  const modulesPageOf = async (r: Request): Promise<void> => {
+    if (!root || !existsSync(root))
+      return notFound(r, "Knowledge needs a repository: start jarvis ui in one.");
+    const tree = await treeOf();
+    const path = (r.url.searchParams.get("path") ?? "").trim().replace(/\/+$/, "") || undefined;
+    const selected = path ? findNode(tree, path) : undefined;
+    const research = researchOf(runtime, options.launcher?.list() ?? [], root);
+    const base = {
+      tree,
+      ...(path ? { path } : {}),
+      ...(selected ? { selected } : {}),
+      need: r.url.searchParams.get("need") === "1",
+      research,
+      drafts: await draftsOf(),
+      canStart: !!options.launcher && !!actions,
+      root,
+    };
+    const conflict = await conflictOf(base);
+    const running = [...research.values()].some((x) => ["starting", "running", "queued"].includes(x.kind));
+    return page(
+      r,
+      200,
+      {
+        title: path ? `Modules · ${path}` : "Modules",
+        page: "knowledge",
+        ...(running ? { tick: 5000 } : {}),
+      },
+      modulesContent({ ...base, ...(conflict ? { conflict } : {}) }, actions, knowledgeNotice(r)),
+    );
+  };
+  const back = (path: string, notice: string, extra = "") =>
+    `/knowledge/modules?${path ? `path=${encodeURIComponent(path)}&` : ""}notice=${notice}${extra}`;
+  /** POST /knowledge/…: research, the queue, a candidate's decision, the commit, open in editor. */
+  const knowledgePost = async (r: Request): Promise<void> => {
+    if (!root || !actions) return notFound(r, `Nothing to do at ${r.url.pathname}.`);
+    const form = await formOf(r.req);
+    const sent = form.get("t");
+    if (!sent || !same(sent, token)) return send(r, 403, forbiddenPage());
+    const pathOf = () => (form.get("path") ?? "").trim().replace(/\/+$/, "");
+    const at = r.url.pathname;
+    if (at === "/knowledge/modules/research") {
+      if (!options.launcher) return notFound(r, "Starting research is off here.");
+      const tree = await treeOf();
+      const paths = [...new Set(form.getAll("path").map((p) => p.trim().replace(/\/+$/, "")))].filter(
+        Boolean,
+      );
+      if (paths.length === 0) return redirect(r, back(pathOf(), "no-parts"));
+      if (paths.some((p) => !findNode(tree, p))) return redirect(r, back(paths[0] as string, "no-path"));
+      const note = (form.get("note") ?? "").trim().slice(0, NOTE_MAX);
+      const launches = paths.map((module) =>
+        options.launcher?.startModule({ module, repoRoot: root, ...(note ? { note } : {}) }),
+      );
+      const waiting = launches.filter((l) => l?.queued).length;
+      return redirect(
+        r,
+        back(paths[0] as string, waiting > 0 ? "queued" : "started", waiting > 0 ? `&count=${waiting}` : ""),
+      );
+    }
+    if (at === "/knowledge/modules/unqueue") {
+      options.launcher?.unqueue(form.get("launch") ?? "");
+      return redirect(r, back(pathOf(), "unqueued"));
+    }
+    if (at === "/knowledge/commit") {
+      const drafts = await draftsOf();
+      if (drafts.length === 0) return redirect(r, back(pathOf(), "nothing-to-commit"));
+      const files = drafts.map((d) => d.path);
+      const names = files.map((f) => f.replace(/^.*\//, "").replace(/\.md$/, "")).slice(0, 4);
+      const message = `knowledge: ${names.join(", ")}${files.length > names.length ? ` and ${files.length - names.length} more` : ""}`;
+      const add = await git(["add", "-A", "--", ...files], root);
+      // the author is the repository's git config, as for any commit made by hand
+      const commit = add.code === 0 ? await git(["commit", "-q", "-m", message, "--", ...files], root) : add;
+      if (commit.code !== 0) {
+        runtime.log.error("ui.commit", { message: commit.stderr.slice(0, 2000) });
+        return redirect(r, back(pathOf(), "commit-failed"));
+      }
+      return redirect(r, back(pathOf(), "committed", `&file=${encodeURIComponent(files.join(", "))}`));
+    }
+    if (at === "/knowledge/open") {
+      const file = (form.get("file") ?? "").replace(/^\/+/, "");
+      if (!file.startsWith(".jarvis/") || file.includes("..")) return redirect(r, back(pathOf(), "no-path"));
+      const editor = options.open?.(root, [{ path: file }]);
+      return redirect(
+        r,
+        editor
+          ? back(pathOf(), "opened", `&editor=${encodeURIComponent(editor)}`)
+          : back(pathOf(), "no-editor"),
+      );
+    }
+    const m = /^\/knowledge\/candidates\/([^/]+)\/(accept|reject)$/.exec(at);
+    if (!m) return notFound(r, `Nothing to do at ${at}.`);
+    const id = decodeURIComponent(m[1] as string);
+    const all = candidatesOf(runtime, (run) => run.workflow === "onboard-module");
+    const c = all.find((x) => x.artifact.artifactId === id);
+    if (!c) return notFound(r, "No such candidate.");
+    const module = c.doc.module ?? "";
+    if (c.decision) return redirect(r, back(module, "decided"));
+    const who = options.actor ? await options.actor() : undefined;
+    if (!who) return redirect(r, back(module, "actor"));
+    if (m[2] === "accept") {
+      const checked = new Set(form.getAll("checked").map(Number));
+      if (c.review.some((_, i) => !checked.has(i))) return redirect(r, back(module, "check-all"));
+      const fileId = (form.get("id") ?? "").trim();
+      try {
+        const done = promoteCandidate(runtime, {
+          root,
+          candidate: c,
+          actor: who,
+          ...(/^[a-z0-9][a-z0-9._-]{0,59}$/.test(fileId) ? { id: fileId } : {}),
+          replace: form.get("replace") === "1",
+          channel: "ui",
+          checked: checked.size,
+        });
+        return redirect(r, back(module, "accepted", `&file=${encodeURIComponent(done.path)}`));
+      } catch (error) {
+        if (!(error instanceof CandidateTargetTaken)) throw error;
+        return redirect(r, back(module, "taken"));
+      }
+    }
+    const comment = (form.get("comment") ?? "").trim().slice(0, NOTE_MAX);
+    rejectCandidate(runtime, c, who, comment || undefined);
+    if (form.get("again") === "1" && options.launcher && module) {
+      const dropped = (c.doc.dropped ?? []).slice(0, 12).map((d) => `- ${d.section} "${d.what}": ${d.why}`);
+      const note = [
+        comment,
+        dropped.length > 0
+          ? `The previous research had these claims dropped by the check against the code:\n${dropped.join("\n")}`
+          : "",
+      ]
+        .filter(Boolean)
+        .join("\n\n")
+        .slice(0, NOTE_MAX);
+      options.launcher.startModule({ module, repoRoot: root, ...(note ? { note } : {}) });
+      return redirect(r, back(module, "again"));
+    }
+    return redirect(r, back(module, "rejected"));
+  };
+
   /** "New task": the CLI started in the background, driven by the page (src/ui/launcher.ts). */
   const startTask = async (r: Request): Promise<void> => {
     const launcher = options.launcher;
@@ -432,6 +668,7 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
   /** Accept / Send back / Run again / Open in editor: the same functions as the terminal's keys. */
   const post = async (r: Request): Promise<void> => {
     if (r.url.pathname === "/runs/new") return startTask(r);
+    if (r.url.pathname.startsWith("/knowledge/")) return knowledgePost(r);
     if (r.url.pathname === "/mcp/check") {
       if (!actions) return notFound(r, "Nothing to do at /mcp/check.");
       const sent = (await formOf(r.req)).get("t");
@@ -595,6 +832,8 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
         ),
       );
     }
+    if (path === "/knowledge" || path === "/knowledge/") return redirect(r, "/knowledge/modules");
+    if (path === "/knowledge/modules") return modulesPageOf(r);
     const runMatch = /^\/runs\/([^/]+)$/.exec(path);
     if (runMatch) {
       const run = resolveRun(runMatch[1] as string);
@@ -657,7 +896,15 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
     }
     if (path === "/waiting.json") {
       // the page's system notifications: the runs that wait for a person, each stop with its own key
-      const waiting = runtime.runs.list({ state: ["WAITING_HUMAN"], limit: 200 }).map((run) => ({
+      const waiting: Array<{
+        id: string;
+        task: string;
+        workflow: string;
+        what: string;
+        parked: string | number | undefined;
+        terminal: boolean;
+        href?: string;
+      }> = runtime.runs.list({ state: ["WAITING_HUMAN"], limit: 200 }).map((run) => ({
         id: shortRunId(run.id),
         task: (run.task.split("\n")[0] ?? "").trim().slice(0, 140),
         workflow: run.workflow,
@@ -665,6 +912,19 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
         parked: parkedAt(runtime, run.id),
         terminal: waitingCard(runtime, run.id) !== undefined,
       }));
+      // module research whose candidate waits for a review on the Modules page
+      for (const c of candidatesOf(runtime, (run) => run.workflow === "onboard-module")) {
+        if (c.decision || !c.doc.module) continue;
+        waiting.push({
+          id: shortRunId(c.artifact.runId),
+          task: `module ${c.doc.module}`,
+          workflow: "onboard-module",
+          what: "review what the research found",
+          parked: c.artifact.artifactId,
+          terminal: false,
+          href: `/knowledge/modules?path=${encodeURIComponent(c.doc.module)}`,
+        });
+      }
       return send(r, 200, JSON.stringify({ waiting }), "application/json; charset=utf-8", {
         "Cache-Control": "no-store",
       });

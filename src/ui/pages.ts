@@ -55,7 +55,7 @@ function goesOn(terminal: boolean, run: Run, driven = false): Html {
 
 export interface Chrome {
   readonly title: string;
-  readonly page: "runs" | "run" | "artifact" | "error";
+  readonly page: "runs" | "run" | "artifact" | "knowledge" | "error";
   readonly address: string;
   readonly runId?: string;
   readonly back?: { readonly href: string; readonly label: string };
@@ -93,7 +93,7 @@ ${chrome.refresh ? html`<noscript><meta http-equiv="refresh" content="${String(c
 <a class="brand" href="/">jarvis</a>
 ${chrome.back ? html`<a class="back" href="${chrome.back.href}">← ${chrome.back.label}</a>` : ""}
 ${chrome.repos ?? ""}
-${chrome.page === "runs" ? html`<nav aria-label="Pages"><a href="/" aria-current="page">Runs</a></nav>` : ""}
+${chrome.page === "runs" || chrome.page === "knowledge" ? html`<nav aria-label="Pages"><a href="/"${chrome.page === "runs" ? html` aria-current="page"` : ""}>Runs</a><a href="/knowledge/modules"${chrome.page === "knowledge" ? html` aria-current="page"` : ""}>Knowledge</a></nav>` : ""}
 ${chrome.canStart ? html`<a class="btn primary small" href="/#new">New task</a>` : ""}
 <div class="status">
 <div class="models-wrap" data-pop-wrap><button type="button" class="models" data-mcp aria-expanded="false" aria-controls="mcp-pop" title="MCP: checking the servers…"><span class="dot" data-state="pending" aria-hidden="true"></span><span>mcp</span></button>
@@ -716,7 +716,7 @@ export function documentHtml(name: string, text: string, doc?: Record<string, un
   return html`<pre><code>${text}</code></pre>`;
 }
 
-function diffFileHtml(f: DiffFile, index: number, comments: boolean): Html {
+export function diffFileHtml(f: DiffFile, index: number, comments: boolean): Html {
   const status =
     f.status === "added"
       ? " · new"

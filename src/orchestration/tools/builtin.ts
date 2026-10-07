@@ -5,6 +5,7 @@ import { collectDesign } from "../../design/collect.ts";
 import { changedFiles, checkStandards } from "../../knowledge/check.ts";
 import { impactOf, repoIdOf, updateGraph } from "../../knowledge/graph/update.ts";
 import { loadStandards } from "../../knowledge/standards.ts";
+import { verifyModuleStep } from "../../onboarding/moduleRun.ts";
 import type { DeterministicTool } from "../executors.ts";
 
 /**
@@ -38,6 +39,9 @@ export const BUILTIN_TOOLS: Record<string, DeterministicTool> = {
 
   /** The design frames of the task, read and described by code (src/design/collect.ts). */
   "design.collect": collectDesign,
+
+  /** The onboarding mapper's claims against the code; the survivors become a candidate. */
+  "onboard.verify": verifyModuleStep,
 
   fail: async (_ctx, args) => ({ status: "failure", reason: String(args.reason ?? "failed on purpose") }),
 

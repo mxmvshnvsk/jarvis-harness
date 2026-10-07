@@ -260,6 +260,53 @@ tr:last-child td{border-bottom:0}
 .launch.failed{border-color:var(--bad)}
 .tail{margin:6px 0 0;padding:10px 12px;border-radius:8px;background:var(--sunken);border:1px solid var(--line);font-size:12px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere;max-height:240px;overflow:auto}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.tabs a[aria-current=page]{color:var(--ink);font-weight:600;border-bottom:2px solid var(--ink)}
+/* Knowledge → Modules */
+.mcols{gap:20px}
+.mleft{flex:1 1 400px;min-width:0;display:flex;flex-direction:column;gap:12px}
+.mright{flex:1.4 1 560px;min-width:0}
+.mpath{display:flex;align-items:flex-end;gap:8px}
+.mpath .field{flex:1}
+.mpath input{height:44px;padding:0 12px;border:1px solid var(--field-line);border-radius:8px;background:var(--panel);color:var(--ink);font-family:var(--mono);font-size:14px}
+.mtree{overflow:hidden}
+.mtree ul{list-style:none;margin:0;padding:0}
+.mtree ul ul{padding-left:18px}
+.mtree summary{list-style:none;display:block;cursor:pointer}
+.mtree summary::-webkit-details-marker{display:none}
+.mtree summary .mname::before{content:"▸";display:inline-block;width:16px;color:var(--muted)}
+.mtree details[open]>summary .mname::before{content:"▾"}
+.mhead,.mrow{display:grid;grid-template-columns:minmax(0,1fr) auto 48px;gap:10px;align-items:center;padding:8px 14px}
+.mhead{color:var(--muted);font-size:12px;font-weight:500;border-bottom:1px solid var(--line)}
+.mrow{min-height:44px;box-sizing:border-box;border-top:1px solid var(--line-soft);color:var(--ink);text-decoration:none}
+.mrow:hover{background:var(--sunken)}
+.mrow.current{background:var(--accent-soft);box-shadow:inset 3px 0 0 var(--accent)}
+.mname{font-family:var(--mono);font-size:13px;overflow-wrap:anywhere}
+.mtree li>.mrow .mname{padding-left:16px}
+.mfiles{font-family:var(--mono);font-size:12px;color:var(--muted);text-align:right}
+.mfiles.big{color:var(--wait);font-weight:600}
+.mrow .pill{font-size:12px;padding:2px 8px}
+.mresearch{padding:20px 24px;display:flex;flex-direction:column;gap:16px}
+.mresearch h2{margin:0;font-size:18px}
+.mfacts{display:grid;grid-template-columns:130px minmax(0,1fr);gap:8px 14px;margin:0;font-size:13px;line-height:19px}
+.mfacts dt{color:var(--muted)}.mfacts dd{margin:0}
+.mstart,.mresearch form{display:flex;flex-direction:column;gap:12px}
+.mparts,.mchecks{border:0;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.mchecks legend{margin-bottom:6px;font-size:14px}
+.mpart,.mcheck{display:flex;align-items:center;gap:12px;min-height:44px;padding:6px 12px;border-radius:8px;border:1px solid var(--line-soft);cursor:pointer}
+.mcheck{align-items:flex-start;background:var(--wait-bg)}
+.mcheck:has(input:checked){background:var(--ok-bg)}
+.mpart input,.mcheck input{width:20px;height:20px;margin:0;flex-shrink:0;accent-color:var(--accent-fill)}
+.mpart code{flex:1;min-width:0;overflow-wrap:anywhere}
+.mdropped h3{margin:0 0 6px;font-size:14px}
+.mdropped ul{margin:0;padding-left:18px;font-size:13px;line-height:20px}
+.mdoc,.mdiff,.magain{border:1px solid var(--line-soft);border-radius:8px}
+.mdoc>summary,.mdiff>summary,.magain>summary{padding:10px 14px;cursor:pointer;font-size:14px}
+.mdoc .doc{max-height:360px;overflow:auto;padding:12px 16px;border-top:1px solid var(--line-soft)}
+.magain form{padding:0 14px 14px}
+.field.inline{flex-direction:row;align-items:center;gap:8px}
+.field.inline input{height:40px;padding:0 10px;border:1px solid var(--field-line);border-radius:8px;font-family:var(--mono);font-size:13px;background:var(--panel);color:var(--ink)}
+.mdrafts{margin-top:20px;padding:16px 20px;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px 20px}
+.mdrafts>div{display:flex;flex-direction:column;gap:4px}
 @media (max-width:640px){
   .wrap{padding:0 16px}
   main.wrap{padding-top:20px;gap:22px}
@@ -469,7 +516,7 @@ export const SCRIPT = `
       if (baseline || w.terminal || !notifyOn() || document.hasFocus()) continue;
       try {
         const n = new Notification('Jarvis: ' + w.what, { body: w.task + '\\n' + w.workflow + ' · run ' + w.id, tag: 'jarvis-' + key });
-        n.onclick = () => { window.focus(); location.href = '/runs/' + w.id; n.close(); };
+        n.onclick = () => { window.focus(); location.href = w.href || '/runs/' + w.id; n.close(); };
       } catch {
         /* a browser that only notifies from a service worker: the page still shows it */
       }

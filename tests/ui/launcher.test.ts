@@ -93,6 +93,51 @@ describe("the launcher", () => {
   });
 });
 
+describe("module research from the page", () => {
+  it("runs one research at a time: the rest wait in a queue, in order, and can be taken out", async () => {
+    const first = launcher.startModule({
+      module: "src/orders",
+      note: "how totals are rounded",
+      repoRoot: sb.project,
+    });
+    const second = launcher.startModule({ module: "src/billing", repoRoot: sb.project });
+    const third = launcher.startModule({ module: "src/shared/upload", repoRoot: sb.project });
+    expect(first.queued).toBe(false);
+    expect([second.queued, third.queued]).toEqual([true, true]);
+    expect((await calls(1))[0]).toBe(
+      `${sb.project}|off|onboard --module src/orders --note how totals are rounded`,
+    );
+    // the CLI made its run; it is the launch's once matched by the module
+    const run = rt.runs.create({
+      task: "Map the module `src/orders` of this repository for onboarding.",
+      workflow: "onboard-module",
+      owner: DEV,
+      workspace: { mode: "cwd", repoRoot: sb.project, path: sb.project, baseRef: "HEAD" },
+      dataClass: "internal",
+    });
+    rt.artifacts.put({
+      runId: run.id,
+      type: "module-input",
+      name: "module.json",
+      content: JSON.stringify({ module: "src/orders" }),
+      provenance: { kind: "tool", capability: "onboard.module" },
+    });
+    rt.runs.transition(run.id, "RUNNING");
+    await new Promise((r) => setTimeout(r, 100)); // the first CLI process has exited
+    launcher.tend();
+    expect(first.runId).toBe(run.id);
+    // its run still goes on: the queue waits
+    expect(second.queued).toBe(true);
+    expect(launcher.unqueue(third.id)).toBe(true);
+    expect(launcher.unqueue(first.id)).toBe(false);
+    rt.runs.transition(run.id, "COMPLETED");
+    launcher.tend();
+    expect(second.queued).toBe(false);
+    expect((await calls(2))[1]).toBe(`${sb.project}|off|onboard --module src/billing`);
+    expect(launcher.list().some((l) => l.id === third.id)).toBe(false);
+  });
+});
+
 describe("New task on the page", () => {
   const post = (
     path: string,

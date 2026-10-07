@@ -107,11 +107,13 @@ The full walkthrough — project policy, knowledge, clarifications, review — i
 
 ```sh
 jarvis onboard               # scan an existing repo: suggest tools.local, write architecture.md/conventions.md skeletons
+jarvis onboard --module src/orders   # an agent maps one module; claims checked against the code wait as a candidate
 jarvis ask "how do we pass dependencies into hooks"   # answer from your knowledge base with checked citations; `jarvis ask RTL` decodes a glossary term
 jarvis spec ABC-42              # only research → requirements → spec, up to its approval
 jarvis hooks install            # standards, checks and impact analysis before every git push
 jarvis explain src/foo.ts:42    # why this line exists: task → spec → sources → tool calls
-jarvis ui                       # the runs on a local page (127.0.0.1): what waits for you, documents, diffs
+jarvis ui                       # the runs on a local page (127.0.0.1): what waits for you, documents, diffs;
+                                #   Knowledge → Modules: research a module from the page, review and accept it
 jarvis mcp serve                # Jarvis as a read-only MCP server for an IDE or another agent
 jarvis ci ABC-42 --bundle run.json.gz   # the same workflow in CI, handed over to a developer
 ```

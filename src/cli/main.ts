@@ -190,6 +190,7 @@ export function buildProgram(options: RunOptions = {}): Command {
       "--module <path>",
       "agent mode: map one module with the onboard-mapper agent; the result waits as a knowledge candidate",
     )
+    .option("--note <text>", "with --module: what matters, added to the agent's task")
     .option("--no-graph", "skip the project graph (module dependencies)")
     .action(
       async (opts: {
@@ -198,6 +199,7 @@ export function buildProgram(options: RunOptions = {}): Command {
         applyConfig: boolean;
         graph: boolean;
         module?: string;
+        note?: string;
       }) => {
         await runOnboard(ctxFor(), opts);
       },
@@ -764,7 +766,12 @@ export function buildProgram(options: RunOptions = {}): Command {
     .command("promote <name>")
     .description("write the candidate as a standard / knowledge file and record the decision")
     .option("--id <id>", "file id (default: derived from the name)")
-    .action(async (name: string, opts: { id?: string }) => {
+    .option(
+      "--replace",
+      "replace a document a person wrote at the target (a generated one is replaced anyway)",
+      false,
+    )
+    .action(async (name: string, opts: { id?: string; replace?: boolean }) => {
       await runCandidatesPromote(ctxFor(), name, opts);
     });
   candidates

@@ -74,6 +74,13 @@ Remaining commands of ADR-0001 §15:
   older candidate about the same thing; any unique part works), `candidates show` prints the document as promote
   would write it with the generalisations to check, `list` says where to look (code paths, most quoted files) and how
   many claims to check; module maps are promoted to `module-<name>.md` without `--id`
+- module research from `jarvis ui` (Knowledge → Modules): the module tree of the scan down to folders, with size and
+  coverage (own document, generated, a wider one, the team's documentation via `scopes`, may be stale); a folder over
+  150 files / 15k lines is offered in parts; `jarvis onboard --module` started in the background, one at a time with a
+  queue; the claim check is now the `verify` step of `onboard-module` (a run resumed later still ends with its
+  candidate), the candidate keeps the dropped claims and the note (`--note`); the review: confirmed / dropped / to
+  check (every generalisation ticked before Accept), Replace with a diff for a document a person wrote
+  (`candidates promote --replace`; a generated one is replaced), Research again with a note, Commit knowledge
 - output styling: one palette for every command (`src/cli/style.ts`; headings bold, the subject bold cyan, metadata
   dim, commands cyan, ok/additions green, warnings yellow, errors/removals red), backticked spans render as commands,
   `jarvis diff` coloured like git, `candidates show` renders the markdown; errors are prefixed `error:`, notices go

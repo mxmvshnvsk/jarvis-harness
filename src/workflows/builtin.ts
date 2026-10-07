@@ -272,8 +272,8 @@ steps:
 
 export const ONBOARD_MODULE_WORKFLOW = `
 name: onboard-module
-version: 1
-description: Map one module of an existing repository (jarvis onboard --module)
+version: 2
+description: Map one module of an existing repository (jarvis onboard --module, Modules in jarvis ui)
 entry: map
 steps:
   - id: map
@@ -281,6 +281,14 @@ steps:
     agent: onboard-mapper
     phase: research
     outputs: [module-map]
+    transitions:
+      onSuccess: verify
+  # every claim against the files it cites, no model; what survives waits as a candidate
+  - id: verify
+    kind: deterministic
+    tool: onboard.verify
+    inputs: [module-map]
+    outputs: [candidate]
     transitions:
       onSuccess: DONE
 `;

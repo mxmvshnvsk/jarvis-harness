@@ -77,7 +77,7 @@ const TEST_DIRS = new Set(["test", "tests", "__tests__", "e2e", "spec", "specs"]
 const DOC_DIRS = new Set(["docs", "doc", "documentation"]);
 const TEST_FILE = /(\.|_)(test|spec)\.[a-z]+$|(^|\/)test_[^/]+\.py$|Tests?\.cs$|_test\.go$/;
 
-function rolOf(path: string, first: string): ModuleFacts["role"] {
+export function rolOf(path: string, first: string): ModuleFacts["role"] {
   if (TEST_DIRS.has(first)) return "tests";
   if (DOC_DIRS.has(first)) return "docs";
   if (first.startsWith(".") || first === "scripts" || first === "tools") return "config";
@@ -322,7 +322,11 @@ function sensitiveOf(root: string, files: readonly string[]): string[] {
 }
 
 /** Adds one tracked file to a module's counts; returns the lines it contributed. */
-function countFile(root: string, f: string, s: { files: number; lines: number; langs: Set<string> }): number {
+export function countFile(
+  root: string,
+  f: string,
+  s: { files: number; lines: number; langs: Set<string> },
+): number {
   s.files += 1;
   const lang = CODE_EXT[extname(f)];
   if (!lang) return 0;
@@ -385,6 +389,13 @@ export async function scopeFacts(
     dependsOn: [...dependsOn].sort(),
     usedBy: [...usedBy].sort(),
   };
+}
+
+/** Tracked files the scan counts (no lock files, build output, vendored code or `.jarvis/`). */
+export async function trackedFiles(root: string): Promise<string[]> {
+  const listed = await git(["ls-files", "-z"], root);
+  const all = listed.code === 0 ? listed.stdout.split("\0").filter(Boolean) : [];
+  return all.filter((f) => !SKIP_FILE.test(f) && !SKIP_DIR.test(f));
 }
 
 export interface ScanOptions {

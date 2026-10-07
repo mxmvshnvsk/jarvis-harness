@@ -30,6 +30,8 @@ export interface OnboardOptions {
   readonly graph?: boolean;
   /** Agent mode (prototype): map this one module with the onboard-mapper agent. */
   readonly module?: string;
+  /** With `module`: what matters to the person who asked, added to the agent's task. */
+  readonly note?: string;
 }
 
 type FileAction = "created" | "refreshed" | "kept (edited by a human)" | "would create" | "would refresh";
@@ -175,18 +177,25 @@ async function runModuleMap(
     throw new CliExit(EXIT.error);
   }
   if (options.dryRun) {
-    ctx.out.result({ module, task: taskFor(module, facts), facts, wouldRun: "onboard-module" }, () => {
-      ctx.out.line(`would run the onboard-mapper agent on ${module}:`);
-      ctx.out.line(taskFor(module, facts));
-    });
+    ctx.out.result(
+      { module, task: taskFor(module, facts, options.note), facts, wouldRun: "onboard-module" },
+      () => {
+        ctx.out.line(`would run the onboard-mapper agent on ${module}:`);
+        ctx.out.line(taskFor(module, facts, options.note));
+      },
+    );
     return;
   }
   const runtime = createRuntime(loaded, { env: ctx.env });
   try {
     const progress = followRun(ctx, runtime);
-    const result = await mapModule(runtime, { root, module, facts, env: ctx.env }).finally(() =>
-      progress.stop(),
-    );
+    const result = await mapModule(runtime, {
+      root,
+      module,
+      facts,
+      note: options.note,
+      env: ctx.env,
+    }).finally(() => progress.stop());
     ctx.out.result(result, () => {
       const st = ctx.out.style;
       ctx.out.line(`${st.muted("run")} ${result.runId || "-"}${st.muted(":")} ${st.state(result.state)}`);
