@@ -1,4 +1,5 @@
 import { BudgetManager } from "../budget/admission.ts";
+import { OutputReserve } from "../budget/outputReserve.ts";
 import { MemoryUsageStore, type UsageStore } from "../budget/usage.ts";
 import { prefixReuse } from "../context/serialize.ts";
 import type { ModelConfig, ResolvedConfig } from "../core/config/schema.ts";
@@ -52,6 +53,8 @@ export interface GatewayOptions {
   readonly retry?: Partial<RetryPolicy>;
   readonly sleep?: (ms: number) => Promise<void>;
   readonly clock?: () => Date;
+  /** The output a call reserves in its pool (src/budget/outputReserve.ts); default: from this process's calls. */
+  readonly reserve?: OutputReserve;
 }
 
 class Semaphore {
@@ -98,6 +101,7 @@ export class ModelGateway implements ModelCaller {
   private readonly retry: RetryPolicy;
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly clock: () => Date;
+  private readonly reserve: OutputReserve;
   private readonly semaphores = new Map<string, Semaphore>();
   /** The last prompt of each step (run, step, iteration, model): what the next call can reuse. */
   private readonly lastPrompts = new Map<string, readonly Message[]>();
@@ -115,6 +119,7 @@ export class ModelGateway implements ModelCaller {
     this.cassette = options.cassette;
     this.retry = { ...DEFAULT_RETRY, ...options.retry };
     this.sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+    this.reserve = options.reserve ?? new OutputReserve();
   }
 
   model(modelId: string): ModelConfig {
@@ -155,7 +160,14 @@ export class ModelGateway implements ModelCaller {
       request.messages,
       request.tools,
     );
-    const reserveOutput = request.maxOutput ?? model.maxOutput;
+    // the typical answer of this kind of call, not the whole maxOutput (pilot: a pool of 30k let
+    // nothing through after 14k with a 16k reserve per call); the request itself keeps maxOutput
+    const reserveKind = {
+      agentId: request.agentId,
+      role: request.role,
+      tools: (request.tools?.length ?? 0) > 0,
+    };
+    const reserveOutput = this.reserve.reserve(reserveKind, request.maxOutput ?? model.maxOutput);
 
     // Replay never touches the provider or the budget (ADR-0012 §4).
     const key = this.cassette ? cassetteKey(request) : undefined;
@@ -207,6 +219,7 @@ export class ModelGateway implements ModelCaller {
         agentId: request.agentId,
         estimatedPromptTokens: estimatedPrompt,
         maxOutput: request.maxOutput,
+        reserveOutput,
         tools: request.tools?.map((t) => t.name),
         messageCount: delta.total,
         // only what was not logged before for this step; `from` is where the delta starts
@@ -407,6 +420,10 @@ export class ModelGateway implements ModelCaller {
   }
 
   private account(request: ModelRequest, pool: string, result: ProviderResult): void {
+    this.reserve.observe(
+      { agentId: request.agentId, role: request.role, tools: (request.tools?.length ?? 0) > 0 },
+      result.usage.outputTokens,
+    );
     this.usage.record({
       pool,
       model: request.modelId,

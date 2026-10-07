@@ -3,6 +3,7 @@ import { TypeScriptAdapter } from "../adapters/typescript/adapter.ts";
 import { BlobStore } from "../artifacts/blobs.ts";
 import { ArtifactStore } from "../artifacts/store.ts";
 import { BudgetManager } from "../budget/admission.ts";
+import { OutputReserve } from "../budget/outputReserve.ts";
 import { SqliteUsageStore } from "../budget/usage.ts";
 import { CapabilityRegistry } from "../capabilities/registry.ts";
 import type { LoadedConfig } from "../core/config/load.ts";
@@ -124,7 +125,20 @@ export function createRuntime(loaded: LoadedConfig, options: RuntimeOptions = {}
     new EnvSecretResolver(env),
     new KeychainSecretResolver(keychain, (value) => redactor.addLiterals([value])),
   ]);
+  // what a call reserves in its pool: the typical answer of its kind, from the journal's recent calls
+  const reserve = new OutputReserve(
+    events
+      .list({ kind: "model.call", latest: true, limit: 3000 })
+      .filter((e) => typeof e.payload?.outputTokens === "number" && e.payload.source !== "replay")
+      .map((e) => ({
+        agentId: typeof e.payload?.agentId === "string" ? e.payload.agentId : undefined,
+        role: typeof e.payload?.role === "string" ? e.payload.role : undefined,
+        tools: Number(e.payload?.toolCount ?? 0) > 0,
+        outputTokens: e.payload?.outputTokens as number,
+      })),
+  );
   const gateway = new ModelGateway({
+    reserve,
     config: loaded.config,
     secrets,
     usage,

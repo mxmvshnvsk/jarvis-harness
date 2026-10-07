@@ -32,14 +32,16 @@ export interface Usage {
   readonly lastAt?: string;
 }
 
-const USAGE_EVENTS = 5000;
+const USAGE_EVENTS = 20_000;
+const USAGE_DAYS = 30;
 
 /**
- * Use of knowledge over the recent journal: `agent.start` carries the package's provenance
+ * Use of knowledge over the last 30 days of the journal: `agent.start` carries the package's provenance
  * (`knowledge:<name>#sha`, `skill:<id>@v`, `standard:<id>@v`), `tool.call knowledge.read` an
  * explicit ask. Keyed without the version: `knowledge:<name>`, `skill:<id>`, `standard:<id>`.
  */
-export function usageOf(runtime: Runtime): Map<string, Usage> {
+export function usageOf(runtime: Runtime, now = new Date()): Map<string, Usage> {
+  const since = new Date(now.getTime() - USAGE_DAYS * 86_400_000).toISOString();
   const acc = new Map<
     string,
     { calls: number; runs: Set<string>; asked: number; lastRun?: string; lastAt?: string }
@@ -50,7 +52,7 @@ export function usageOf(runtime: Runtime): Map<string, Usage> {
     acc.set(key, a);
     return a;
   };
-  for (const e of runtime.events.list({ kind: "agent.start", limit: USAGE_EVENTS })) {
+  for (const e of runtime.events.list({ kind: "agent.start", since, limit: USAGE_EVENTS, latest: true })) {
     const refs = Array.isArray(e.payload?.knowledge) ? (e.payload.knowledge as unknown[]) : [];
     for (const r of refs) {
       if (typeof r !== "string") continue;
@@ -65,7 +67,7 @@ export function usageOf(runtime: Runtime): Map<string, Usage> {
       }
     }
   }
-  for (const e of runtime.events.list({ kind: "tool.call", limit: USAGE_EVENTS })) {
+  for (const e of runtime.events.list({ kind: "tool.call", since, limit: USAGE_EVENTS, latest: true })) {
     if (e.payload?.capability !== "knowledge.read" || typeof e.payload.args !== "string") continue;
     const ref = /"ref"\s*:\s*"([^"]+)"/.exec(e.payload.args)?.[1];
     if (ref) at(keyOf(ref)).asked += 1;

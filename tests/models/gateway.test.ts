@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { OutputReserve } from "../../src/budget/outputReserve.ts";
 import { MemoryUsageStore } from "../../src/budget/usage.ts";
 import { EnvSecretResolver } from "../../src/core/config/secrets.ts";
 import { classifyNetworkError } from "../../src/models/errors.ts";
@@ -173,6 +174,28 @@ describe("ModelGateway", () => {
       .catch((e: unknown) => e as ModelError);
     expect(error).toBeInstanceOf(ModelError);
     expect((error as ModelError).retryAfterMs).toBeGreaterThan(0);
+  });
+
+  it("reserves the typical answer of the call in the pool, not the whole maxOutput (pilot)", async () => {
+    const config = testConfig(server.baseUrl) as unknown as {
+      models: Record<string, { maxOutput: number }>;
+      quotaPools: Record<string, { limits: { outputTokens: number } }>;
+    };
+    (config.models.private as { maxOutput: number }).maxOutput = 16000;
+    (config.quotaPools.corp as { limits: { outputTokens: number } }).limits.outputTokens = 30000;
+    usage.record({ pool: "corp", model: "private", promptTokens: 1, cachedTokens: 0, outputTokens: 14155 });
+    const tools = [{ name: "repo.read", description: "read", parameters: { type: "object" } }];
+    const reserve = new OutputReserve(
+      Array.from({ length: 20 }, () => ({ role: "research", tools: true, outputTokens: 300 })),
+    );
+    server.queue(completion("ok"));
+    const g = gateway({ config: config as never, reserve });
+    await expect(g.call({ ...ask, tools })).resolves.toMatchObject({ text: "ok" });
+    // the request still allows the whole maxOutput
+    expect(server.requests[0]?.body.max_tokens).toBe(16000);
+    // with the window nearly spent even the small reserve waits
+    usage.record({ pool: "corp", model: "private", promptTokens: 1, cachedTokens: 0, outputTokens: 14000 });
+    await expect(g.call({ ...ask, tools })).rejects.toMatchObject({ kind: "quota_exhausted" });
   });
 
   it("records and replays cassettes; replay touches neither network nor budget", async () => {

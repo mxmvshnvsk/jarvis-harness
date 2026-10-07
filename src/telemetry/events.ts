@@ -61,9 +61,19 @@ export class SqliteEventStore implements EventSink {
     return row.seq ?? 0;
   }
 
-  /** Events after `afterSeq`, oldest first (used by `status --watch` and the TUI). */
+  /**
+   * Events after `afterSeq`, oldest first (used by `status --watch` and the TUI). `latest`: the last
+   * `limit` of them rather than the first — still returned oldest first.
+   */
   list(
-    options: { runId?: string; afterSeq?: number; kind?: string; since?: string; limit?: number } = {},
+    options: {
+      runId?: string;
+      afterSeq?: number;
+      kind?: string;
+      since?: string;
+      limit?: number;
+      latest?: boolean;
+    } = {},
   ): StoredEvent[] {
     const clauses: string[] = ["seq > ?"];
     const params: Array<string | number> = [options.afterSeq ?? 0];
@@ -83,7 +93,7 @@ export class SqliteEventStore implements EventSink {
     const rows = this.db
       .prepare(
         `SELECT seq, ts, run_id, step_id, iteration, actor, kind, payload_json
-         FROM events WHERE ${clauses.join(" AND ")} ORDER BY seq ASC LIMIT ?`,
+         FROM events WHERE ${clauses.join(" AND ")} ORDER BY seq ${options.latest ? "DESC" : "ASC"} LIMIT ?`,
       )
       .all(...params) as Array<{
       seq: number;
@@ -95,6 +105,7 @@ export class SqliteEventStore implements EventSink {
       kind: string;
       payload_json: string | null;
     }>;
+    if (options.latest) rows.reverse();
     return rows.map((r) => ({
       seq: r.seq,
       ts: r.ts,
