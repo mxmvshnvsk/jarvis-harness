@@ -30,7 +30,23 @@ interface ModelRow {
     requests: number;
     requestLimit?: number;
     resetsIn: string;
+    /** The pool's unlimited hours: `unlimited until 07:00` or `unlimited from 22:00`. */
+    unlimited?: string;
   };
+}
+
+/** `unlimited until Mon 07:00` / `unlimited from 22:00`, in local time. */
+export function unlimitedText(
+  u: { now: true; until?: Date } | { now: false; next?: Date } | undefined,
+  now = new Date(),
+): string | undefined {
+  if (!u) return undefined;
+  const at = u.now ? u.until : u.next;
+  if (!at) return u.now ? "unlimited now" : undefined;
+  const sameDay = at.toDateString() === now.toDateString();
+  const time = at.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+  const when = sameDay ? time : `${at.toLocaleDateString("en-GB", { weekday: "short" })} ${time}`;
+  return u.now ? `unlimited until ${when}` : `unlimited from ${when}`;
 }
 
 function fmtDuration(ms: number): string {
@@ -89,6 +105,7 @@ export async function runModelsList(ctx: CliContext): Promise<void> {
                 resetsIn: fmtDuration(
                   usage.windowEnd.getTime() + definition.window.minutes * 60_000 - Date.now(),
                 ),
+                ...((u) => (u ? { unlimited: u } : {}))(unlimitedText(runtime.budget.unlimited(pool))),
               },
             }
           : {}),
@@ -114,7 +131,7 @@ export async function runModelsList(ctx: CliContext): Promise<void> {
           const limit = r.window.limit !== undefined ? `/${r.window.limit}` : "";
           const rl = r.window.requestLimit !== undefined ? `/${r.window.requestLimit}` : "";
           ctx.out.line(
-            `${" ".repeat(w)}  window: ${r.window.outputTokens}${limit} output tokens, ${r.window.requests}${rl} requests`,
+            `${" ".repeat(w)}  window: ${r.window.outputTokens}${limit} output tokens, ${r.window.requests}${rl} requests${r.window.unlimited ? ` · ${r.window.unlimited}` : ""}`,
           );
         }
         if (r.probe) {

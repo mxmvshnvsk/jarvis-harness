@@ -379,6 +379,7 @@ export function feedItem(e: StoredEvent): FeedItem | undefined {
     case "run.applied":
       return at(`applied${who ? ` by ${who}` : ""}`, "ok");
     case "model.retry":
+    case "model.failover":
     case "model.error": {
       const notice = noticeOf(e);
       // the notice carries a wall clock of its own: the feed has one

@@ -26,17 +26,19 @@ export interface WindowUsage {
 
 export interface UsageStore {
   record(usage: UsageRecord): void;
-  windowUsage(pool: string, definition: QuotaPool, now?: Date): WindowUsage;
+  /** `since`: nothing before it counts (the end of the pool's unlimited hours). */
+  windowUsage(pool: string, definition: QuotaPool, now?: Date, since?: Date): WindowUsage;
 }
 
 /** Window bounds: sliding = now − minutes; fixed = aligned to multiples of the window since epoch. */
-export function windowBounds(definition: QuotaPool, now: Date): { start: Date; end: Date } {
+export function windowBounds(definition: QuotaPool, now: Date, since?: Date): { start: Date; end: Date } {
   const ms = definition.window.minutes * 60_000;
+  const from = (start: number) => new Date(since && since.getTime() > start ? since.getTime() : start);
   if (definition.window.kind === "fixed") {
     const start = Math.floor(now.getTime() / ms) * ms;
-    return { start: new Date(start), end: new Date(start + ms) };
+    return { start: from(start), end: new Date(start + ms) };
   }
-  return { start: new Date(now.getTime() - ms), end: now };
+  return { start: from(now.getTime() - ms), end: now };
 }
 
 export class SqliteUsageStore implements UsageStore {
@@ -63,8 +65,8 @@ export class SqliteUsageStore implements UsageStore {
       );
   }
 
-  windowUsage(pool: string, definition: QuotaPool, now: Date = new Date()): WindowUsage {
-    const { start, end } = windowBounds(definition, now);
+  windowUsage(pool: string, definition: QuotaPool, now: Date = new Date(), since?: Date): WindowUsage {
+    const { start, end } = windowBounds(definition, now, since);
     const row = this.db
       .prepare(
         `SELECT COUNT(*) AS requests,
@@ -108,8 +110,8 @@ export class MemoryUsageStore implements UsageStore {
     this.records.push({ ...usage, ts: usage.ts ?? new Date() });
   }
 
-  windowUsage(pool: string, definition: QuotaPool, now: Date = new Date()): WindowUsage {
-    const { start, end } = windowBounds(definition, now);
+  windowUsage(pool: string, definition: QuotaPool, now: Date = new Date(), since?: Date): WindowUsage {
+    const { start, end } = windowBounds(definition, now, since);
     const rows = this.records.filter((r) => r.pool === pool && r.ts > start && r.ts <= end);
     const oldest = rows.reduce<Date | undefined>(
       (a, r) => (a === undefined || r.ts < a ? r.ts : a),

@@ -84,10 +84,39 @@ export const QuotaLimitsSchema = z.strictObject({
   concurrency: z.int().positive().optional(),
 });
 
+const HHMM = z.string().regex(/^([01]?\d|2[0-3]):[0-5]\d$/, "a time of day as HH:MM");
+
+/** Hours with no limits (the platform's nights, weekends): days, a time span, or both. */
+export const UnlimitedSpanSchema = z
+  .strictObject({
+    days: z
+      .array(z.enum(["mon", "tue", "wed", "thu", "fri", "sat", "sun"]))
+      .min(1)
+      .optional(),
+    from: HHMM.optional(),
+    to: HHMM.optional(),
+  })
+  .refine((s) => s.days !== undefined || s.from !== undefined || s.to !== undefined, {
+    message: "a span needs days, from/to, or both",
+  });
+
+const knownZone = (tz: string): boolean => {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 export const QuotaPoolSchema = z.strictObject({
   window: QuotaWindowSchema,
   limits: QuotaLimitsSchema.prefault({}),
   soft: z.number().min(0).max(1).default(0.8),
+  /** Hours when the platform does not limit the pool: admitted without a check, not counted after. */
+  unlimited: z.array(UnlimitedSpanSchema).default([]),
+  /** The zone of `unlimited` (IANA, e.g. Europe/Moscow); none — the machine's. */
+  timezone: z.string().refine(knownZone, "an IANA time zone, e.g. Europe/Moscow").optional(),
 });
 export type QuotaPool = z.infer<typeof QuotaPoolSchema>;
 

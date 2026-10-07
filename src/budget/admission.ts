@@ -1,5 +1,6 @@
 import type { QuotaPool } from "../core/config/schema.ts";
 import type { RateLimitInfo } from "../models/types.ts";
+import { lastUnlimitedEnd, nextUnlimited, type Schedule, unlimitedAt, unlimitedUntil } from "./schedule.ts";
 import type { UsageStore, WindowUsage } from "./usage.ts";
 
 /**
@@ -68,7 +69,29 @@ export class BudgetManager {
 
   windowUsage(pool: string): WindowUsage | undefined {
     const definition = this.pools[pool];
-    return definition ? this.usage.windowUsage(pool, definition, this.clock()) : undefined;
+    if (!definition) return undefined;
+    const now = this.clock();
+    return this.usage.windowUsage(pool, definition, now, this.since(definition, now));
+  }
+
+  /** The pool's unlimited hours now: until when; or when they begin next. */
+  unlimited(pool: string): { now: true; until?: Date } | { now: false; next?: Date } | undefined {
+    const definition = this.pools[pool];
+    if (!definition || definition.unlimited.length === 0) return undefined;
+    const now = this.clock();
+    const schedule = scheduleOf(definition);
+    if (unlimitedAt(schedule, now)) {
+      const until = unlimitedUntil(schedule, now);
+      return { now: true, ...(until ? { until } : {}) };
+    }
+    const next = nextUnlimited(schedule, now);
+    return { now: false, ...(next ? { next } : {}) };
+  }
+
+  /** What the pool spent in its unlimited hours does not count: the window starts after them. */
+  private since(definition: QuotaPool, now: Date): Date | undefined {
+    if (definition.unlimited.length === 0) return undefined;
+    return lastUnlimitedEnd(scheduleOf(definition), now, definition.window.minutes * 60_000);
   }
 
   admit(request: AdmissionRequest): AdmissionDecision {
@@ -95,9 +118,26 @@ export class BudgetManager {
         remaining: {},
       };
     }
-    const usage = this.usage.windowUsage(request.pool, definition, now);
+    const schedule = scheduleOf(definition);
+    if (unlimitedAt(schedule, now)) {
+      // the platform's unlimited hours: no check (concurrency still holds)
+      const usage = this.usage.windowUsage(request.pool, definition, now);
+      return {
+        allowed: true,
+        pool: request.pool,
+        pressure: 0,
+        soft: false,
+        concurrency: definition.limits.concurrency ?? 1,
+        usage,
+        remaining: {},
+      };
+    }
+    const usage = this.usage.windowUsage(request.pool, definition, now, this.since(definition, now));
     const limits = definition.limits;
-    const resetAt = this.resetAt(definition, usage, now);
+    // a pool that waits goes on when its window frees or its unlimited hours begin, whichever is first
+    const frees = this.resetAt(definition, usage, now);
+    const opens = nextUnlimited(schedule, now);
+    const resetAt = opens && opens < frees ? opens : frees;
     const remaining: { outputTokens?: number; inputTokens?: number; requests?: number } = {};
     const ratios: number[] = [];
 
@@ -174,6 +214,14 @@ export class BudgetManager {
   }
 
   private deny(pool: string, reason: string, usage: WindowUsage, resetAt: Date): AdmissionDenied {
-    return { allowed: false, pool, reason, usage, resetAt };
+    const definition = this.pools[pool];
+    const opens = definition ? nextUnlimited(scheduleOf(definition), this.clock()) : undefined;
+    const note = opens && opens.getTime() === resetAt.getTime() ? "; unlimited hours begin then" : "";
+    return { allowed: false, pool, reason: `${reason}${note}`, usage, resetAt };
   }
 }
+
+const scheduleOf = (definition: QuotaPool): Schedule => ({
+  spans: definition.unlimited,
+  ...(definition.timezone ? { timezone: definition.timezone } : {}),
+});

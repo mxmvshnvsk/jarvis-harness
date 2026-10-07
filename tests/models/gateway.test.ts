@@ -167,13 +167,44 @@ describe("ModelGateway", () => {
 
   it("denies admission when the pool window is exhausted", async () => {
     usage.record({ pool: "corp", model: "private", promptTokens: 1, cachedTokens: 0, outputTokens: 900 });
-    await expect(gateway().call(ask)).rejects.toMatchObject({ kind: "quota_exhausted" });
+    const only = { ...ask, role: "strict" }; // no other model for the role
+    await expect(gateway().call(only)).rejects.toMatchObject({ kind: "quota_exhausted" });
     expect(server.requests).toHaveLength(0);
     const error = await gateway()
-      .call(ask)
+      .call(only)
       .catch((e: unknown) => e as ModelError);
     expect(error).toBeInstanceOf(ModelError);
     expect((error as ModelError).retryAfterMs).toBeGreaterThan(0);
+  });
+
+  it("a full pool hands the call to the role's next model in another pool; back when it has room", async () => {
+    usage.record({ pool: "corp", model: "private", promptTokens: 1, cachedTokens: 0, outputTokens: 900 });
+    server.queue(completion("from the second cluster"));
+    server.queue(completion("again"));
+    // cloud comes first after private, but a confidential project never sends to it
+    const g = gateway({
+      config: testConfig(server.baseUrl, {
+        roles: { research: { models: ["private", "cloud", "schema"] } },
+      }),
+    });
+    await expect(g.call(ask)).resolves.toMatchObject({ text: "from the second cluster" });
+    expect(server.requests[0]?.body.model).toBe("fake-schema-model");
+    await g.call(ask);
+    // said once for the stretch, not on every call
+    const failovers = events.events.filter((e) => e.kind === "model.failover");
+    expect(failovers).toHaveLength(1);
+    expect(failovers[0]?.payload).toMatchObject({
+      from: "private",
+      to: "schema",
+      role: "research",
+      pool: "corp",
+    });
+    expect(usage.records.filter((r) => r.pool === "model:schema")).toHaveLength(2);
+    // the first pool has room again: the preferred model answers
+    usage.records.splice(0, usage.records.length);
+    server.queue(completion("home"));
+    await expect(g.call(ask)).resolves.toMatchObject({ text: "home" });
+    expect(server.requests.at(-1)?.body.model).toBe("fake-model");
   });
 
   it("reserves the typical answer of the call in the pool, not the whole maxOutput (pilot)", async () => {
@@ -190,12 +221,14 @@ describe("ModelGateway", () => {
     );
     server.queue(completion("ok"));
     const g = gateway({ config: config as never, reserve });
-    await expect(g.call({ ...ask, tools })).resolves.toMatchObject({ text: "ok" });
+    await expect(g.call({ ...ask, role: "strict", tools })).resolves.toMatchObject({ text: "ok" });
     // the request still allows the whole maxOutput
     expect(server.requests[0]?.body.max_tokens).toBe(16000);
     // with the window nearly spent even the small reserve waits
     usage.record({ pool: "corp", model: "private", promptTokens: 1, cachedTokens: 0, outputTokens: 14000 });
-    await expect(g.call({ ...ask, tools })).rejects.toMatchObject({ kind: "quota_exhausted" });
+    await expect(g.call({ ...ask, role: "strict", tools })).rejects.toMatchObject({
+      kind: "quota_exhausted",
+    });
   });
 
   it("records and replays cassettes; replay touches neither network nor budget", async () => {

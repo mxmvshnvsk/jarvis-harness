@@ -11,6 +11,7 @@ import { errorFields, type Logger, NULL_LOGGER } from "../telemetry/log.ts";
 import { type CassetteMode, type CassetteStore, cassetteKey, cassetteRequest } from "./cassette.ts";
 import { ModelError } from "./errors.ts";
 import { type AdapterRegistry, adapterFor, defaultAdapters } from "./providers/index.ts";
+import { type AgentRequirements, rejectModel } from "./router.ts";
 import { charsOfMessages, TokenEstimator } from "./tokens.ts";
 import type { Message, ModelRequest, ModelResponse, ProviderResult, StreamProgress } from "./types.ts";
 
@@ -105,6 +106,8 @@ export class ModelGateway implements ModelCaller {
   private readonly semaphores = new Map<string, Semaphore>();
   /** The last prompt of each step (run, step, iteration, model): what the next call can reuse. */
   private readonly lastPrompts = new Map<string, readonly Message[]>();
+  /** Steps whose calls go to another model of the role while the first one's pool is full. */
+  private readonly failedOver = new Map<string, string>();
 
   constructor(options: GatewayOptions) {
     this.config = options.config;
@@ -132,7 +135,7 @@ export class ModelGateway implements ModelCaller {
     return this.model(modelId).quotaPool ?? `model:${modelId}`;
   }
 
-  async call(input: ModelRequest): Promise<ModelResponse> {
+  async call(input: ModelRequest, failover = false): Promise<ModelResponse> {
     const model = this.model(input.modelId);
     const modelId = input.modelId;
     // The effective request carries the output reserve (role cap, model cap) so the adapter,
@@ -192,6 +195,22 @@ export class ModelGateway implements ModelCaller {
       estimatedPromptTokens: estimatedPrompt,
     });
     if (!decision.allowed) {
+      // another model of the role with room in its own pool takes the call (a second cluster)
+      const alternate = this.alternateFor(request, modelId, pool);
+      const step = `${request.runId ?? "-"}:${request.stepId ?? "-"}:${request.role ?? "-"}`;
+      if (alternate && this.failedOver.get(step) === alternate)
+        return this.call({ ...input, modelId: alternate }, true);
+      if (alternate) {
+        // once per stretch: every call of the step goes the same way until the first pool has room
+        this.failedOver.set(step, alternate);
+        this.events.emit({
+          kind: "model.failover",
+          ...(request.runId ? { runId: request.runId } : {}),
+          ...(request.stepId ? { stepId: request.stepId } : {}),
+          payload: { from: modelId, to: alternate, role: request.role, pool, reason: decision.reason },
+        });
+        return this.call({ ...input, modelId: alternate }, true);
+      }
       const error = new ModelError(
         "quota_exhausted",
         `model ${modelId}: budget admission denied for pool "${pool}": ${decision.reason}`,
@@ -204,6 +223,9 @@ export class ModelGateway implements ModelCaller {
       throw error;
     }
 
+    // the preferred model has room again: the next failover is news
+    if (!failover)
+      this.failedOver.delete(`${request.runId ?? "-"}:${request.stepId ?? "-"}:${request.role ?? "-"}`);
     if (this.log.enabled("debug")) {
       const delta = this.log.promptDelta(
         `${request.runId ?? "-"}:${request.stepId ?? "-"}:${request.iteration ?? 0}:${modelId}`,
@@ -507,6 +529,42 @@ export class ModelGateway implements ModelCaller {
         ...(reuse !== undefined ? { prefixReuse: reuse } : {}),
       },
     });
+  }
+
+  /**
+   * The next model of the call's role, after this one, that can take it now: allowed for the data
+   * class, with what the call needs (tools, structured output, room for the prompt), in a pool of its
+   * own that admits it. `roles.<role>.models` is the order: the first is preferred, the next ones
+   * take over while its pool is full (ADR-0007 §3).
+   */
+  private alternateFor(request: ModelRequest, modelId: string, pool: string): string | undefined {
+    const candidates = request.role ? (this.config.roles[request.role]?.models ?? []) : [];
+    const from = candidates.indexOf(modelId);
+    if (from < 0) return undefined;
+    const requires: AgentRequirements = {
+      ...((request.tools?.length ?? 0) > 0 ? { tools: true } : {}),
+      ...(request.responseFormat && request.responseFormat.kind !== "text"
+        ? { structuredOutput: request.responseFormat.kind }
+        : {}),
+    };
+    for (const id of candidates.slice(from + 1)) {
+      const model = this.config.models[id];
+      if (!model || this.poolOf(id) === pool) continue;
+      if (rejectModel(id, model, requires, this.config.dataClass)) continue;
+      const prompt = this.estimator.estimateMessages(id, model.tokenizer, request.messages, request.tools);
+      if (prompt + Math.min(request.maxOutput ?? model.maxOutput, model.maxOutput) > model.contextWindow)
+        continue;
+      const decision = this.budget.admit({
+        pool: this.poolOf(id),
+        estimatedOutputTokens: this.reserve.reserve(
+          { agentId: request.agentId, role: request.role, tools: requires.tools === true },
+          model.maxOutput,
+        ),
+        estimatedPromptTokens: prompt,
+      });
+      if (decision.allowed) return id;
+    }
+    return undefined;
   }
 
   private emitError(request: ModelRequest, error: ModelError, retries: number, attemptMs?: number): void {
