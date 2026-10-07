@@ -147,7 +147,17 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
     status: number,
     chrome: Omit<Chrome, "address">,
     content: ReturnType<typeof html>,
-  ) => send(r, status, layout({ ...chrome, address: address() }, content));
+  ) => {
+    const theme = cookieOf(r.req, "jarvis_theme");
+    send(
+      r,
+      status,
+      layout(
+        { ...chrome, address: address(), ...(theme === "light" || theme === "dark" ? { theme } : {}) },
+        content,
+      ),
+    );
+  };
   const notFound = (r: Request, message: string) =>
     page(
       r,

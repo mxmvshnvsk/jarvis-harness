@@ -55,14 +55,17 @@ export interface Chrome {
   readonly repos?: Html;
   /** Re-render the live regions this often (ms): clocks, the checkout's changes. */
   readonly tick?: number;
+  /** The person's pick from the header's switch; none — the system's (prefers-color-scheme). */
+  readonly theme?: "light" | "dark";
 }
 
 export function layout(chrome: Chrome, content: Html): string {
   return html`<!doctype html>
-<html lang="en">
+<html lang="en"${chrome.theme ? html` data-theme="${chrome.theme}"` : ""}>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="${chrome.theme ?? "light dark"}">
 <meta name="referrer" content="same-origin">
 <title>${chrome.title} · jarvis</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -78,6 +81,7 @@ ${chrome.back ? html`<a class="back" href="${chrome.back.href}">← ${chrome.bac
 ${chrome.repos ?? ""}
 ${chrome.page === "runs" ? html`<nav aria-label="Pages"><a href="/" aria-current="page">Runs</a></nav>` : ""}
 <span class="live" data-state="connecting" role="status"><span class="dot" aria-hidden="true"></span><span class="label">connecting…</span><span aria-hidden="true">·</span><span>${chrome.address}</span></span>
+<button type="button" class="theme" data-theme-switch aria-label="Theme (switch)"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.25" fill="none" stroke="currentColor" stroke-width="1.5"></circle><path d="M8 1.75a6.25 6.25 0 0 1 0 12.5z" fill="currentColor"></path></svg><span class="label">Auto</span></button>
 </div></header>
 <main id="main" class="wrap">
 ${content}
@@ -701,7 +705,7 @@ export function errorContent(status: number, message: string, hint?: Part): Html
 
 /** The plain page a request without the session token gets. */
 export function forbiddenPage(): string {
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>jarvis ui</title></head><body style="font-family:system-ui,sans-serif;background:#F7F6F3;color:#1D1C1A;padding:32px"><h1 style="font-size:22px">403 — this page needs its session token</h1><p>Open the address <code>jarvis ui</code> printed in the terminal: it carries the token.</p></body></html>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light dark"><title>jarvis ui</title></head><body style="font-family:system-ui,sans-serif;padding:32px"><h1 style="font-size:22px">403 — this page needs its session token</h1><p>Open the address <code>jarvis ui</code> printed in the terminal: it carries the token.</p></body></html>`;
 }
 
 export { escapeHtml };

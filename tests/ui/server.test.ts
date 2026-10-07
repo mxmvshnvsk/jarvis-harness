@@ -138,6 +138,24 @@ describe("jarvis ui: the session token", () => {
 });
 
 describe("jarvis ui: pages", () => {
+  it("a dark theme: the system's by default, the person's pick from a cookie, no hard-coded colours", async () => {
+    const auto = await get("/", authed());
+    expect(auto.body).toContain('<html lang="en">');
+    expect(auto.body).toContain('<meta name="color-scheme" content="light dark">');
+    expect(auto.body).toContain("data-theme-switch");
+    const dark = await get("/", { cookie: `${authed().cookie}; jarvis_theme=dark` });
+    expect(dark.body).toContain('<html lang="en" data-theme="dark">');
+    expect(dark.body).toContain('<meta name="color-scheme" content="dark">');
+    const odd = await get("/", { cookie: `${authed().cookie}; jarvis_theme="><script>` });
+    expect(odd.body).toContain('<html lang="en">');
+    const css = (await get("/assets/app.css", authed())).body;
+    expect(css).toContain("@media (prefers-color-scheme:dark){:root:not([data-theme=light]){");
+    expect(css).toContain(":root[data-theme=dark]{");
+    // every colour comes from a token, so both themes cover the whole page
+    const rules = css.slice(css.indexOf("*{box-sizing"));
+    expect(rules.match(/#[0-9A-Fa-f]{6}\b/g) ?? []).toEqual([]);
+  });
+
   it("runs: what waits for you first, with what it waits for and a link", async () => {
     const { run } = seedWaiting(
       "Billing: rounding in invoice totals",
