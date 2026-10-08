@@ -360,6 +360,20 @@ describe("New task on the page", () => {
     expect(resumableOf(rt, rt.runs.get(failed.id) ?? failed)).toBeUndefined();
   });
 
+  it("a run failed on the model can be tried again once the model answers", async () => {
+    await serve();
+    const run = createRun("Billing: rounding in invoice totals");
+    rt.runs.transition(run.id, "RUNNING");
+    rt.runs.transition(run.id, "FAILED", { reason: "model flash: authentication failed (403): no access" });
+    expect(resumableOf(rt, rt.runs.get(run.id) ?? run)).toBe("retry");
+    const short = run.id.replace(/^run_/, "").slice(0, 8);
+    const body = await page(`/runs/${short}`);
+    expect(body).toContain("✗ the model failed the run — its work is kept");
+    expect(body).toContain("model flash: authentication failed (403): no access");
+    expect(body).toContain(`action="/runs/${short}/resume"`);
+    expect(body).toContain(">Try again</button>");
+  });
+
   /** A research of ABC-42 that has ended: sdd can go on from it. */
   const finishedResearch = () => {
     const run = rt.runs.create({

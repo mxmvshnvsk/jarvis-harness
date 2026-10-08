@@ -7,7 +7,8 @@ import { formatLink, rootCause } from "../core/errorCause.ts";
  *   checkpoints and goes WAITING_BUDGET.
  * - rate_limited — short-term throttling: bounded retry honouring Retry-After.
  * - transient — network/timeout/5xx: bounded retry with backoff.
- * - auth — 401/403: no retry, configuration problem.
+ * - auth — 401/403: no retry, configuration problem; a 403/404 saying the model is unavailable is
+ *   transient (the run waits for the model).
  * - invalid — other 4xx or malformed response: no retry.
  * - replay_miss — cassette has no recording for this request (ADR-0012 §4).
  * - policy — denied before the call (egress, admission, unsupported capability).
@@ -60,6 +61,23 @@ export function parseRetryAfter(header: string | null | undefined): number | und
   return undefined;
 }
 
+const UNAVAILABLE_PATTERNS = [
+  /недоступн/i,
+  /\bunavailable\b/i,
+  /\bnot (currently )?available\b/i,
+  /\b(choose|select|pick|use) (another|a different) model\b/i,
+  /выберите другую модель/i,
+  /\bmodel\b[^.]{0,60}\b(disabled|offline|is down)\b/i,
+];
+
+/** The body says the model is unavailable (as is, or with `\uXXXX` escapes of a JSON string). */
+export function saysUnavailable(body: string): boolean {
+  const text = body.replace(/\\u([0-9a-fA-F]{4})/g, (_, h: string) =>
+    String.fromCharCode(Number.parseInt(h, 16)),
+  );
+  return UNAVAILABLE_PATTERNS.some((p) => p.test(text));
+}
+
 /** Maps an HTTP failure to a ModelError. `body` is the raw response text when available. */
 export function classifyHttpError(
   status: number,
@@ -70,6 +88,16 @@ export function classifyHttpError(
   const retryAfterMs = parseRetryAfter(headers.get("retry-after"));
   const snippet = body.slice(0, 500);
   const base = { status, modelId, ...(retryAfterMs !== undefined ? { retryAfterMs } : {}) };
+  // a gateway that took the model offline answers 403/404 with words to that effect: the model is down,
+  // not the key — wait for it as for a timeout (pilot: 403 «Модель … недоступна. Пожалуйста, выберите
+  // другую модель.» failed the run, and there was nothing to press when the model came back)
+  if ((status === 403 || status === 404) && saysUnavailable(body)) {
+    return new ModelError(
+      "transient",
+      `model ${modelId}: the gateway says it is unavailable (${status}): ${snippet}`,
+      base,
+    );
+  }
   if (status === 401 || status === 403) {
     return new ModelError("auth", `model ${modelId}: authentication failed (${status}): ${snippet}`, base);
   }

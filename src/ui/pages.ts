@@ -972,6 +972,17 @@ function nowHtml(page: RunPage, now: number, actions?: Actions): Html {
         : page.run.state === "RUNNING"
           ? "no process drives this run (interrupted or crashed)"
           : undefined;
+    // failed on the model, not on its own work: when the model answers again, try the step again
+    if (page.resumable === "retry") {
+      const cmd = `jarvis resume ${shortRunId(page.run.id)}`;
+      return html`<section class="panel now" aria-label="Now" data-live="card"><div class="row"><span class="bad">✗ the model failed the run — its work is kept</span></div>
+<p class="muted" style="margin:0;font-size:14px;overflow-wrap:anywhere">${cut(page.run.stateReason ?? "", 300)}</p>
+<div class="actions">${
+        actions
+          ? html`${resumeForm(actions, page.run, "Try again")}<span class="hint">once the model answers again: the step goes on from its last checkpoint; or <code>${cmd}</code></span>`
+          : html`<span class="hint">Once the model answers again: <code>${cmd}</code></span><button type="button" class="btn" data-copy="${cmd}">Copy command</button>`
+      }</div></section>`;
+    }
     // an empty region, not none: the live refresh replaces it, so a finished run's spinner goes away
     if (!stopped) return html`<div data-live="card" hidden></div>`;
     const cmd = `jarvis resume ${shortRunId(page.run.id)}`;

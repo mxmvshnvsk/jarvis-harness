@@ -15,9 +15,18 @@ import type { Runtime } from "./runtime.ts";
  * - `suspended` — stopped with Ctrl-C;
  * - `quota` — parked on a quota window or a model: it tries at once and parks again if still full.
  *
- * A FAILED run is not offered: what failed is for a person to read first (`jarvis continue`).
+ * - `retry` — FAILED on the model (refused, unavailable, timed out to the end): once it answers again —
+ *   a person often learns it elsewhere — the step goes on from its checkpoint (pilot: a 403 «the model is
+ *   unavailable» failed a run at review, and there was nothing to press when the model came back).
+ *
+ * Another FAILED run is not offered: what failed is for a person to read first (`jarvis continue`).
  */
-export type Resumable = "decided" | "interrupted" | "suspended" | "quota";
+export type Resumable = "decided" | "interrupted" | "suspended" | "quota" | "retry";
+
+/** The run failed on a model call, not on its own work. */
+export function failedOnModel(run: Pick<Run, "state" | "stateReason">): boolean {
+  return run.state === "FAILED" && /^model \S+: /.test(run.stateReason ?? "");
+}
 
 export function resumableOf(runtime: Runtime, run: Run, now = Date.now()): Resumable | undefined {
   if (isTerminal(run.state) || waitingCard(runtime, run.id)) return undefined;
@@ -30,6 +39,8 @@ export function resumableOf(runtime: Runtime, run: Run, now = Date.now()): Resum
       return run.lease && Date.parse(run.lease.until) >= now ? undefined : "interrupted";
     case "WAITING_HUMAN":
       return decidedOn(runtime, run) ? "decided" : undefined;
+    case "FAILED":
+      return failedOnModel(run) ? "retry" : undefined;
     default:
       return undefined;
   }
