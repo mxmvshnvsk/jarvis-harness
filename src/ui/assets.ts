@@ -397,12 +397,12 @@ form.clarify>.actions{margin:4px 0}
 .trysteps>li::marker{color:var(--muted);font-weight:500}
 .cmd{display:flex;gap:8px;align-items:center}
 .cmd code{flex:1 1 auto;min-width:0;padding:8px 10px;border-radius:8px;background:var(--chip);font-size:13px;overflow-x:auto;white-space:nowrap}
-.checks{margin:0;padding-left:0;list-style:none;display:flex;flex-direction:column;gap:10px}
-.checks .rq{font-size:14px}
-.checks ul{margin:4px 0 0;padding-left:0;list-style:none;display:flex;flex-direction:column;gap:4px}
-.checks label{display:flex;gap:8px;align-items:flex-start;font-size:13px;line-height:19px;color:var(--ink-2);cursor:pointer}
-.checks input{margin-top:3px}
-.checks label:has(input:checked){color:var(--muted);text-decoration:line-through}
+.tryit .checks{margin:0;padding-left:0;list-style:none;display:flex;flex-direction:column;gap:10px}
+.tryit .checks .rq{font-size:14px}
+.tryit .checks ul{margin:4px 0 0;padding-left:0;list-style:none;display:flex;flex-direction:column;gap:4px}
+.tryit .checks label{display:flex;gap:8px;align-items:flex-start;font-size:13px;line-height:19px;color:var(--ink-2);cursor:pointer}
+.tryit .checks input{margin-top:3px}
+.tryit .checks label:has(input:checked){color:var(--muted);text-decoration:line-through}
 .tryact{gap:8px;flex-wrap:wrap}
 .inrepo{display:flex;flex-direction:column;gap:6px}
 .inrepo[open]{display:flex}

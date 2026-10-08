@@ -525,5 +525,7 @@ describe("the page's styles", () => {
   it("scope the open-questions form: a bare .q rule broke Ask's header (pilot)", async () => {
     const { STYLE } = await import("../../src/ui/assets.ts");
     expect(STYLE).not.toMatch(/(^|\n)\.q[ {.:]/);
+    // the same for Try it's checklist: Ask's answer has a .checks row of its own
+    expect(STYLE).not.toMatch(/(^|\n)\.checks[ {.:]/);
   });
 });
