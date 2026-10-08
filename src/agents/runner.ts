@@ -1,3 +1,4 @@
+import { pausedText } from "../app/pause.ts";
 import { BudgetExceededError, grantsFromEvents } from "../budget/runBudget.ts";
 import {
   ContextManager,
@@ -372,6 +373,12 @@ export class AgentRuntimeRunner implements AgentRunner {
       // Ctrl-C between calls: keep the conversation, park the run (src/orchestration/interrupt.ts)
       if (interruption.requested) checkpoint();
       interruption.throwIfRequested();
+      // Pause from the page: the same, asked from another process (src/app/pause.ts)
+      const pause = ctx.pauseRequested?.();
+      if (pause) {
+        checkpoint();
+        throw new SuspendRun("SUSPENDED", pausedText(pause.by));
+      }
       if (modelCalls >= limits.maxModelCalls) {
         if (ask) parkOnLimit("modelCalls", modelCalls, limits.maxModelCalls);
         budgetExhausted = "model";

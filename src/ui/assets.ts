@@ -454,6 +454,8 @@ form.clarify>.actions{margin:4px 0}
 .runtitle{display:flex;align-items:flex-start;justify-content:space-between;gap:16px 24px}
 .runtext{flex:1;min-width:0;display:flex;flex-direction:column;gap:8px}
 .runtext p{margin:0}
+.headact{gap:8px;flex-shrink:0;align-items:flex-start}
+.headact form{margin:0}
 .cancel{position:relative;flex-shrink:0}
 .cancel>summary{list-style:none;width:max-content}
 .cancel>summary::-webkit-details-marker{display:none}

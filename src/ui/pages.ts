@@ -181,6 +181,9 @@ export function artifactHref(
 /** The state of a run as a pill: `⏸ WAITING_HUMAN · loop`, `◌ RUNNING · verify#4`, `✓ COMPLETED`. */
 /** «Cancel» pressed and the run not stopped yet: it finishes its current model or tool call first. */
 const cancelling = (run: Run): boolean => run.cancelRequested && !isTerminal(run.state);
+/** A process drives it now: it can stop at a safe point and keep its place. */
+const pausable = (page: Pick<RunPage, "run" | "leaseLive">): boolean =>
+  page.run.state === "RUNNING" && page.leaseLive === true && !cancelling(page.run);
 
 function statePill(run: Run, extra?: string): Html {
   if (cancelling(run))
@@ -958,7 +961,9 @@ function nowHtml(page: RunPage, now: number, actions?: Actions): Html {
   if (!a?.step || !page.leaseLive) {
     const stopped =
       page.run.state === "SUSPENDED"
-        ? "stopped with Ctrl-C — it goes on from where it stopped"
+        ? page.run.stateReason?.startsWith("paused")
+          ? `${page.run.stateReason.split(";")[0]} — Resume goes on from where it stopped`
+          : "stopped with Ctrl-C — it goes on from where it stopped"
         : page.run.state === "RUNNING"
           ? "no process drives this run (interrupted or crashed)"
           : undefined;
@@ -1119,10 +1124,11 @@ ${rest ? html`<p class="muted" style="white-space:pre-wrap">${cut(rest, 600)}</p
 ${r.stateReason && r.state !== "RUNNING" && r.state !== "WAITING_BUDGET" ? html`<p class="muted">${r.stateReason}</p>` : ""}
 ${page.continuedFrom ? continuedFromHtml(page.continuedFrom) : ""}
 </div>
-${actions && !isTerminal(r.state) ? (cancelling(r) ? html`<span class="btn small danger" aria-disabled="true">Cancelling…</span>` : cancelHtml(r, actions)) : ""}
+<div class="row headact">${actions && pausable(page) ? (page.pausing ? html`<span class="btn small" aria-disabled="true">Pausing…</span>` : form(actions, `/runs/${encodeURIComponent(shortRunId(r.id))}/pause`, html`<button type="submit" class="btn small" title="Stops after the current model or tool call, keeps its place; Resume goes on">Pause</button>`)) : ""}${actions && !isTerminal(r.state) ? (cancelling(r) ? html`<span class="btn small danger" aria-disabled="true">Cancelling…</span>` : cancelHtml(r, actions)) : ""}</div>
 </div>
 </div>
 ${notice ?? ""}
+${page.pausing && !cancelling(r) ? html`<div class="banner info" data-live="pausing" role="status"><span class="spin" aria-hidden="true"></span> Pausing${page.pausing.by ? ` (asked by ${page.pausing.by})` : ""} — the run stops after its current model or tool call and keeps its place; then <b>Resume</b> goes on from there</div>` : html`<div data-live="pausing" hidden></div>`}
 ${cancelling(r) ? html`<div class="banner bad" data-live="cancelling" role="status"><span class="spin" aria-hidden="true"></span> Cancelling — the run stops after its current model or tool call (a model call can take a minute or two); then it is CANCELLED, its checkout and artifacts stay</div>` : html`<div data-live="cancelling" hidden></div>`}
 <div class="cols">
 <section class="panel side steps" aria-labelledby="steps" data-live="steps">

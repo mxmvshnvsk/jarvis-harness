@@ -39,6 +39,7 @@ import {
 } from "../app/knowledgeView.ts";
 import { type McpProbe, mcpHealthOf } from "../app/mcpHealth.ts";
 import { modelsHealthOf } from "../app/modelHealth.ts";
+import { pauseRequested, requestPause } from "../app/pause.ts";
 import { resumableOf } from "../app/resumable.ts";
 import type { Runtime } from "../app/runtime.ts";
 import { tryOutOf } from "../app/tryOut.ts";
@@ -435,6 +436,8 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
       amount: html`<div class="banner bad">Say how many more — a whole number above zero</div>`,
       resumed: html`<div class="banner ok">Resumed — it goes on in the background from where it stopped</div>`,
       cancelled: html`<div class="banner ok">Cancelled — nothing runs it any more; its checkout and artifacts stay</div>`,
+      "pause-requested": html`<div class="banner ok">Pause requested — the run stops after its current model or tool call and keeps its place</div>`,
+      "not-running": html`<div class="banner info">Nothing runs it now — there is nothing to pause</div>`,
       "cancel-requested": html`<div class="banner ok">Cancel requested — the process running it stops at its next safe point (after the current model or tool call)</div>`,
       "already-ended": html`<div class="banner bad">The run has ended already: nothing to cancel</div>`,
       resuming: html`<div class="banner ok">It is being resumed already</div>`,
@@ -1150,9 +1153,10 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
         "Cache-Control": "no-store",
       });
     }
-    const m = /^\/runs\/([^/]+)\/(decide|rerun|open|budget|resume|cancel|continue|clarify|eval|note)$/.exec(
-      r.url.pathname,
-    );
+    const m =
+      /^\/runs\/([^/]+)\/(decide|rerun|open|budget|resume|cancel|continue|clarify|eval|note|pause)$/.exec(
+        r.url.pathname,
+      );
     const run = m ? resolveRun(m[1] as string) : undefined;
     if (!m || !run || !actions) return notFound(r, `Nothing to do at ${r.url.pathname}.`);
     const form = await formOf(r.req);
@@ -1279,6 +1283,17 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
         r,
         editor ? `${where}?notice=opened&editor=${encodeURIComponent(editor)}` : `${where}?notice=no-editor`,
       );
+    }
+    if (m[2] === "pause") {
+      // as Ctrl-C, from another process: at the next safe point, the place kept (src/app/pause.ts)
+      if (run.state !== "RUNNING" || run.cancelRequested)
+        return redirect(r, `/runs/${short}?notice=not-running`);
+      if (!pauseRequested(runtime, run.id)) {
+        const who = await actor();
+        if (!who) return redirect(r, `/runs/${short}?notice=actor`);
+        requestPause(runtime, run, `${who.kind}:${who.id}`, "ui");
+      }
+      return redirect(r, `/runs/${short}?notice=pause-requested`);
     }
     if (m[2] === "cancel") {
       // as `jarvis cancel`: at once when nothing executes it, else at its next safe point (ADR-0002 §6)

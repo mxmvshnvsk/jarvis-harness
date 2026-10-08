@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { requestRerun } from "../../src/app/decide.ts";
 import { Journey } from "../../src/app/journey.ts";
+import { pauseRequested, requestPause } from "../../src/app/pause.ts";
 import type { Runtime } from "../../src/app/runtime.ts";
 import { formatStepReport } from "../../src/cli/progress.ts";
 import { createStyle } from "../../src/cli/style.ts";
@@ -212,6 +213,38 @@ describe("LocalWorkflowEngine", () => {
     const resumed = await engine.execute(run.id, owner);
     expect(resumed.run.state).toBe("COMPLETED");
     expect(seen).toEqual(["work 1", "verify 1", "work 2", "verify 2", "work 3", "verify 3"]);
+  });
+
+  it("Pause from another process parks the run at the next step and Resume goes on there", async () => {
+    const wf = workflowOf({
+      name: "paused",
+      entry: "one",
+      steps: [
+        { id: "one", kind: "agentic", agent: "one", transitions: { onSuccess: "two" } },
+        { id: "two", kind: "agentic", agent: "two", transitions: { onSuccess: "DONE" } },
+      ],
+    });
+    const seen: string[] = [];
+    const engine = engineFor(rt, [wf], {
+      one: async (ctx) => {
+        seen.push("one");
+        requestPause(rt, ctx.run, "user:dev@example.com", "ui");
+        expect(ctx.pauseRequested?.()).toEqual({ by: "dev@example.com", seq: expect.any(Number) });
+        return { status: "success" };
+      },
+      two: async () => {
+        seen.push("two");
+        return { status: "success" };
+      },
+    });
+    const run = createRun(rt, "paused");
+    const parked = await engine.execute(run.id, owner);
+    expect(parked.run).toMatchObject({ state: "SUSPENDED", currentStep: "two" });
+    expect(parked.run.stateReason).toContain("paused by dev@example.com");
+    expect(pauseRequested(rt, run.id)).toBeUndefined();
+    const resumed = await engine.execute(run.id, owner);
+    expect(resumed.run.state).toBe("COMPLETED");
+    expect(seen).toEqual(["one", "two"]);
   });
 
   it("parks on the approval gate, resumes after approval, and re-parks after a human edit", async () => {

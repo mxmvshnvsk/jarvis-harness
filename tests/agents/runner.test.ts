@@ -6,6 +6,7 @@ import { BUILTIN_AGENTS } from "../../src/agents/builtin/index.ts";
 import { AgentRegistry } from "../../src/agents/definition.ts";
 import { AgentRuntimeRunner, inParallel } from "../../src/agents/runner.ts";
 import { type BudgetStop, budgetGranted, budgetStopOf, grantBudget } from "../../src/app/budgetStop.ts";
+import { requestPause } from "../../src/app/pause.ts";
 import type { Runtime } from "../../src/app/runtime.ts";
 import { recordGiven } from "../../src/interaction/answers.ts";
 import { addNote, notesOf } from "../../src/interaction/notes.ts";
@@ -1043,6 +1044,44 @@ context: { maxContext: 8000 }
     );
     expect(notesOf(rt, run.id)[0]?.delivered).toBe(true);
     expect(rt.events.list({ runId: run.id, kind: "human.note.delivered" })).toHaveLength(1);
+  });
+
+  it("Pause from the page stops the agent before its next model call and keeps its conversation", async () => {
+    sb.write("project/.jarvis/project.yaml", "version: 1\nworkspace: { mode: cwd }\n");
+    rt = await testRuntime(sb, { PATH: process.env.PATH ?? "" });
+    const wf = workflowOf({
+      name: "paused",
+      entry: "research",
+      steps: [
+        {
+          id: "research",
+          kind: "agentic",
+          agent: "research",
+          outputs: ["research"],
+          transitions: { onSuccess: "DONE" },
+        },
+      ],
+    });
+    const engine = engineWith(rt, wf);
+    const run = createRun(rt, "paused");
+    let round = 0;
+    server.respond(() => {
+      round += 1;
+      if (round === 1) {
+        const live = rt as Runtime;
+        requestPause(live, live.runs.get(run.id) as never, "user:dev@example.com", "ui");
+        return toolCallCompletion("repo.search", { pattern: "deliverySlots" });
+      }
+      return completion(JSON.stringify(RESEARCH_DOC));
+    });
+    const parked = await engine.execute(run.id, { owner: "cli:t" });
+    expect(parked.run.state).toBe("SUSPENDED");
+    expect(parked.run.stateReason).toContain("paused by dev@example.com");
+    expect(server.requests).toHaveLength(1);
+    const resumed = await engine.execute(run.id, { owner: "cli:t" });
+    expect(resumed.run.state).toBe("COMPLETED");
+    // the conversation went on: the search and its result are in the next call
+    expect(JSON.stringify(server.requests[1]?.body.messages)).toContain("deliverySlots");
   });
 
   it("an answer cut at the output limit before a call does not end the work: smaller calls are asked for", async () => {

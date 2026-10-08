@@ -7,6 +7,7 @@ import { type Continuation, continuationOf, continuedFromOf, contradictionsOf } 
 import { awaitedArtifact, type Decision, decisionOn, rerunRequested, waitingCard } from "../app/decide.ts";
 import { continuedBy } from "../app/handoff.ts";
 import { Journey, type LoopReport, type StepReport } from "../app/journey.ts";
+import { pauseRequested } from "../app/pause.ts";
 import { type PlanProgress, planProgressOf } from "../app/planProgress.ts";
 import { type Resumable, resumableOf } from "../app/resumable.ts";
 import type { Runtime } from "../app/runtime.ts";
@@ -545,6 +546,8 @@ export interface RunPage {
   readonly notes?: readonly RunNote[];
   /** The step runs again on a back edge: what it fixes (the reasons of the steps that sent it back). */
   readonly fixing?: FixView;
+  /** Pause asked, the process has not stopped yet (src/app/pause.ts). */
+  readonly pausing?: { readonly by?: string };
   /** A finished run whose implementation was accepted: «Make an eval case» (src/evals/runToCase.ts). */
   readonly evalReady?: boolean;
   /** The eval case it became. */
@@ -666,6 +669,8 @@ export function feedItem(e: StoredEvent): FeedItem | undefined {
     }
     case "run.interrupted":
       return at("⏸ interrupted (Ctrl-C)", "warn");
+    case "run.pause":
+      return at(`⏸ pause asked${who ? ` by ${who}` : ""}${from(p.channel)}`, "warn");
     case "run.applied":
       return at(`applied${who ? ` by ${who}` : ""}`, "ok");
     case "context.compacting": {
@@ -851,6 +856,9 @@ export async function runPage(
     ...continuationLinks(runtime, engine, run),
     ...evalOf(runtime, run),
     ...((n) => (n.length > 0 ? { notes: n } : {}))(notesOf(runtime, run.id)),
+    ...((p) => (p ? { pausing: p.by ? { by: p.by } : {} } : {}))(
+      run.state === "RUNNING" ? pauseRequested(runtime, run.id) : undefined,
+    ),
     ...((f) => (f ? { fixing: f } : {}))(
       run.state === "RUNNING"
         ? fixOf(

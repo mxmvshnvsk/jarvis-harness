@@ -34,6 +34,8 @@ export interface StepContext {
   saveCheckpoint(state: Record<string, unknown>): void;
   /** Re-reads the run; true once `jarvis cancel` was called (ADR-0002 §6). */
   cancelRequested(): boolean;
+  /** A person asked to pause (src/app/pause.ts): who; the agent parks at its next safe point. */
+  pauseRequested?(): { by?: string } | undefined;
 }
 
 export interface StepExecutor {

@@ -756,6 +756,51 @@ describe("New task on the page", () => {
     expect(rt.events.list({ runId: run.id, kind: "human.note" })[0]?.stepId).toBe("implementation");
   });
 
+  it("Pause on a running run: recorded once, the page says it is pausing, then Resume", async () => {
+    const token = await serve();
+    const run = createRun("ABC-42: Delivery slots on the order form");
+    rt.runs.update(run.id, { currentStep: "implementation", currentIteration: 1 });
+    rt.runs.transition(run.id, "RUNNING");
+    const held = rt.runs.acquireLease(run.id, "cli:elsewhere", 90_000);
+    rt.events.emit({
+      kind: "step.start",
+      runId: run.id,
+      stepId: "implementation",
+      payload: { stepId: "implementation", iteration: 1 },
+    });
+    rt.events.emit({
+      kind: "agent.start",
+      runId: run.id,
+      stepId: "implementation",
+      payload: { agent: "implementation" },
+    });
+    const short = run.id.replace(/^run_/, "").slice(0, 8);
+    expect(await page(`/runs/${short}`)).toContain(`action="/runs/${short}/pause"`);
+    expect((await post(`/runs/${short}/pause`, { t: token })).location).toBe(
+      `/runs/${short}?notice=pause-requested`,
+    );
+    await post(`/runs/${short}/pause`, { t: token });
+    const asked = rt.events.list({ runId: run.id, kind: "run.pause" });
+    expect(asked).toHaveLength(1);
+    expect(asked[0]).toMatchObject({ actor: "user:dev@example.com", payload: { channel: "ui" } });
+    const body = await page(`/runs/${short}`);
+    expect(body).toContain("Pausing…");
+    expect(body).toContain(
+      "Pausing (asked by dev@example.com) — the run stops after its current model or tool call",
+    );
+    expect(body).toContain("⏸ pause asked by dev@example.com from the page");
+    // the process parks it
+    rt.runs.transition(run.id, "SUSPENDED", {
+      reason: "paused by dev@example.com; Resume (or `jarvis continue`) goes on from here",
+    });
+    rt.events.emit({ kind: "run.state", runId: run.id, payload: { state: "SUSPENDED" } });
+    if (held.ok) rt.runs.releaseLease(run.id, "cli:elsewhere", held.lease.epoch);
+    const after = await page(`/runs/${short}`);
+    expect(after).not.toContain("Pausing…");
+    expect(after).toContain("⏸ paused by dev@example.com — Resume goes on from where it stopped");
+    expect((await post(`/runs/${short}/pause`, { t: token })).location).toContain("notice=not-running");
+  });
+
   it("a round sent back at the review gate shows who sent it and the comment, open", async () => {
     await serve();
     const run = createRun("ABC-42: Delivery slots on the order form");

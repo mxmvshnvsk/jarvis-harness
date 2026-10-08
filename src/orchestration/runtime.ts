@@ -1,5 +1,6 @@
 import { reasonOf } from "../app/activity.ts";
 import { rerunBackTo } from "../app/decide.ts";
+import { pausedText, pauseRequested } from "../app/pause.ts";
 import type { Runtime } from "../app/runtime.ts";
 import { BudgetExceededError, BudgetedGateway } from "../budget/runBudget.ts";
 import { EXIT } from "../cli/output.ts";
@@ -169,6 +170,17 @@ export class LocalWorkflowEngine {
           run = await this.park(run, step, iteration, interrupted(), workspace);
           break;
         }
+        const pause = pauseRequested(this.rt, run.id);
+        if (pause) {
+          run = await this.park(
+            run,
+            step,
+            iteration,
+            new SuspendRun("SUSPENDED", pausedText(pause.by)),
+            workspace,
+          );
+          break;
+        }
         let outcome: StepOutcome;
         try {
           outcome = await this.executeStep(run, workflow, step, iteration, lease, workspace);
@@ -280,6 +292,7 @@ export class LocalWorkflowEngine {
         this.rt.checkpoints.save({ runId: run.id, stepId: step.id, iteration, kind: "intra", state });
       },
       cancelRequested: () => this.rt.runs.require(run.id).cancelRequested,
+      pauseRequested: () => pauseRequested(this.rt, run.id),
     };
     try {
       const outcome = await this.executors[step.kind].execute(ctx);
