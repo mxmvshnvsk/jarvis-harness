@@ -9,6 +9,7 @@ import { resumableOf } from "../../src/app/resumable.ts";
 import { createRuntime, type Runtime } from "../../src/app/runtime.ts";
 import { loadConfig } from "../../src/core/config/load.ts";
 import { recordGiven } from "../../src/interaction/answers.ts";
+import { addNote } from "../../src/interaction/notes.ts";
 import { createLauncher, type Launcher } from "../../src/ui/launcher.ts";
 import { startUiServer, type UiServer } from "../../src/ui/server.ts";
 import { type Sandbox, sandbox } from "../helpers/tmp.ts";
@@ -799,6 +800,41 @@ describe("New task on the page", () => {
     expect(after).not.toContain("Pausing…");
     expect(after).toContain("⏸ paused by dev@example.com — Resume goes on from where it stopped");
     expect((await post(`/runs/${short}/pause`, { t: token })).location).toContain("notice=not-running");
+  });
+
+  it("notes fold once the agents have them, open while one is on its way; Add a note stays outside", async () => {
+    await serve();
+    const run = createRun("ABC-42: Delivery slots on the order form");
+    rt.runs.update(run.id, { currentStep: "review", currentIteration: 1 });
+    rt.runs.transition(run.id, "RUNNING");
+    rt.runs.acquireLease(run.id, "cli:elsewhere", 90_000);
+    rt.events.emit({
+      kind: "step.start",
+      runId: run.id,
+      stepId: "review",
+      payload: { stepId: "review", iteration: 1 },
+    });
+    rt.events.emit({ kind: "agent.start", runId: run.id, stepId: "review", payload: { agent: "review" } });
+    const live = rt.runs.require(run.id);
+    addNote(rt, live, "The slots method serves the courier app too", "dev@example.com");
+    addNote(rt, live, "The slots method serves the courier app too", "dev@example.com");
+    for (const e of rt.events.list({ runId: run.id, kind: "human.note" }))
+      rt.events.emit({
+        kind: "human.note.delivered",
+        runId: run.id,
+        stepId: "review",
+        payload: { seq: e.seq },
+      });
+    const short = run.id.replace(/^run_/, "").slice(0, 8);
+    const folded = await page(`/runs/${short}`);
+    expect(folded).toContain('<details class="planw notesw" data-keep="notes-delivered">');
+    expect(folded).toContain('<span class="of">Notes 1</span>');
+    expect(folded).toContain("sent 2 times");
+    expect(folded).toMatch(/<\/details>\s*<details class="addnote"/);
+    addNote(rt, live, "Keep the slots for 3 days", "dev@example.com");
+    const open = await page(`/runs/${short}`);
+    expect(open).toContain('<details class="planw notesw" data-keep="notes-pending" open>');
+    expect(open).toContain("◌ 1 on its way");
   });
 
   it("a later step on its next round fixes nothing; a fix shows only the round that sent it back", async () => {

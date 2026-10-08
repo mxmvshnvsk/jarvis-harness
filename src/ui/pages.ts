@@ -1026,20 +1026,36 @@ ${
  */
 function notesBox(page: RunPage, step: string, actions?: Actions): Html {
   const notes = page.notes ?? [];
-  const list =
-    notes.length > 0
-      ? html`<ul class="notes">${notes.map(
-          (n) =>
-            html`<li><span class="${n.delivered ? "ok" : "warn"}">${n.delivered ? "✓ the agent got it" : "◌ goes with its next model call"}</span> <span class="meta">${n.by}${n.stepId ? ` · ${n.stepId}` : ""}</span><div class="said">${n.text}</div></li>`,
-        )}</ul>`
-      : "";
-  if (!actions) return html`${list}`;
-  return html`${list}<details class="addnote" data-keep="addnote"><summary>✎ Add a note for ${step}</summary>
+  const add = actions
+    ? html`<details class="addnote" data-keep="addnote"><summary>✎ Add a note for ${step}</summary>
 ${form(
   actions,
   `${runHref(page.run)}/note`,
   html`<label class="field grow">The agent gets it before its next model call, as binding — and every step after it<textarea name="text" rows="3" maxlength="4000" required placeholder="A correction, a decision, a hint: «the slots method serves the courier app too»"></textarea></label><div class="actions"><button type="submit" class="btn primary">Send to the agent</button></div>`,
-)}</details>`;
+)}</details>`
+    : "";
+  if (notes.length === 0) return html`${add}`;
+  // the same text sent twice (a double click, a second window) is one note
+  const groups: Array<{ note: (typeof notes)[number]; times: number; delivered: boolean }> = [];
+  for (const n of notes) {
+    const same = groups.find((g) => g.note.text.trim() === n.text.trim());
+    if (same) {
+      same.times += 1;
+      same.delivered = same.delivered && n.delivered;
+    } else groups.push({ note: n, times: 1, delivered: n.delivered });
+  }
+  const pending = groups.filter((g) => !g.delivered).length;
+  const last = groups.at(-1) as (typeof groups)[number];
+  // folded once the agents have them; open while one is on its way (a new key: the fold follows);
+  // «Add a note» stays outside the fold — a new person would not look for it inside
+  return html`<details class="planw notesw" data-keep="notes-${pending > 0 ? "pending" : "delivered"}"${pending > 0 ? html` open` : ""}>
+<summary><span class="of">Notes ${String(groups.length)}</span><span class="${pending > 0 ? "warn" : "ok"}">${pending > 0 ? `◌ ${pending} on its way` : "✓ the agents have them"}</span><span class="d muted">${cut(last.note.text.split("\n").find((l) => l.trim()) ?? "", 90)}</span></summary>
+<div class="planbox"><ul class="notes">${groups.map(
+    (g) =>
+      html`<li><span class="${g.delivered ? "ok" : "warn"}">${g.delivered ? "✓ the agent got it" : "◌ goes with its next model call"}</span> <span class="meta">${g.note.by}${g.note.stepId ? ` · ${g.note.stepId}` : ""}${g.times > 1 ? ` · sent ${g.times} times` : ""}</span><div class="said">${g.note.text}</div></li>`,
+  )}</ul></div>
+</details>
+${add}`;
 }
 
 const planAt = (p: PlanProgress): string =>

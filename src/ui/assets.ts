@@ -438,6 +438,9 @@ form.clarify>.actions{margin:4px 0}
 .fixw .of{color:var(--bad)}
 .fixw .plist li.on{background:var(--bad-bg)}
 .notes{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.notesw>summary .warn,.notesw>summary .ok{font-size:13px;white-space:nowrap}
+.notesw>summary .d{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:13px}
+.notesw .planbox{display:flex;flex-direction:column;gap:10px}
 .notes li{font-size:13px;padding:8px 12px;border-radius:8px;background:var(--accent-soft)}
 .notes .said{white-space:pre-wrap;font-size:14px;line-height:20px;color:var(--ink);margin-top:2px}
 .addnote summary{cursor:pointer;font-size:13px;color:var(--accent)}
