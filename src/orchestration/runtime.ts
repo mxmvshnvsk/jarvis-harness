@@ -253,6 +253,7 @@ export class LocalWorkflowEngine {
       this.rt.loaded.config,
       { runId: run.id, stepId: step.id, iteration },
       (modelId) => this.rt.budget.scaleNow(models[modelId]?.quotaPool ?? `model:${modelId}`),
+      (modelId, at) => this.rt.budget.unlimitedAt(models[modelId]?.quotaPool ?? `model:${modelId}`, at),
     );
     const tools = this.rt.tools.bind({
       run,

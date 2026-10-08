@@ -66,6 +66,9 @@ export interface TranscriptState {
   readonly transcriptRef: string;
   readonly toolCalls: number;
   readonly modelCalls: number;
+  /** Of those, made in the pool's unlimited hours: they do not count against the day's limits. */
+  readonly freeToolCalls?: number;
+  readonly freeModelCalls?: number;
   /** Context management (ADR-0013): counters survive a resume; the rest serves `jarvis context|compact`. */
   readonly peakPressure?: number;
   readonly trims?: number;
@@ -199,17 +202,21 @@ export class AgentRuntimeRunner implements AgentRunner {
     const override = config.agents[def.id]?.limits;
     const grants = grantsFromEvents(rt.db.db, ctx.run.id, ctx.step.id, ctx.iteration);
     // in the pool's unlimited hours the limits grow (`unlimitedScale`), read anew at every check: a
-    // step that began at night is held to the day's limits once the night is over
+    // step that began at night is held to the day's limits once the night is over — for what it does
+    // after it (pilot: the night's calls counted against the day's limits, and the step stopped at 8:00)
     const toolLimit = override?.maxToolCalls ?? def.limits.maxToolCalls;
     const modelLimit = override?.maxModelCalls ?? def.limits.maxModelCalls;
     const scale = () => rt.budget.scaleNow(route.pool);
+    let freeToolCalls = restored?.freeToolCalls ?? 0;
+    let freeModelCalls = restored?.freeModelCalls ?? 0;
+    const free = () => scale() > 1;
     const limits = {
       ...def.limits,
       get maxToolCalls() {
-        return toolLimit * scale() + grants.toolCalls;
+        return toolLimit * scale() + grants.toolCalls + (free() ? 0 : freeToolCalls);
       },
       get maxModelCalls() {
-        return modelLimit * scale() + grants.modelCalls;
+        return modelLimit * scale() + grants.modelCalls + (free() ? 0 : freeModelCalls);
       },
     };
     // a used-up limit: finish with what there is (marked incomplete), or — `onLimit: ask`, a person at
@@ -271,6 +278,7 @@ export class AgentRuntimeRunner implements AgentRunner {
         store: (text) => rt.blobs.put(text, "text/plain").contentRef,
         summarize: async (rendered, previous) => {
           modelCalls += 1;
+          if (free()) freeModelCalls += 1;
           const response = await ctx.gateway.call({
             modelId: summarizerRoute.modelId,
             role: summarizerRoute === route ? def.role : "compaction",
@@ -305,6 +313,7 @@ export class AgentRuntimeRunner implements AgentRunner {
         transcriptRef,
         toolCalls,
         modelCalls,
+        ...(freeToolCalls + freeModelCalls > 0 ? { freeToolCalls, freeModelCalls } : {}),
         ...manager.stats,
         baseTokens: estimate(base),
         effective,
@@ -414,6 +423,7 @@ export class AgentRuntimeRunner implements AgentRunner {
         throw error;
       }
       modelCalls += 1;
+      if (free()) freeModelCalls += 1;
       // cut at the output limit before a whole call: a full-file write in one argument, or thinking that
       // used the allowance up — not the end of the work (pilot: three empty answers ended a fix round
       // that edited nothing)
@@ -450,6 +460,7 @@ export class AgentRuntimeRunner implements AgentRunner {
           return { call, args: {} as Record<string, unknown>, skipped: true as const };
         }
         toolCalls += 1;
+        if (free()) freeToolCalls += 1;
         let args: Record<string, unknown> = {};
         let parseError: string | undefined;
         try {

@@ -89,6 +89,45 @@ export function grantsFromEvents(db: DatabaseSync, runId: string, stepId: string
   return grants;
 }
 
+/**
+ * The usage of the calls made outside the pools' unlimited hours (`free(modelId, at)` — the call was in
+ * them). Pilot: a run spent 80M input tokens at night under the tenfold cap; at 8:00 the cap fell back
+ * and the run stopped at once on what the night had spent.
+ */
+export function limitedUsageFromEvents(
+  db: DatabaseSync,
+  free: (modelId: string, at: Date) => boolean,
+  runId: string,
+  stepId?: string,
+  iteration?: number,
+): StepUsage {
+  const clauses = ["kind = 'model.call'", "run_id = ?"];
+  const params: Array<string | number> = [runId];
+  if (stepId !== undefined) {
+    clauses.push("step_id = ?");
+    params.push(stepId);
+  }
+  if (iteration !== undefined) {
+    clauses.push("iteration = ?");
+    params.push(iteration);
+  }
+  const rows = db
+    .prepare(
+      `SELECT ts, json_extract(payload_json, '$.modelId') AS modelId, COALESCE(json_extract(payload_json, '$.outputTokens'), 0) AS output,
+              COALESCE(json_extract(payload_json, '$.promptTokens'), 0) AS input
+       FROM events WHERE ${clauses.join(" AND ")}`,
+    )
+    .all(...params) as Array<{ ts: string; modelId: string | null; output: number; input: number }>;
+  const usage = { outputTokens: 0, inputTokens: 0, requests: 0 };
+  for (const r of rows) {
+    if (r.modelId && free(r.modelId, new Date(r.ts))) continue;
+    usage.outputTokens += r.output;
+    usage.inputTokens += r.input;
+    usage.requests += 1;
+  }
+  return usage;
+}
+
 export function usageFromEvents(
   db: DatabaseSync,
   runId: string,
@@ -130,6 +169,8 @@ export class BudgetedGateway implements ModelCaller {
 
   /** How many times the caps grow for a call of this model now (its pool's unlimited hours). */
   private readonly scale: (modelId: string) => number;
+  /** A call of this model at that time was in its pool's unlimited hours: outside them it does not count. */
+  private readonly free: ((modelId: string, at: Date) => boolean) | undefined;
 
   constructor(
     inner: ModelCaller,
@@ -137,12 +178,14 @@ export class BudgetedGateway implements ModelCaller {
     config: ResolvedConfig,
     scope: BudgetScope,
     scale: (modelId: string) => number = () => 1,
+    free?: (modelId: string, at: Date) => boolean,
   ) {
     this.inner = inner;
     this.db = db;
     this.budget = config.budget;
     this.scope = scope;
     this.scale = scale;
+    this.free = free;
   }
 
   /**
@@ -150,8 +193,14 @@ export class BudgetedGateway implements ModelCaller {
    * overshoot by at most one response. Counting the reserve would make small caps unusable.
    */
   check(scale = 1): void {
-    const run = usageFromEvents(this.db, this.scope.runId);
-    const step = usageFromEvents(this.db, this.scope.runId, this.scope.stepId, this.scope.iteration);
+    // in unlimited hours: everything against the grown caps; after them: only what was spent outside
+    const free = scale === 1 ? this.free : undefined;
+    const run = free
+      ? limitedUsageFromEvents(this.db, free, this.scope.runId)
+      : usageFromEvents(this.db, this.scope.runId);
+    const step = free
+      ? limitedUsageFromEvents(this.db, free, this.scope.runId, this.scope.stepId, this.scope.iteration)
+      : usageFromEvents(this.db, this.scope.runId, this.scope.stepId, this.scope.iteration);
     const grants = grantsFromEvents(this.db, this.scope.runId, this.scope.stepId, this.scope.iteration);
     const plus = (cap: number | undefined, extra: number) =>
       cap === undefined ? undefined : cap * scale + extra;

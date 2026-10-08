@@ -353,7 +353,7 @@ Enter никогда не принимает. Уточняющие вопрос�
 закончить шаг с тем, что есть (результат помечается неполным), `q` — позже. То же — кнопками на странице
 прогона в `jarvis ui`; решение со страницы карточка подхватывает сама, а если карточки нет — прогон продолжает
 страница. В безлимитные часы пула лимиты агентов и `budget.perStep|perRun` умножаются на
-`quotaPools.<pool>.unlimitedScale` (по умолчанию 10).
+`quotaPools.<pool>.unlimitedScale` (по умолчанию 10); потраченное в эти часы после них в лимиты не идёт.
 
 ```
 ⏸ implementation stopped: 80 of 80 tool calls — the implementation agent's limit (agents.implementation.limits)

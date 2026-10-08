@@ -95,6 +95,13 @@ export class BudgetManager {
     return unlimitedAt(scheduleOf(definition), this.clock()) ? definition.unlimitedScale : 1;
   }
 
+  /** That moment was in the pool's unlimited hours (what was spent then does not count against the day's caps). */
+  unlimitedAt(pool: string, at: Date): boolean {
+    const definition = this.pools[pool];
+    if (!definition || definition.unlimited.length === 0) return false;
+    return unlimitedAt(scheduleOf(definition), at);
+  }
+
   /** What the pool spent in its unlimited hours does not count: the window starts after them. */
   private since(definition: QuotaPool, now: Date): Date | undefined {
     if (definition.unlimited.length === 0) return undefined;
