@@ -16,7 +16,8 @@ decision and side effect recorded in SQLite.
 - **Replaceable** — any OpenAI-compatible endpoint, MCP servers for Jira/Confluence/Bitbucket/Figma, language adapters.
 - **Measurable** — budgets per quota pool (with unlimited hours and a second cluster to fall over to), tokens and
   events per step, evals on fixture repositories.
-- **A local web page** — `jarvis ui`: runs and what waits for you, decisions, New task, the knowledge base.
+- **A local web page** — `jarvis ui`: a run from research to acceptance without a terminal — answers to open
+  questions, notes to the running agent, «Try it» before accepting, pause and resume; New task, the knowledge base.
 
 ![jarvis work → approve → diff → apply](docs/assets/work.gif)
 
@@ -119,7 +120,9 @@ jarvis spec ABC-42              # research → requirements → spec, up to its 
 jarvis hooks install            # standards, checks and impact analysis before every git push
 jarvis explain src/foo.ts:42    # why this line exists: task → spec → sources → tool calls
 jarvis ui                       # a local page (127.0.0.1:4317): runs and what waits for you; approve, send back,
-                                #   grant budget, resume, cancel; New task (research/fix/sdd/spec) in the background;
+                                #   answer open questions and clarifications, note the running agent, try the result,
+                                #   grant budget, pause, resume, cancel; continue research into sdd; make an eval case;
+                                #   New task (research/fix/sdd/spec) in the background;
                                 #   Knowledge: documents, standards, skills, glossary as agents get them, add a term,
                                 #   research a module and accept what the check kept; model and MCP status
 jarvis show <run> spec          # what a run produced; `jarvis logs --level error`, `jarvis errors J008`
