@@ -2,6 +2,7 @@ import type { Runtime } from "../app/runtime.ts";
 import { effectiveAllowWrites } from "../core/config/profiles.ts";
 import type { ResolvedConfig } from "../core/config/schema.ts";
 import type { Run } from "../core/domain/run.ts";
+import { globMatches } from "../knowledge/frontmatter.ts";
 import { runEffect } from "../orchestration/effects.ts";
 import type { HeldLease } from "../orchestration/lease.ts";
 import { egressExceptionFor, networkAllowed } from "../security/policy/egress.ts";
@@ -36,6 +37,11 @@ export interface BindOptions {
   readonly workspacePath: string;
   /** Capability patterns this agent may use; `["*"]` for everything policy allows. */
   readonly agentCapabilities: readonly string[];
+  /**
+   * Where this agent may write (globs, repo-relative): a write elsewhere is denied with the reason. The
+   * test agent writes tests, not the implementation (pilot: it fixed the app's code inside verify).
+   */
+  readonly writePaths?: readonly string[];
   readonly env?: NodeJS.ProcessEnv;
 }
 
@@ -116,6 +122,7 @@ export class BoundTools {
   private readonly registry: ToolRegistry;
   private readonly ctx: ToolContext;
   private readonly agentCapabilities: readonly string[];
+  private readonly writePaths: readonly string[] | undefined;
   private seq = 0;
 
   constructor(
@@ -130,6 +137,7 @@ export class BoundTools {
     this.rt = rt;
     this.registry = registry;
     this.agentCapabilities = options.agentCapabilities;
+    this.writePaths = options.writePaths;
     this.ctx = {
       run: options.run,
       stepId: options.stepId,
@@ -180,7 +188,17 @@ export class BoundTools {
       });
       return result;
     }
-    const decision = this.router.policy(capability, this.agentCapabilities);
+    const policy = this.router.policy(capability, this.agentCapabilities);
+    const outside =
+      policy.allowed && this.writePaths && capability.access === "write" && typeof args.path === "string"
+        ? !globMatches(args.path.replace(/^\.\//, ""), this.writePaths)
+        : false;
+    const decision = outside
+      ? {
+          allowed: false,
+          reason: `this agent writes only ${this.writePaths?.join(", ")} — ${String(args.path)} is not one: report the defect in your result instead of changing the code`,
+        }
+      : policy;
     if (!decision.allowed) {
       const result: ToolResult = {
         capability: name,

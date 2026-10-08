@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Runtime } from "../../src/app/runtime.ts";
@@ -64,7 +64,7 @@ async function setup(
     redactor: new Redactor({ salt: "t" }),
     pathPolicy: new PathPolicy(),
   });
-  const bind = (caps: string[] = ["*"]): BoundTools =>
+  const bind = (caps: string[] = ["*"], writePaths?: string[]): BoundTools =>
     router.bind({
       run: rt.runs.require(run.id),
       stepId: "impl",
@@ -72,6 +72,7 @@ async function setup(
       lease,
       workspacePath: sb.project,
       agentCapabilities: caps,
+      ...(writePaths ? { writePaths } : {}),
       env: { PATH: process.env.PATH ?? "" },
     });
   return { run, router, registry, bind };
@@ -243,5 +244,63 @@ describe("ToolRouter policy", () => {
     expect(again.source).toBe("journal");
     expect(rt.effects.byRun(rt.runs.list()[0]?.id as string).map((e) => e.status)).toEqual(["done"]);
     expect(sh(bare, "git", ["rev-parse", "refs/heads/jarvis/test"]).trim()).toHaveLength(40);
+  });
+});
+
+describe("builds the checks read (tools.rebuild)", () => {
+  it("a check first rebuilds what changed since the last build, once; a rebuild run by hand counts", async () => {
+    const { bind } = await setup(
+      [
+        "version: 1",
+        "tools:",
+        "  local:",
+        '    build-lib: "echo built >> ../build.log"',
+        '    typecheck-app: "echo typecheck"',
+        "  rebuild:",
+        '    - { when: ["lib/**"], run: build-lib }',
+      ].join("\n"),
+    );
+    const tools = bind();
+    const builds = () => {
+      try {
+        return readFileSync(join(sb.root, "build.log"), "utf8").split("\n").filter(Boolean).length;
+      } catch {
+        return 0;
+      }
+    };
+    // nothing of the library changed: nothing to rebuild
+    expect((await tools.invoke("project.typecheck-app")).text).not.toContain("rebuilt first");
+    expect(builds()).toBe(0);
+    await tools.invoke("repo.write", { path: "lib/a.ts", content: "export const a = 1;\n" });
+    const first = await tools.invoke("project.typecheck-app");
+    expect(first.text).toContain("[rebuilt first: build-lib]");
+    expect(builds()).toBe(1);
+    expect((await tools.invoke("project.typecheck-app")).text).not.toContain("rebuilt first");
+    expect(builds()).toBe(1);
+    // the library changed again
+    utimesSync(join(sb.project, "lib/a.ts"), new Date(), new Date(Date.now() + 5_000));
+    expect((await tools.invoke("project.typecheck-app")).text).toContain("rebuilt first");
+    expect(builds()).toBe(2);
+    // a rebuild run on its own (project.checks does so) makes the next check skip it
+    utimesSync(join(sb.project, "lib/a.ts"), new Date(), new Date(Date.now() + 10_000));
+    await tools.invoke("project.build-lib");
+    expect((await tools.invoke("project.typecheck-app")).text).not.toContain("rebuilt first");
+    expect(builds()).toBe(3);
+  });
+
+  it("an agent with write paths cannot write outside them", async () => {
+    const { bind } = await setup();
+    const tools = bind(["*"], ["**/*.test.ts", "**/__mocks__/**"]);
+    const code = await tools.invoke("repo.write", { path: "src/index.ts", content: "export {};\n" });
+    expect(code.ok).toBe(false);
+    expect(code.denied).toContain("this agent writes only **/*.test.ts, **/__mocks__/**");
+    expect(code.denied).toContain("report the defect in your result");
+    expect(readFileSync(join(sb.project, "src/index.ts"), "utf8")).toContain("answer = 42");
+    expect((await tools.invoke("repo.write", { path: "./src/index.test.ts", content: "test;\n" })).ok).toBe(
+      true,
+    );
+    expect((await tools.invoke("repo.write", { path: "src/__mocks__/api.ts", content: "x;\n" })).ok).toBe(
+      true,
+    );
   });
 });

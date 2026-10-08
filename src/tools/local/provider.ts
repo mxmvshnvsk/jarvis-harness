@@ -1,6 +1,8 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import type { ResolvedConfig } from "../../core/config/schema.ts";
+import { changedFiles } from "../../knowledge/check.ts";
+import { globMatches } from "../../knowledge/frontmatter.ts";
 import { readByRef } from "../../knowledge/resolver.ts";
 import { refreshIndex, search } from "../../knowledge/retrieval/service.ts";
 import { knowledgeRootsOf } from "../../knowledge/sources.ts";
@@ -77,6 +79,9 @@ function isProbablyBinary(buffer: Buffer): boolean {
 export class LocalToolProvider implements ToolProvider {
   readonly name = "local";
   private readonly config: ResolvedConfig;
+  /** Per checkout and rebuild command: the state of its sources at the last build (src/orchestration/tools/rebuild.ts). */
+  private readonly built = new Map<string, string>();
+  private readonly queues = new Map<string, Promise<unknown>>();
 
   constructor(config: ResolvedConfig) {
     this.config = config;
@@ -537,7 +542,7 @@ export class LocalToolProvider implements ToolProvider {
           properties: { args: { type: "string", description: "extra arguments appended to the command" } },
         },
         handler: async (args, ctx) =>
-          this.runProjectCommand(`${command}${typeof args.args === "string" ? ` ${args.args}` : ""}`, ctx),
+          this.projectCommand(name, `${command}${typeof args.args === "string" ? ` ${args.args}` : ""}`, ctx),
       });
     }
 
@@ -562,6 +567,81 @@ export class LocalToolProvider implements ToolProvider {
       });
     }
     return caps;
+  }
+
+  /**
+   * A `tools.local` command. A rebuild (`tools.rebuild`) marks its sources as built; a `test*` or
+   * `typecheck*` check first runs the rebuilds whose sources changed since (pilot: the implementation's
+   * own typecheck passed against the library built before its change). Builds and those checks go one
+   * at a time per checkout — verify runs its stages side by side.
+   */
+  private async projectCommand(name: string, command: string, ctx: ToolContext): Promise<ToolOutput> {
+    const rebuilds = this.config.tools.rebuild;
+    const isBuild = rebuilds.some((r) => r.run === name);
+    if (rebuilds.length === 0 || (!isBuild && !/^(test|typecheck)/.test(name)))
+      return this.runProjectCommand(command, ctx);
+    return this.inTurn(ctx.workspacePath, async () => {
+      if (isBuild) {
+        const out = await this.runProjectCommand(command, ctx);
+        if (out.ok) await this.markBuilt(name, ctx);
+        return out;
+      }
+      const notes: string[] = [];
+      for (const target of await this.staleBuilds(ctx)) {
+        const build = this.config.tools.local[target];
+        if (!build) continue;
+        const out = await this.runProjectCommand(build, ctx);
+        if (!out.ok)
+          return { ...out, text: `rebuild "${target}" failed before "${name}":\n${out.text ?? ""}` };
+        await this.markBuilt(target, ctx);
+        notes.push(target);
+      }
+      const out = await this.runProjectCommand(command, ctx);
+      return notes.length > 0
+        ? { ...out, text: `[rebuilt first: ${notes.join(", ")}]\n${out.text ?? ""}` }
+        : out;
+    });
+  }
+
+  private inTurn<T>(key: string, work: () => Promise<T>): Promise<T> {
+    const mine = (this.queues.get(key) ?? Promise.resolve()).then(work, work);
+    this.queues.set(
+      key,
+      mine.catch(() => undefined),
+    );
+    return mine;
+  }
+
+  /** The state of a rebuild's sources in the checkout: the changed files it watches, with their times. */
+  private async sourcesOf(name: string, ctx: ToolContext): Promise<string> {
+    const rule = this.config.tools.rebuild.filter((r) => r.run === name).flatMap((r) => r.when);
+    const base = ctx.run.workspace.baseCommit ?? ctx.run.workspace.baseRef;
+    const changed = (await changedFiles(ctx.workspacePath, base)).filter((f) => globMatches(f, rule));
+    return changed
+      .map((f) => {
+        try {
+          return `${f}@${statSync(join(ctx.workspacePath, f)).mtimeMs}`;
+        } catch {
+          return `${f}@gone`;
+        }
+      })
+      .join("\n");
+  }
+
+  private async markBuilt(name: string, ctx: ToolContext): Promise<void> {
+    this.built.set(`${ctx.workspacePath}\0${name}`, await this.sourcesOf(name, ctx));
+  }
+
+  /** The rebuilds whose sources changed since they last ran here (never ran: the run changed them at all). */
+  private async staleBuilds(ctx: ToolContext): Promise<string[]> {
+    const names = [...new Set(this.config.tools.rebuild.map((r) => r.run))];
+    const stale: string[] = [];
+    for (const name of names) {
+      const now = await this.sourcesOf(name, ctx);
+      if (!now) continue;
+      if (this.built.get(`${ctx.workspacePath}\0${name}`) !== now) stale.push(name);
+    }
+    return stale;
   }
 
   private async runProjectCommand(

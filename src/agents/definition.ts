@@ -36,6 +36,8 @@ export interface AgentDefinition<T = unknown> {
   readonly limits: AgentLimits;
   /** Artifact types to inject fully (the rest of the step inputs are listed by name only). */
   readonly contextInputs?: readonly string[];
+  /** Where the agent may write (globs); without — wherever its capabilities and the path policy allow. */
+  readonly writes?: readonly string[];
 }
 
 export const DEFAULT_LIMITS: AgentLimits = { maxToolCalls: 40, maxModelCalls: 60, checkpointEvery: 5 };

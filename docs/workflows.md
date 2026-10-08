@@ -111,7 +111,7 @@ flowchart LR
 | impact | research | чтение репо (в т.ч. `graph.impact`, `graph.neighbors`) | ok, needs_research |
 | plan | research | `repo.read/list/search` | ok, spec_infeasible |
 | implementation | implementation | чтение + `repo.write/edit`, `project.*`, `figma.get` | ok |
-| test | implementation | чтение + запись, `project.*` | ok, defects_found |
+| test | implementation | чтение + запись только тестов (`*.test.*`, `*.spec.*`, `__tests__`, `__mocks__`, `__snapshots__`, `test/`, `tests/`), `project.*` | ok, defects_found |
 | docs | implementation | чтение + запись | ok |
 | telemetry | implementation | чтение + запись | ok, spec_gap |
 | review | review | чтение, `project.*` | ok, fix_required, plan_wrong |

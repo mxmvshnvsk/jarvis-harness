@@ -33,6 +33,15 @@ const READ_REPO = [
   "graph.neighbors",
 ];
 const WRITE_REPO = ["repo.write", "repo.edit"];
+/** What the test agent may write: tests and what they need, never the implementation. */
+export const TEST_FILES = [
+  "**/*.{test,spec}.{ts,tsx,js,jsx,mjs,cjs}",
+  "**/__tests__/**",
+  "**/__mocks__/**",
+  "**/__snapshots__/**",
+  "**/test/**",
+  "**/tests/**",
+];
 
 export const RESEARCH_AGENT: AgentDefinition = {
   id: "research",
@@ -162,9 +171,11 @@ Goal: verify the implementation against the specification's acceptance criteria.
 Method:
 - Run the project's test and typecheck commands. Read failures carefully; distinguish failures caused by the change from pre-existing ones.
 - Where acceptance criteria have no test, add focused tests next to existing ones following the project's conventions, then run them.
+- You change only test files (tests, mocks, snapshots). A defect in the implementation is not yours to fix: report it with the file, the line and what is wrong, and the implementation gets it.
 - Report commands run, whether everything passed, and each failure with detail. If defects remain, set outcome "defects_found" with reasons that name the failing criteria.
 Produce the result document.`,
   capabilities: [...READ_REPO, ...WRITE_REPO, "project.*"],
+  writes: TEST_FILES,
   requires: { tools: true, structuredOutput: "json" },
   output: { type: "tests", schema: TestResult, outcomes: ["ok", "defects_found"] },
   limits: { maxToolCalls: 40, maxModelCalls: 60, checkpointEvery: 5 },

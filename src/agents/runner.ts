@@ -137,6 +137,7 @@ export class AgentRuntimeRunner implements AgentRunner {
       lease: ctx.lease,
       workspacePath: ctx.workspace.ref.path,
       agentCapabilities: def.capabilities,
+      ...(def.writes ? { writePaths: def.writes } : {}),
       env: rt.env,
     });
     const toolDescriptors = bound.list();
