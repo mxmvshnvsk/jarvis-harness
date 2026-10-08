@@ -988,12 +988,25 @@ ${notesBox(page, a.step.id, actions)}
 /** A step on its second round: what it fixes, folded into one line like the plan. */
 function fixWidget(f: NonNullable<RunPage["fixing"]>): Html {
   const n = f.reasons.length;
-  return html`<details class="planw fixw" data-keep="fixing">
-<summary><span class="of">Round ${String(f.round)}${f.max ? ` of ${f.max}` : ""}</span><span class="d">Fixing ${n > 0 ? `${n} defect${n === 1 ? "" : "s"}` : "what"} ${f.from} found</span></summary>
-<div class="planbox"><ol class="plist">${f.reasons.map(
-    (r, i) =>
-      html`<li class="on"><span class="bad">✗</span><span class="n">${String(i + 1)}</span><span class="d">${cut(r.text, 600)}</span><span class="f">${r.step}</span></li>`,
-  )}</ol></div>
+  const r = f.review;
+  const head = r
+    ? html`<span class="d">Fixing what ${r.by} sent back at ${f.from}${r.comment ? html`: <span class="muted">${cut(r.comment.split("\n").find((l) => l.trim()) ?? "", 120)}</span>` : " (no comment)"}</span>`
+    : html`<span class="d">Fixing ${n > 0 ? `${n} defect${n === 1 ? "" : "s"}` : "what"} ${f.from} found</span>`;
+  return html`<details class="planw fixw" data-keep="fixing"${r ? html` open` : ""}>
+<summary><span class="of">Round ${String(f.round)}${f.max ? ` of ${f.max}` : ""}</span>${head}</summary>
+${
+  r
+    ? html`<div class="planbox sentback"><span class="meta">${r.decision === "reject" ? "rejected" : "sent back"} ${r.ref} by ${r.by}${r.channel === "ui" ? " in the browser" : r.channel === "cli" ? " in the terminal" : ""} — the agent gets it as is, binding</span>${r.comment ? html`<div class="said">${cut(r.comment, 4000)}</div>` : html`<span class="muted">No comment was given.</span>`}</div>`
+    : ""
+}
+${
+  n > 0 || !r
+    ? html`<div class="planbox"><ol class="plist">${f.reasons.map(
+        (r, i) =>
+          html`<li class="on"><span class="bad">✗</span><span class="n">${String(i + 1)}</span><span class="d">${cut(r.text, 600)}</span><span class="f">${r.step}</span></li>`,
+      )}</ol></div>`
+    : ""
+}
 </details>`;
 }
 

@@ -755,4 +755,64 @@ describe("New task on the page", () => {
     expect(after).toContain("The method serves the courier app too");
     expect(rt.events.list({ runId: run.id, kind: "human.note" })[0]?.stepId).toBe("implementation");
   });
+
+  it("a round sent back at the review gate shows who sent it and the comment, open", async () => {
+    await serve();
+    const run = createRun("ABC-42: Delivery slots on the order form");
+    rt.runs.update(run.id, { currentStep: "implementation", currentIteration: 2 });
+    rt.runs.transition(run.id, "RUNNING");
+    rt.runs.acquireLease(run.id, "cli:elsewhere", 90_000);
+    const impl = rt.artifacts.put({
+      runId: run.id,
+      type: "implementation",
+      name: "implementation.json",
+      content: "{}",
+      provenance: { kind: "agent", agentId: "implementation" },
+    });
+    const ev = (kind: string, stepId: string, payload: Record<string, unknown>, actor?: string) =>
+      rt.events.emit({ kind, runId: run.id, stepId, payload, ...(actor ? { actor } : {}) });
+    ev("step.start", "implementation", { stepId: "implementation", iteration: 1 });
+    ev("step.finish", "implementation", { stepId: "implementation", iteration: 1, status: "success" });
+    rt.artifacts.approve({
+      runId: run.id,
+      stepId: "approve-impl",
+      artifactId: impl.artifactId,
+      version: impl.version,
+      actor: DEV,
+      decision: "request_changes",
+      comment: "The slot picker: onClose comes from its parent.\nMake it optional.",
+    });
+    ev(
+      "approval.recorded",
+      "approve-impl",
+      {
+        artifactId: impl.artifactId,
+        version: impl.version,
+        type: "implementation",
+        decision: "request_changes",
+        channel: "ui",
+      },
+      "user:dev@example.com",
+    );
+    ev("step.finish", "approve-impl", {
+      stepId: "approve-impl",
+      status: "success",
+      outcome: "request_changes",
+    });
+    ev("workflow.loop", "approve-impl", {
+      edge: "approve-impl->implementation#request_changes",
+      iteration: 1,
+      max: 3,
+    });
+    ev("step.start", "implementation", { stepId: "implementation", iteration: 2 });
+    ev("agent.start", "implementation", { agent: "implementation" });
+    const short = run.id.replace(/^run_/, "").slice(0, 8);
+    const body = await page(`/runs/${short}`);
+    expect(body).toContain('<details class="planw fixw" data-keep="fixing" open>');
+    expect(body).toContain(
+      'Fixing what dev@example.com sent back at approve-impl: <span class="muted">The slot picker: onClose comes from its parent.</span>',
+    );
+    expect(body).toContain("sent back implementation@1 by dev@example.com in the browser");
+    expect(body).toContain("Make it optional.");
+  });
 });

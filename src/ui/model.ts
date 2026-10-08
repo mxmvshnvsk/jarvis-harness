@@ -852,7 +852,17 @@ export async function runPage(
     ...evalOf(runtime, run),
     ...((n) => (n.length > 0 ? { notes: n } : {}))(notesOf(runtime, run.id)),
     ...((f) => (f ? { fixing: f } : {}))(
-      run.state === "RUNNING" ? fixOf(events, activity?.step?.id) : undefined,
+      run.state === "RUNNING"
+        ? fixOf(
+            events,
+            activity?.step?.id,
+            (artifactId, version, decision) =>
+              runtime.artifacts
+                .approvalsFor(artifactId, version)
+                .filter((a) => a.decision === decision)
+                .at(-1)?.comment,
+          )
+        : undefined,
     ),
     ...((p) => (p ? { planProgress: p } : {}))(
       run.state === "RUNNING" && implementing(activity) ? planProgressOf(runtime, run, events) : undefined,
@@ -973,6 +983,14 @@ export interface FixView {
   /** The step that sent the work back (a composite: its children's reasons). */
   readonly from: string;
   readonly reasons: ReadonlyArray<{ readonly step: string; readonly text: string }>;
+  /** A person sent the work back at a gate: who, what, with which comment (it goes to the agent as is). */
+  readonly review?: {
+    readonly by: string;
+    readonly channel?: string;
+    readonly ref: string;
+    readonly decision: string;
+    readonly comment?: string;
+  };
 }
 
 /**
@@ -980,7 +998,11 @@ export interface FixView {
  * the reasons the steps in between finished with. Pilot: the second round showed «Plan 1 of 15» as if
  * the work started over.
  */
-export function fixOf(events: readonly StoredEvent[], stepId: string | undefined): FixView | undefined {
+export function fixOf(
+  events: readonly StoredEvent[],
+  stepId: string | undefined,
+  commentOf?: (artifactId: string, version: number, decision: string) => string | undefined,
+): FixView | undefined {
   if (!stepId) return undefined;
   let start = -1;
   let iteration = 1;
@@ -1005,7 +1027,34 @@ export function fixOf(events: readonly StoredEvent[], stepId: string | undefined
     }
   }
   const reasons: Array<{ step: string; text: string }> = [];
+  let review: FixView["review"];
+  let gate: string | undefined;
   for (const e of events.slice(prevEnd + 1, start)) {
+    if (e.kind === "approval.recorded") {
+      const p = (e.payload ?? {}) as {
+        artifactId?: unknown;
+        version?: unknown;
+        type?: unknown;
+        decision?: unknown;
+        channel?: unknown;
+      };
+      const decision = typeof p.decision === "string" ? p.decision : "";
+      if (decision && decision !== "approve") {
+        gate = e.stepId ?? gate;
+        const comment =
+          typeof p.artifactId === "string" && typeof p.version === "number"
+            ? commentOf?.(p.artifactId, p.version, decision)
+            : undefined;
+        review = {
+          by: (e.actor ?? "a person").replace(/^(user|service|ci):/, ""),
+          ...(typeof p.channel === "string" ? { channel: p.channel } : {}),
+          ref: `${typeof p.type === "string" ? p.type : "artifact"}@${String(p.version ?? "?")}`,
+          decision,
+          ...(comment?.trim() ? { comment: comment.trim() } : {}),
+        };
+      }
+      continue;
+    }
     if (e.kind !== "step.finish") continue;
     const p = (e.payload ?? {}) as { stepId?: string; outcome?: string; status?: string; reason?: string };
     const bad =
@@ -1017,8 +1066,9 @@ export function fixOf(events: readonly StoredEvent[], stepId: string | undefined
   return {
     round: iteration,
     ...(typeof loop?.max === "number" ? { max: loop.max + 1 } : {}),
-    from: loop?.edge?.split("->")[0] ?? "a later step",
+    from: loop?.edge?.split("->")[0] ?? gate ?? "a later step",
     reasons,
+    ...(review ? { review } : {}),
   };
 }
 

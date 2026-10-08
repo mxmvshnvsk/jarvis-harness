@@ -408,6 +408,8 @@ form.clarify>.actions{margin:4px 0}
 .trybar{display:flex;flex-direction:column;gap:6px}
 .trybar .lbl{font-size:13px;font-weight:500;color:var(--muted)}
 .planw{border:1px solid var(--line);border-radius:10px;background:var(--ground)}
+.sentback{display:flex;flex-direction:column;gap:8px}
+.sentback .said{white-space:pre-wrap;font-size:14px;line-height:21px;padding:10px 12px;border-left:3px solid var(--warn-dot);background:var(--sunken);border-radius:6px}
 .planw>summary{display:flex;align-items:baseline;gap:10px;padding:10px 14px;cursor:pointer;list-style:none;flex-wrap:wrap}
 .planw>summary::-webkit-details-marker{display:none}
 .planw>summary::before{content:"▸";color:var(--muted);font-size:12px}
