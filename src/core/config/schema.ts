@@ -237,6 +237,18 @@ export const HooksConfigSchema = z.strictObject({
 export const WorkspaceConfigSchema = z.strictObject({
   mode: WorkspaceModeSchema.default("worktree"),
   setup: z.string().min(1).optional(),
+  /**
+   * How a person tries the result before accepting it (the implementation gate's «Try it»): the commands
+   * that start the project in the run's checkout (after `setup`, which already ran there), the address
+   * to open, a line on what to look at. Without `run` the page guesses from package.json scripts.
+   */
+  try: z
+    .strictObject({
+      run: z.union([z.string().min(1), z.array(z.string().min(1)).min(1)]).optional(),
+      url: z.string().min(1).optional(),
+      note: z.string().min(1).optional(),
+    })
+    .optional(),
   /** Defaults to true in worktree mode and false in cwd mode (ADR-0003 §5). */
   allowWrites: z.boolean().optional(),
   /** Worktrees of terminal runs older than this are removed by `jarvis gc` (ADR-0003 §6). */

@@ -168,6 +168,10 @@ workspace:                     # ADR-0003
   setup: "pnpm install --offline --frozen-lockfile"   # после создания worktree
   allowWrites: true            # по умолчанию true для worktree, false для cwd
   retentionDays: 7             # jarvis gc
+  try:                         # «Try it» на гейте реализации: как запустить результат
+    run: "pnpm dev"            # команда или список; без неё — догадка по scripts в package.json
+    url: http://localhost:3000 # что открыть
+    note: "войти тестовым пользователем"   # строка подсказки
   cache:                       # зависимости между worktree (по умолчанию выключено)
     key: [pnpm-lock.yaml]      # файлы, по содержимому которых кэш подходит
     paths: [node_modules, "packages/*/node_modules"]   # что сохранить; `*` — один уровень каталогов
@@ -273,6 +277,14 @@ lockfile получает их до `setup`, и `setup` почти ничего 
 система умеет (APFS — `cp -c`, btrfs/xfs — `--reflink`), поэтому там она не стоит ни времени, ни места. Хранятся
 три последних ключа. Сломанный кэш стоит только времени полного `setup`. Строка прогресса пишет
 `◌ dependencies restored node_modules (key …)` или `kept … for the next run`.
+
+`workspace.try` — как человек проверяет результат до решения на гейте реализации. Страница реализации в
+`jarvis ui` показывает блок **Try it**: путь рабочей копии прогона и ветку (`setup` там уже выполнен — без
+него рабочей копии нет), команды из `run`, адрес `url`, строку `note`, критерии приёмки из спеки списком
+с галочками, тот же путь в основном репозитории (`git switch -c try-<run> <ветка>`, `setup`, `run`) и к чему
+ведут Accept и Send back. Без `run` команда берётся из `scripts` в package.json рабочей копии (`start-dev`,
+`start:dev`, `dev`, `start`, `serve` — первая найденная, через yarn/pnpm/npm по lockfile) и помечена как
+догадка. Для монорепозитория команду лучше задать явно: `yarn workspace <app> start-dev`.
 
 ### Язык агентов (`language`)
 

@@ -6,6 +6,7 @@ import { duration } from "../app/journey.ts";
 import type { McpHealth, McpServerHealth } from "../app/mcpHealth.ts";
 import type { HealthState, ModelHealth, ModelPerf, ModelsHealth, Unlimited } from "../app/modelHealth.ts";
 import type { PlanProgress } from "../app/planProgress.ts";
+import { cdTo, type TryOut, tryCommand } from "../app/tryOut.ts";
 import type { Change } from "../cli/checkout.ts";
 import { toolMix } from "../cli/progress.ts";
 import { documentToMarkdown } from "../cli/render.ts";
@@ -838,6 +839,66 @@ ${
 }`;
 }
 
+/** The run page's approval card: into the checkout and start, in one line to paste. */
+function tryLine(t: TryOut): Html {
+  return html`<div class="trybar"><span class="lbl">Try it before you decide</span><div class="row"><code class="path">${tryCommand(t)}</code><button type="button" class="btn" data-copy="${tryCommand(t)}">Copy</button></div>${
+    t.start.length === 0
+      ? html`<span class="hint">No start command known: set <code>workspace.try.run</code> in .jarvis/project.yaml</span>`
+      : t.guessed
+        ? html`<span class="hint">start command guessed from package.json — set <code>workspace.try.run</code> to be sure</span>`
+        : ""
+  }</div>`;
+}
+
+/**
+ * «Try it» on the implementation's page: where the result is, how to start it, what to check by hand,
+ * what Accept and Send back lead to. Pilot: «there is no obviousness of the action to accept or not».
+ */
+function tryHtml(t: TryOut, page: ArtifactPage, extras: ArtifactExtras): Html {
+  const cmd = (c: string) =>
+    html`<div class="cmd"><code>${c}</code><button type="button" class="btn small" data-copy="${c}">Copy</button></div>`;
+  const back = `${artifactHref(page.run, page.artifact)}`;
+  return html`<section id="try" class="panel tryit" aria-labelledby="try-h">
+<h2 id="try-h">Try it before you decide</h2>
+<ol class="trysteps">
+<li><b>Go to the run's checkout</b>${t.branch ? html` <span class="meta">branch ${t.branch}</span>` : ""}
+<span class="hint">${t.setup ? html`dependencies are there: <code>${t.setup}</code> ran when the run started` : "the run's own copy of the repository"}</span>
+${cmd(cdTo(t.checkoutShown))}</li>
+<li><b>Start the project</b>
+${
+  t.start.length > 0
+    ? html`<span class="hint">${t.guessed ? html`guessed from package.json — set <code>workspace.try.run</code> in .jarvis/project.yaml to be sure` : "from workspace.try in .jarvis/project.yaml"}</span>${t.start.map(cmd)}`
+    : html`<span class="hint warn">no start command known — set <code>workspace.try.run</code> in .jarvis/project.yaml (e.g. <code>yarn start-dev</code>)</span>`
+}${t.url ? html`<span class="hint">then open <a href="${t.url}" target="_blank" rel="noopener">${t.url}</a></span>` : ""}${t.note ? html`<span class="hint">${t.note}</span>` : ""}</li>
+${
+  t.checks.length > 0
+    ? html`<li><b>Check by hand</b> <span class="hint">the spec's acceptance criteria</span>
+<ul class="checks">${t.checks.map(
+        (c) =>
+          html`<li><span class="rq">${c.id ? html`<b>${c.id}</b> ` : ""}${cut(c.text, 200)}</span><ul>${c.acceptance.map((x) => html`<li><label><input type="checkbox"> ${cut(x, 240)}</label></li>`)}</ul></li>`,
+      )}</ul></li>`
+    : ""
+}
+</ol>
+<div class="row tryact">${t.start.length > 0 ? html`<button type="button" class="btn primary" data-copy="${tryCommand(t)}">Copy: cd and start</button>` : ""}${
+    extras.actions
+      ? form(
+          extras.actions,
+          `${runHref(page.run)}/open`,
+          html`<input type="hidden" name="return" value="${back}"><button type="submit" class="btn">Open in editor</button>`,
+        )
+      : ""
+  }${t.range ? html`<button type="button" class="btn" data-copy="git diff ${t.range}">Copy git diff</button>` : ""}</div>
+${
+  t.inRepo
+    ? html`<details class="inrepo"><summary>Or in your main repository</summary><span class="hint">a branch of your own from the run's branch (the run's branch itself is taken by its checkout); your uncommitted changes go along</span>${cmd(cdTo(t.inRepo.repoShown))}${t.inRepo.commands.map(cmd)}</details>`
+    : ""
+}
+${t.verified ? html`<p class="hint">Jarvis already ran: tests ${t.verified.passed ? html`<span class="ok">✓ passed</span>` : html`<span class="bad">✗ ${t.verified.failures} failing</span>`}${t.verified.commands.length > 0 ? html` — ${t.verified.commands.slice(0, 3).map((c, i) => html`${i > 0 ? ", " : ""}<code>${cut(c, 80)}</code>`)}` : ""}</p>` : ""}
+<div class="facts after">${t.onAccept ? html`<span><b>Accept</b> → ${t.onAccept}; the branch stays — <code>${t.apply}</code> lands it on your branch as one commit</span>` : ""}${t.onSendBack ? html`<span><b>Send back</b> → ${t.onSendBack}</span>` : ""}<span><b>Fixed something yourself</b> in the checkout → it goes in as a <code>human edit</code> when the run goes on</span></div>
+</section>`;
+}
+
 function approvalCardHtml(card: ApprovalCard, page: RunPage, actions?: Actions): Html {
   const title = card.facts?.title ?? `${card.type}/${card.artifact.name}`;
   return html`<section class="panel decision" aria-labelledby="decision" data-live="card">
@@ -848,6 +909,7 @@ function approvalCardHtml(card: ApprovalCard, page: RunPage, actions?: Actions):
 </div>
 ${briefHtml(card)}
 ${card.decision ? html`<div class="banner ok">${decisionText(card)}</div><div class="actions">${goesOn(page, actions)}</div>` : ""}
+${card.tryOut && !card.decision ? tryLine(card.tryOut) : ""}
 <div class="actions"><a class="btn primary big" href="${artifactHref(page.run, card.artifact)}">Review the ${card.type}</a></div>
 ${card.decision ? "" : terminalHint(card, page.terminal, page.run)}
 </section>`;
@@ -1284,6 +1346,8 @@ export interface ArtifactExtras {
   readonly comments?: boolean;
   /** Jarvis prepares answers to the open questions right now (they were not ready at the gate). */
   readonly preparing?: boolean;
+  /** The implementation: how to try it before deciding (src/app/tryOut.ts). */
+  readonly tryOut?: TryOut;
 }
 
 const sourceChips = (sources: readonly string[]) =>
@@ -1463,13 +1527,14 @@ ${
 ${extras.banner ?? ""}
 ${partial ? html`<div class="banner bad">⚠ incomplete: agent ${partial.agentId} hit its ${partial.limit} limit — what it did not cover is unknown</div>` : ""}
 ${
-  diff || page.questions
-    ? html`<nav class="tabs" aria-label="Sections">${page.questions ? html`<a href="#questions">Questions <span class="muted">${page.questions.list.length}</span></a>` : ""}<a href="#document">${diff ? "Summary" : "Document"}</a>${diff ? html`<a href="#files">Files changed <span class="muted">${diff.length}</span></a>` : ""}</nav>`
+  diff || page.questions || extras.tryOut
+    ? html`<nav class="tabs" aria-label="Sections">${page.questions ? html`<a href="#questions">Questions <span class="muted">${page.questions.list.length}</span></a>` : ""}${extras.tryOut ? html`<a href="#try">Try it</a>` : ""}<a href="#document">${diff ? "Summary" : "Document"}</a>${diff ? html`<a href="#files">Files changed <span class="muted">${diff.length}</span></a>` : ""}</nav>`
     : ""
 }
 <div class="cols">
 <div class="mainc">
 ${questionsHtml(page, extras)}
+${extras.tryOut ? tryHtml(extras.tryOut, page, extras) : ""}
 <section id="document" class="panel doc" aria-label="Document">${documentHtml(a.name, page.text, f?.doc)}</section>
 ${
   diff

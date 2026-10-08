@@ -509,3 +509,89 @@ describe("a stop on a budget, decided on the page", () => {
     });
   });
 });
+
+describe("the implementation gate says how to try it", () => {
+  it("into the checkout, how to start, what to check by hand, what Accept and Send back lead to", async () => {
+    sb.write(
+      "home/.jarvis/worktrees/web/run-ABC-42/package.json",
+      JSON.stringify({ scripts: { "start-dev": "x" } }),
+    );
+    sb.write("home/.jarvis/worktrees/web/run-ABC-42/yarn.lock", "");
+    const run = rt.runs.create({
+      task: "ABC-42 delivery slots",
+      workflow: "gated",
+      owner: DEV,
+      workspace: {
+        mode: "worktree",
+        repoRoot: sb.project,
+        path: `${sb.home}/.jarvis/worktrees/web/run-ABC-42`,
+        branch: "jarvis/ABC-42/run",
+        baseRef: "HEAD",
+      },
+      dataClass: "internal",
+    });
+    rt.artifacts.put({
+      runId: run.id,
+      type: "spec",
+      name: "spec.json",
+      content: JSON.stringify({
+        title: "Delivery slots",
+        goals: ["g"],
+        requirements: [
+          { id: "R1", text: "Slots come from logistics-api", acceptance: ["a closed zone shows no slots"] },
+        ],
+      }),
+      provenance: { kind: "agent", agentId: "spec" },
+    });
+    const impl = rt.artifacts.put({
+      runId: run.id,
+      type: "implementation",
+      name: "implementation.json",
+      content: JSON.stringify({ summary: "Slots on the order form" }),
+      provenance: { kind: "agent", agentId: "implementation" },
+    });
+    rt.runs.update(run.id, { currentStep: "approve", currentIteration: 1 });
+    rt.runs.transition(run.id, "RUNNING");
+    rt.checkpoints.save({
+      runId: run.id,
+      stepId: "approve",
+      iteration: 1,
+      kind: "suspend",
+      state: { awaitingApproval: { type: "implementation", version: 1 } },
+    });
+    rt.runs.transition(run.id, "WAITING_HUMAN", {
+      reason: "approval",
+      waitingFor: { kind: "approval", detail: "implementation" },
+    });
+    const short = run.id.slice(4, 12);
+    // the run page: one line to paste
+    const card = await getPage(`/runs/${short}`);
+    expect(card).toContain("Try it before you decide");
+    expect(card).toContain("cd ~/.jarvis/worktrees/web/run-ABC-42 &amp;&amp; yarn start-dev");
+    expect(card).toContain("guessed from package.json");
+
+    const page = await getPage(`/runs/${short}/artifacts/implementation/implementation.json`);
+    expect(page).toContain('<a href="#try">Try it</a>');
+    expect(page).toContain("Go to the run's checkout");
+    expect(page).toContain("branch jarvis/ABC-42/run");
+    expect(page).toContain("<code>yarn start-dev</code>");
+    expect(page).toContain("<b>R1</b> Slots come from logistics-api");
+    expect(page).toContain('<input type="checkbox"> a closed zone shows no slots');
+    expect(page).toContain(`git switch -c try-${short} jarvis/ABC-42/run`);
+    expect(page).toContain("<b>Send back</b> → write again");
+    expect(page).toContain("<b>Accept</b> → the run completes");
+    expect(impl.version).toBe(1);
+
+    // Open in editor from here comes back here
+    const open = await post(`/runs/${short}/open`, {
+      t: ui.token,
+      return: `/runs/${short}/artifacts/implementation/implementation.json`,
+    });
+    expect(open.location).toBe(
+      `/runs/${short}/artifacts/implementation/implementation.json?notice=opened&editor=VS%20Code`,
+    );
+    expect((await post(`/runs/${short}/open`, { t: ui.token, return: "https://elsewhere" })).location).toBe(
+      `/runs/${short}?notice=opened&editor=VS%20Code`,
+    );
+  });
+});

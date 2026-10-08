@@ -387,6 +387,26 @@ form.clarify>.actions{margin:4px 0}
 .qs .dock .note summary{cursor:pointer;font-size:13px;color:var(--accent)}
 .qs .dock .note[open]{display:flex;flex-direction:column;gap:8px}
 .qs .dock .note textarea{padding:8px 10px;border-radius:6px;resize:vertical;min-height:64px}
+.tryit{padding:20px 24px;display:flex;flex-direction:column;gap:14px}
+.tryit h2{font-size:18px;line-height:24px}
+.trysteps{margin:0;padding-left:22px;list-style:decimal;display:flex;flex-direction:column;gap:14px}
+.trysteps>li{display:flex;flex-direction:column;gap:6px;font-size:14px}
+.trysteps>li::marker{color:var(--muted);font-weight:500}
+.cmd{display:flex;gap:8px;align-items:center}
+.cmd code{flex:1 1 auto;min-width:0;padding:8px 10px;border-radius:8px;background:var(--chip);font-size:13px;overflow-x:auto;white-space:nowrap}
+.checks{margin:0;padding-left:0;list-style:none;display:flex;flex-direction:column;gap:10px}
+.checks .rq{font-size:14px}
+.checks ul{margin:4px 0 0;padding-left:0;list-style:none;display:flex;flex-direction:column;gap:4px}
+.checks label{display:flex;gap:8px;align-items:flex-start;font-size:13px;line-height:19px;color:var(--ink-2);cursor:pointer}
+.checks input{margin-top:3px}
+.checks label:has(input:checked){color:var(--muted);text-decoration:line-through}
+.tryact{gap:8px;flex-wrap:wrap}
+.inrepo{display:flex;flex-direction:column;gap:6px}
+.inrepo[open]{display:flex}
+.inrepo summary{cursor:pointer;font-size:13px;color:var(--accent)}
+.tryit .after{border-top:1px solid var(--line-soft);padding-top:12px;font-size:13px;color:var(--ink-2)}
+.trybar{display:flex;flex-direction:column;gap:6px}
+.trybar .lbl{font-size:13px;font-weight:500;color:var(--muted)}
 .planw{border:1px solid var(--line);border-radius:10px;background:var(--ground)}
 .planw>summary{display:flex;align-items:baseline;gap:10px;padding:10px 14px;cursor:pointer;list-style:none;flex-wrap:wrap}
 .planw>summary::-webkit-details-marker{display:none}

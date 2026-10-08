@@ -41,6 +41,7 @@ import { type McpProbe, mcpHealthOf } from "../app/mcpHealth.ts";
 import { modelsHealthOf } from "../app/modelHealth.ts";
 import { resumableOf } from "../app/resumable.ts";
 import type { Runtime } from "../app/runtime.ts";
+import { tryOutOf } from "../app/tryOut.ts";
 import { type OpenIn, reviewFiles } from "../cli/checkout.ts";
 import { humanMove } from "../cli/commands/human.ts";
 import type { Actor } from "../core/domain/actor.ts";
@@ -1271,11 +1272,12 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
         reasons,
       );
       const editor = options.open?.(run.workspace.path, files);
+      // back where it was asked: the run page, or the implementation's page («Try it»)
+      const ret = form.get("return") ?? "";
+      const where = ret.startsWith(`/runs/${short}/artifacts/`) && !/[?#]/.test(ret) ? ret : `/runs/${short}`;
       return redirect(
         r,
-        editor
-          ? `/runs/${short}?notice=opened&editor=${encodeURIComponent(editor)}`
-          : `/runs/${short}?notice=no-editor`,
+        editor ? `${where}?notice=opened&editor=${encodeURIComponent(editor)}` : `${where}?notice=no-editor`,
       );
     }
     if (m[2] === "cancel") {
@@ -1505,6 +1507,14 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
         ...(preparing ? { preparing } : {}),
       };
       if (type === "implementation") {
+        let workflow: ReturnType<LocalWorkflowEngine["workflow"]> | undefined;
+        try {
+          workflow = engine.workflow(run.workflow);
+        } catch {
+          workflow = undefined;
+        }
+        const t = tryOutOf(runtime, run, { ...(workflow ? { workflow } : {}), homeDir: options.homeDir });
+        if (t) Object.assign(extras, { tryOut: t });
         const d = await diffOf(run);
         Object.assign(extras, d.files ? { diff: d.files } : {}, d.note ? { diffNote: d.note } : {});
       }

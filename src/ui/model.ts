@@ -11,6 +11,7 @@ import { type PlanProgress, planProgressOf } from "../app/planProgress.ts";
 import { type Resumable, resumableOf } from "../app/resumable.ts";
 import type { Runtime } from "../app/runtime.ts";
 import type { RunTokens } from "../app/status.ts";
+import { type TryOut, tryOutOf } from "../app/tryOut.ts";
 import { type Change, changesIn, homePath } from "../cli/checkout.ts";
 import { changedFilesOf, type DocFacts, docFacts, reasonsOf } from "../cli/gate.ts";
 import type { ArtifactVersion } from "../core/domain/artifact.ts";
@@ -74,6 +75,8 @@ export interface ApprovalCard {
   readonly excerpt?: string;
   readonly files?: ReadonlyArray<{ path: string; added: number; removed: number }>;
   readonly decision?: Decision;
+  /** The implementation gate: one line into the checkout and to start the project (src/app/tryOut.ts). */
+  readonly tryOut?: TryOut;
 }
 
 /** A stop on a budget (src/app/budgetStop.ts): more and go on, or finish the step with what it has. */
@@ -296,6 +299,7 @@ export async function waitCardOf(runtime: Runtime, run: Run, homeDir: string): P
     const facts = docFacts(awaited.artifact.name, text);
     const files = awaited.type === "implementation" ? await changedFilesOf(run).catch(() => []) : [];
     const decision = decisionOn(runtime, awaited.artifact);
+    const tryOut = awaited.type === "implementation" ? tryOutOf(runtime, run, { homeDir }) : undefined;
     return {
       kind: "approval",
       type: awaited.type,
@@ -303,6 +307,7 @@ export async function waitCardOf(runtime: Runtime, run: Run, homeDir: string): P
       ...(facts ? { facts } : { excerpt: text.split("\n").slice(0, 8).join("\n") }),
       ...(files.length > 0 ? { files } : {}),
       ...(decision ? { decision } : {}),
+      ...(tryOut ? { tryOut } : {}),
     };
   }
   return { kind: "other", what: kind ?? "a decision" };
