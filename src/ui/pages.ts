@@ -867,7 +867,7 @@ ${cmd(cdTo(t.checkoutShown))}</li>
 <li><b>Start the project</b>
 ${
   t.start.length > 0
-    ? html`<span class="hint">${t.guessed ? html`guessed from package.json — set <code>workspace.try.run</code> in .jarvis/project.yaml to be sure` : "from workspace.try in .jarvis/project.yaml"}</span>${t.start.map(cmd)}`
+    ? html`${t.rebuild.length > 0 ? html`<span class="hint">the run changed what the project reads built — rebuild first (<code>tools.rebuild</code>)</span>${t.rebuild.map(cmd)}` : ""}<span class="hint">${t.guessed ? html`guessed from package.json — set <code>workspace.try.run</code> in .jarvis/project.yaml to be sure` : "from workspace.try in .jarvis/project.yaml"}</span>${t.start.map(cmd)}`
     : html`<span class="hint warn">no start command known — set <code>workspace.try.run</code> in .jarvis/project.yaml (e.g. <code>yarn start-dev</code>)</span>`
 }${t.url ? html`<span class="hint">then open <a href="${t.url}" target="_blank" rel="noopener">${t.url}</a></span>` : ""}${t.note ? html`<span class="hint">${t.note}</span>` : ""}</li>
 ${

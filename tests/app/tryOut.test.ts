@@ -122,6 +122,23 @@ describe("Try it", () => {
     );
   });
 
+  it("puts the rebuilds the run's changes call for before the start", async () => {
+    const { run, rt, sb } = await setUp(
+      'version: 1\nworkspace:\n  mode: worktree\n  setup: "yarn install --immutable"\n  try: { run: "yarn workspace web start-dev" }\ntools:\n  local: { build-lib: "yarn build:lib" }\n  rebuild:\n    - { when: ["packages/lib/**"], run: build-lib }\n',
+    );
+    const lib = tryOutOf(rt, run, { homeDir: sb.home, changed: ["packages/lib/src/a.ts", "apps/web/b.ts"] });
+    expect(lib?.rebuild).toEqual(["yarn build:lib"]);
+    expect(tryCommand(lib as NonNullable<typeof lib>)).toBe(
+      "cd ~/.jarvis/worktrees/web/1a2b3c4d-ABC-42 && yarn build:lib && yarn workspace web start-dev",
+    );
+    expect(lib?.inRepo?.commands.slice(1)).toEqual([
+      "yarn install --immutable",
+      "yarn build:lib",
+      "yarn workspace web start-dev",
+    ]);
+    expect(tryOutOf(rt, run, { homeDir: sb.home, changed: ["apps/web/b.ts"] })?.rebuild).toEqual([]);
+  });
+
   it("guesses the start command from package.json when the project does not say it", async () => {
     const { run, rt, sb } = await setUp("version: 1\nworkspace: { mode: worktree }\n");
     const t = tryOutOf(rt, run, { homeDir: sb.home });

@@ -7,6 +7,7 @@ import { impactOf, repoIdOf, updateGraph } from "../../knowledge/graph/update.ts
 import { loadStandards } from "../../knowledge/standards.ts";
 import { verifyModuleStep } from "../../onboarding/moduleRun.ts";
 import type { DeterministicTool } from "../executors.ts";
+import { rebuildsFor } from "./rebuild.ts";
 
 /**
  * Deterministic tools that need nothing but the stores. Repository, git, test and typecheck
@@ -306,11 +307,45 @@ export const BUILTIN_TOOLS: Record<string, DeterministicTool> = {
     const changed = await changedFiles(workspace, base);
     const results: Array<{ check: string; command: string; ok: boolean; skipped?: string; tail?: string }> =
       [];
-    for (const [name, command] of Object.entries(ctx.runtime.loaded.config.tools.local)) {
+    const tools = ctx.runtime.loaded.config.tools;
+    // what the checks read built: rebuilt first, from the run's sources
+    const rebuilt: string[] = [];
+    for (const name of rebuildsFor(tools, changed)) {
+      const command = tools.local[name];
+      if (!command) {
+        results.push({
+          check: `rebuild:${name}`,
+          command: name,
+          ok: false,
+          tail: `no tools.local command "${name}"`,
+        });
+        continue;
+      }
+      const r = await ctx.tools.invoke(`project.${name}`, {});
+      results.push({
+        check: `rebuild:${name}`,
+        command,
+        ok: r.ok,
+        ...(r.ok ? {} : { tail: (r.text ?? r.denied ?? "").split("\n").slice(-40).join("\n") }),
+      });
+      if (r.ok) rebuilt.push(name);
+    }
+    for (const [name, command] of Object.entries(tools.local)) {
       if (!/^(test|typecheck)/.test(name)) continue;
       const dir = /^\s*cd\s+([^\s&;]+)\s*&&/.exec(command)?.[1]?.replace(/\/+$/, "");
       const inScope = dir ? changed.filter((f) => f === dir || f.startsWith(`${dir}/`)) : changed;
       const code = inScope.filter((f) => /\.(tsx?|jsx?|mjs|cjs)$/.test(f));
+      // a package that reads what was rebuilt: its types may break with no file of its own changed
+      if (code.length === 0 && name.startsWith("typecheck") && rebuilt.length > 0) {
+        const r = await ctx.tools.invoke(`project.${name}`, {});
+        results.push({
+          check: name,
+          command,
+          ok: r.ok,
+          ...(r.ok ? {} : { tail: (r.text ?? r.denied ?? "").split("\n").slice(-40).join("\n") }),
+        });
+        continue;
+      }
       if (code.length === 0) {
         results.push({ check: name, command, ok: true, skipped: "no changed code in its scope" });
         continue;

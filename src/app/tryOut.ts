@@ -4,6 +4,7 @@ import type { Runtime } from "../app/runtime.ts";
 import { homePath } from "../cli/checkout.ts";
 import type { Run } from "../core/domain/run.ts";
 import { STEP_DONE, type WorkflowDefinition } from "../core/domain/workflow.ts";
+import { rebuildsFor } from "../orchestration/tools/rebuild.ts";
 import { shortRunId } from "../storage/runStore.ts";
 
 /**
@@ -25,6 +26,8 @@ export interface TryOut {
   /** The commands that start the project; `guessed` — from package.json, not from `workspace.try`. */
   readonly start: readonly string[];
   readonly guessed: boolean;
+  /** `tools.rebuild` the run's changes call for: before the start (the start reads them built). */
+  readonly rebuild: readonly string[];
   readonly url?: string;
   readonly note?: string;
   /** The same in the main repository: a branch of one's own from the run's branch. */
@@ -101,22 +104,37 @@ const stepName = (to: string) => (to === STEP_DONE ? "the run completes" : to);
 export function tryOutOf(
   runtime: Runtime,
   run: Run,
-  options: { readonly workflow?: WorkflowDefinition; readonly homeDir?: string } = {},
+  options: {
+    readonly workflow?: WorkflowDefinition;
+    readonly homeDir?: string;
+    /** The files the run changed against its base. */
+    readonly changed?: readonly string[];
+  } = {},
 ): TryOut | undefined {
-  const { workflow, homeDir = "" } = options;
+  const { workflow, homeDir = "", changed = [] } = options;
   const ws = run.workspace;
   if (ws.mode !== "worktree" || !existsSync(ws.path)) return undefined;
   const config = runtime.loaded.config.workspace;
   const declared = config.try?.run;
   const start = declared ? (typeof declared === "string" ? [declared] : [...declared]) : guessStart(ws.path);
   const setup = config.setup;
+  const tools = runtime.loaded.config.tools;
+  const rebuild = rebuildsFor(tools, changed).flatMap((name) => {
+    const command = tools.local[name];
+    return command ? [command] : [];
+  });
   const short = shortRunId(run.id);
   const inRepo =
     ws.branch && ws.repoRoot !== ws.path
       ? {
           repoRoot: ws.repoRoot,
           repoShown: homePath(ws.repoRoot, homeDir),
-          commands: [`git switch -c try-${short} ${ws.branch}`, ...(setup ? [setup] : []), ...start],
+          commands: [
+            `git switch -c try-${short} ${ws.branch}`,
+            ...(setup ? [setup] : []),
+            ...rebuild.filter((c) => !setup?.includes(c)),
+            ...start,
+          ],
         }
       : undefined;
   const tests = json(runtime, run.id, "tests");
@@ -134,6 +152,7 @@ export function tryOutOf(
     ...(setup ? { setup } : {}),
     start,
     guessed: !declared,
+    rebuild,
     ...(config.try?.url ? { url: config.try.url } : {}),
     ...(config.try?.note ? { note: config.try.note } : {}),
     ...(inRepo ? { inRepo } : {}),
@@ -171,5 +190,5 @@ export function cdTo(path: string): string {
 
 /** One line to paste: into the checkout and start. */
 export function tryCommand(t: TryOut): string {
-  return [cdTo(t.checkoutShown), ...t.start].join(" && ");
+  return [cdTo(t.checkoutShown), ...t.rebuild, ...t.start].join(" && ");
 }

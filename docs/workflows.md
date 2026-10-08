@@ -63,7 +63,7 @@ flowchart LR
 ```
 
 `verify` — composite из `tests` (агент), `standards` (`standards.check`), `checks` (`project.checks`: команды
-`tools.local` для изменённых пакетов), `docs` и `telemetry` (агенты), все параллельно. `needs_clarification` — не ребро, а парковка: AgenticExecutor открывает тред
+`tools.local` для изменённых пакетов; сначала `tools.rebuild`, после пересборки — `typecheck*` всех пакетов), `docs` и `telemetry` (агенты), все параллельно. `needs_clarification` — не ребро, а парковка: AgenticExecutor открывает тред
 уточнения, run ждёт человека, после решения тот же шаг исполняется заново с решением в контексте.
 
 | Шаг | Вид | Входы | Выход |

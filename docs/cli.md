@@ -207,8 +207,10 @@ implementation → verify (standards, checks) → review → approve-impl`. Бе
 которые перечитывали одни и те же файлы. Implementation без плана реализует требования spec и пишет тесты,
 которых требуют её критерии приёмки. `verify` — без модели: стандарты и проверки проекта (`project.checks`):
 команды `tools.local` с именами `test*`/`typecheck*`, в пакете которых (`cd <dir> && …`) есть изменённый код;
-jest — только связанные тесты (`--findRelatedTests`, с `--passWithNoTests`: нет связанных тестов — не провал). Упавшая проверка — возврат в implementation с командой и
-хвостом вывода. Для фич — `jarvis work` (`sdd`).
+jest — только связанные тесты (`--findRelatedTests`, с `--passWithNoTests`: нет связанных тестов — не провал). Перед ними —
+`tools.rebuild`: сборка того, что пакеты читают собранным (общая библиотека монорепо), если её файлы менялись;
+после сборки `typecheck*` идут и для пакетов без своих изменений. Упавшая проверка или сборка — возврат в
+implementation с командой и хвостом вывода. Для фич — `jarvis work` (`sdd`).
 
 ### `jarvis research <task> [--base <ref>] [--fresh design]` / `jarvis spec <task> [--base <ref>] [--fresh design]`
 

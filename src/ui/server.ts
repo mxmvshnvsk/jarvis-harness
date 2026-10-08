@@ -1513,9 +1513,13 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
         } catch {
           workflow = undefined;
         }
-        const t = tryOutOf(runtime, run, { ...(workflow ? { workflow } : {}), homeDir: options.homeDir });
-        if (t) Object.assign(extras, { tryOut: t });
         const d = await diffOf(run);
+        const t = tryOutOf(runtime, run, {
+          ...(workflow ? { workflow } : {}),
+          homeDir: options.homeDir,
+          changed: (d.files ?? []).map((f) => f.path),
+        });
+        if (t) Object.assign(extras, { tryOut: t });
         Object.assign(extras, d.files ? { diff: d.files } : {}, d.note ? { diffNote: d.note } : {});
       }
       return page(

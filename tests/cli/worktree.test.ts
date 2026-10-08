@@ -235,6 +235,60 @@ steps:
     );
   });
 
+  it("project.checks rebuilds what a package reads built, then typechecks its dependents (tools.rebuild)", async () => {
+    sb.write(
+      "project/.jarvis/project.yaml",
+      [
+        "version: 1",
+        "workspace: { mode: cwd, allowWrites: true }",
+        "tools:",
+        "  local:",
+        '    build-lib: "echo lib built"',
+        '    build-docs: "echo docs && exit 4"',
+        '    typecheck-app: "cd app && echo typecheck app"',
+        '    test-app: "cd app && echo never"',
+        "  rebuild:",
+        '    - { when: ["lib/**"], run: build-lib }',
+        '    - { when: ["lib/**/*.ts"], run: build-lib }',
+        '    - { when: ["docs/**"], run: build-docs }',
+      ].join("\n"),
+    );
+    sb.write("project/app/index.ts", "export {};\n");
+    sb.write(
+      "project/.jarvis/workflows/chk.yaml",
+      `name: chk
+entry: change
+steps:
+  - id: change
+    kind: deterministic
+    tool: repo.write
+    args: { path: "lib/a.ts", content: "export const a = 1;\\n" }
+    transitions: { onSuccess: checks }
+  - id: checks
+    kind: deterministic
+    tool: project.checks
+    outputs: [checks]
+    transitions: { onSuccess: DONE, onOutcome: { defects_found: { to: change, maxIterations: 1 } } }
+`,
+    );
+    sh(sb.project, ["add", "-A"]);
+    sh(sb.project, ["commit", "-q", "-m", "checks"]);
+    await jarvis(["work", "T-3", "--workflow", "chk"]);
+    const loaded = await loadConfig({ cwd: sb.project, homeDir: sb.home, env: {} });
+    const rt = createRuntime(loaded, { env: {} });
+    const runId = rt.runs.list({ includeTerminal: true })[0]?.id as string;
+    const checks = JSON.parse(rt.artifacts.text(rt.artifacts.listLatest(runId, "checks")[0] as never)) as {
+      results: Array<{ check: string; command: string; ok: boolean; skipped?: string }>;
+    };
+    rt.close();
+    // once per command; the docs build is not called for; the app is typechecked with no file of its own changed
+    expect(checks.results.map((r) => [r.check, r.ok, r.skipped ?? ""])).toEqual([
+      ["rebuild:build-lib", true, ""],
+      ["typecheck-app", true, ""],
+      ["test-app", true, "no changed code in its scope"],
+    ]);
+  });
+
   it("restores the worktree to the last checkpoint on resume", async () => {
     const loaded = await loadConfig({ cwd: sb.project, homeDir: sb.home, env: {} });
     const wt = await WorktreeWorkspace.create({

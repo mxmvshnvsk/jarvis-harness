@@ -299,7 +299,10 @@ export async function waitCardOf(runtime: Runtime, run: Run, homeDir: string): P
     const facts = docFacts(awaited.artifact.name, text);
     const files = awaited.type === "implementation" ? await changedFilesOf(run).catch(() => []) : [];
     const decision = decisionOn(runtime, awaited.artifact);
-    const tryOut = awaited.type === "implementation" ? tryOutOf(runtime, run, { homeDir }) : undefined;
+    const tryOut =
+      awaited.type === "implementation"
+        ? tryOutOf(runtime, run, { homeDir, changed: files.map((f) => f.path) })
+        : undefined;
     return {
       kind: "approval",
       type: awaited.type,

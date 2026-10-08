@@ -203,6 +203,16 @@ export const McpConfigSchema = z.strictObject({
 export const ToolsConfigSchema = z.strictObject({
   /** Project commands exposed as `project.<name>` capabilities (tests, typecheck, lint, …). */
   local: z.record(z.string(), z.string().min(1)).prefault({}),
+  /**
+   * Builds the checks depend on: before `project.checks`, the `tools.local` command `run` when a changed
+   * file matches `when` (globs), and then every `typecheck*` check, whatever its scope — its package
+   * reads the built output (a monorepo's shared library in its publish folder). Pilot: the app was
+   * typechecked against the library built by `setup` before the run's changes, and passed; the build
+   * failed afterwards. «Try it» puts the same commands before the start.
+   */
+  rebuild: z
+    .array(z.strictObject({ when: z.array(z.string().min(1)).min(1), run: z.string().min(1) }))
+    .default([]),
   /** Expose `shell.run` for arbitrary commands inside the workspace. Off by default. */
   shell: z.boolean().default(false),
   /** Tool output returned to the agent is capped; the full (redacted) output is kept as a blob. */
