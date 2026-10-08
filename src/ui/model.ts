@@ -1023,21 +1023,45 @@ export function fixOf(
   });
   if (start < 0 || iteration <= 1) return undefined;
   let loop: { edge?: string; iteration?: number; max?: number } | undefined;
+  let loopAt = -1;
   let prevEnd = -1;
   for (let i = start - 1; i >= 0; i--) {
     const e = events[i] as StoredEvent;
     const p = (e.payload ?? {}) as { stepId?: string; edge?: string };
-    if (!loop && e.kind === "workflow.loop" && typeof p.edge === "string" && p.edge.includes(`->${stepId}#`))
+    if (
+      !loop &&
+      e.kind === "workflow.loop" &&
+      typeof p.edge === "string" &&
+      p.edge.includes(`->${stepId}#`)
+    ) {
       loop = e.payload as typeof loop;
+      loopAt = i;
+    }
     if (e.kind === "step.finish" && (p.stepId ?? e.stepId) === stepId) {
       prevEnd = i;
+      break;
+    }
+  }
+  // a step only runs again «to fix» when a back edge sent the work to it; a later step on its next
+  // round (review after another implementation round) fixes nothing (pilot: review#3 showed «Fixing
+  // what … sent back» and four typecheck failures already fixed)
+  if (!loop) return undefined;
+  // the reasons of the round that sent it back: since the sending step last began
+  const from = loop.edge?.split("->")[0];
+  let fromStart = prevEnd;
+  for (let i = loopAt - 1; i > prevEnd; i--) {
+    const e = events[i] as StoredEvent;
+    const p = (e.payload ?? {}) as { stepId?: string };
+    if (e.kind === "step.start" && (p.stepId ?? e.stepId) === from) {
+      fromStart = i;
       break;
     }
   }
   const reasons: Array<{ step: string; text: string }> = [];
   let review: FixView["review"];
   let gate: string | undefined;
-  for (const e of events.slice(prevEnd + 1, start)) {
+  // a person's decision is recorded before the gate's step runs again: from the last round on
+  for (const [k, e] of events.slice(prevEnd + 1, loopAt).entries()) {
     if (e.kind === "approval.recorded") {
       const p = (e.payload ?? {}) as {
         artifactId?: unknown;
@@ -1063,7 +1087,7 @@ export function fixOf(
       }
       continue;
     }
-    if (e.kind !== "step.finish") continue;
+    if (e.kind !== "step.finish" || prevEnd + 1 + k <= fromStart) continue;
     const p = (e.payload ?? {}) as { stepId?: string; outcome?: string; status?: string; reason?: string };
     const bad =
       (p.outcome && p.outcome !== "success") ||

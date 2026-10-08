@@ -109,7 +109,9 @@ describe("live activity of a run", () => {
       ev(10, "model.progress", { modelId: "flash", outputChars: 0, reasoningChars: 12_000 }),
     ];
     const thinking = activityOf(events, at(200)) as NonNullable<ReturnType<typeof activityOf>>;
-    expect(formatActivity(thinking, { timeoutMs: 120_000 })).toContain("waiting 3:19, thinking ~3.0k tok ·");
+    expect(formatActivity(thinking, { timeoutMs: 120_000 })).toContain(
+      "waiting 3:19, thinking ~3.0k tok, nothing from the model for 3:10 ·",
+    );
     const receiving = activityOf(
       [...events, ev(20, "model.progress", { outputChars: 4_800, reasoningChars: 12_000 })],
       at(200),
@@ -118,6 +120,20 @@ describe("live activity of a run", () => {
     // the answer clears it
     const done = activityOf([...events, ev(30, "model.call", { latencyMs: 29_000 })], at(200));
     expect(done?.receiving).toBeUndefined();
+  });
+
+  it("says when a streamed answer went quiet: a piece that does not grow is not news", () => {
+    const events = [
+      ...RUN.slice(0, 3),
+      ev(10, "model.progress", { modelId: "flash", outputChars: 0, reasoningChars: 4_000 }),
+      ev(20, "model.progress", { modelId: "flash", outputChars: 0, reasoningChars: 8_000 }),
+      ev(60, "model.progress", { modelId: "flash", outputChars: 0, reasoningChars: 8_000 }),
+    ];
+    const flowing = activityOf(events, at(40)) as NonNullable<ReturnType<typeof activityOf>>;
+    expect(formatActivity(flowing)).not.toContain("nothing from the model");
+    const stuck = activityOf(events, at(200)) as NonNullable<ReturnType<typeof activityOf>>;
+    expect(stuck.quietMs).toBe(180_000);
+    expect(formatActivity(stuck)).toContain("thinking ~2.0k tok, nothing from the model for 3:00");
   });
 
   it("tells a slow answer from one past the model timeout", () => {

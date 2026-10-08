@@ -47,6 +47,9 @@ a{color:var(--accent)}a:hover{color:var(--accent-dark)}
 .ok{color:var(--ok)}.warn{color:var(--wait)}.bad{color:var(--bad)}
 .skip-link{position:absolute;left:-9999px}.skip-link:focus{left:16px;top:8px;background:var(--panel);padding:8px;z-index:9}
 .top{background:var(--panel);border-bottom:1px solid var(--line)}
+/* the header stays while the page scrolls: the models' and MCP popovers are looked at often (pilot);
+   on a narrow screen it wraps into rows and would eat the page, so it scrolls away there */
+@media (min-width:720px){.top{position:sticky;top:0;z-index:40}html{scroll-padding-top:84px}}
 .wrap{max-width:1240px;margin:0 auto;padding:0 24px}
 .top .wrap{padding-top:12px;padding-bottom:12px;display:flex;flex-wrap:wrap;align-items:center;gap:12px 24px}
 .brand{font-family:var(--mono);font-weight:600;font-size:17px;color:var(--ink);text-decoration:none}

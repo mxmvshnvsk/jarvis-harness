@@ -1,4 +1,4 @@
-import { type Activity, clock, compactingText, kilo, type ToolBatch } from "../app/activity.ts";
+import { type Activity, clock, compactingText, kilo, QUIET_MS, type ToolBatch } from "../app/activity.ts";
 import { type BudgetStop, sourceOf, unitOf } from "../app/budgetStop.ts";
 import { type BudgetWait, whenText } from "../app/budgetWait.ts";
 import { isStale, issueKeyOf, type StartPoint } from "../app/continuation.ts";
@@ -335,9 +335,14 @@ export function callText(a: Activity): Html {
       : `, thinking ~${kilo(Math.round(a.receiving.reasoningChars / 4))} tok`
     : "";
   const retry = a.retrying ? `, retry ${a.retrying.attempt} after ${a.retrying.reason}` : "";
+  // a stream that began and went quiet (it reports every few seconds): a slow or stuck provider, say so
+  const quiet =
+    a.receiving && a.quietMs !== undefined && a.quietMs >= QUIET_MS
+      ? html`, <span class="warn">nothing from the model for ${ticking(a.quietMs)}</span>`
+      : "";
   if (a.compacting)
-    return html`${compactingText(a.compacting)}, ${ticking(a.compacting.ms)}${coming}${retry}`;
-  return html`model call ${step.modelCalls + 1}, waiting ${ticking(a.waitingMs)}${coming}${retry}`;
+    return html`${compactingText(a.compacting)}, ${ticking(a.compacting.ms)}${coming}${quiet}${retry}`;
+  return html`model call ${step.modelCalls + 1}, waiting ${ticking(a.waitingMs)}${coming}${quiet}${retry}`;
 }
 
 /** `[8/18] implementation#2 · model call 12, waiting 0:21, receiving ~1.1k tok` */

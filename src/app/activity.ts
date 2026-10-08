@@ -49,6 +49,12 @@ export interface Activity {
   /** A streamed answer on its way: characters of the answer and of the reasoning so far. */
   readonly receiving?: { readonly outputChars: number; readonly reasoningChars: number };
   /**
+   * How long nothing came from the model on the call in flight (since the call or its last streamed
+   * piece). Pilot: a provider in trouble streamed nothing for three minutes and the page still said
+   * «thinking» — RUNNING, yellow models, and no way to tell a slow answer from a stuck one.
+   */
+  readonly quietMs?: number;
+  /**
    * The tools the step's agent asked for in one answer, the batch in flight or the last one: each call
    * on one clock from the batch's start (lanes), what is still running, and how long the batch took.
    */
@@ -167,6 +173,8 @@ export function activityOf(events: readonly StoredEvent[], now: Date = new Date(
     recent: Array<NonNullable<Activity["lastTool"]>>;
     retrying?: { attempt: number; reason: string } | undefined;
     receiving?: { outputChars: number; reasoningChars: number } | undefined;
+    /** The last piece of the answer in flight came then. */
+    heardAt?: string | undefined;
     compacting?: { kind: string; tokens: number; blocks: number; since: string } | undefined;
     batch?: LiveBatch | undefined;
   }
@@ -255,6 +263,7 @@ export function activityOf(events: readonly StoredEvent[], now: Date = new Date(
           if (live.agentActive) live.waitingSince = e.ts;
           live.retrying = undefined;
           live.receiving = undefined;
+          live.heardAt = undefined;
         }
         break;
       case "context.trimmed":
@@ -279,7 +288,16 @@ export function activityOf(events: readonly StoredEvent[], now: Date = new Date(
         if (live) live.compacting = undefined;
         break;
       case "model.progress":
-        if (live) live.receiving = { outputChars: num(p.outputChars), reasoningChars: num(p.reasoningChars) };
+        if (live) {
+          const was = live.receiving;
+          live.receiving = { outputChars: num(p.outputChars), reasoningChars: num(p.reasoningChars) };
+          // a piece arrived only when the counts grew
+          if (
+            !was ||
+            live.receiving.outputChars + live.receiving.reasoningChars > was.outputChars + was.reasoningChars
+          )
+            live.heardAt = e.ts;
+        }
         break;
       case "model.retry":
         // the wait keeps counting from the first attempt: the answer is still the same one
@@ -324,6 +342,7 @@ export function activityOf(events: readonly StoredEvent[], now: Date = new Date(
           if (live.agentActive) live.waitingSince = e.ts;
           live.retrying = undefined;
           live.receiving = undefined;
+          live.heardAt = undefined;
         }
         break;
       }
@@ -371,6 +390,11 @@ export function activityOf(events: readonly StoredEvent[], now: Date = new Date(
     ...(lastRetry ? { lastRetry } : {}),
     ...(current?.retrying && waitingMs !== undefined ? { retrying: current.retrying } : {}),
     ...(current?.receiving && waitingMs !== undefined ? { receiving: current.receiving } : {}),
+    ...((q) => (q !== undefined ? { quietMs: q } : {}))(
+      waitingMs !== undefined && waitingSince
+        ? Math.max(0, now.getTime() - Date.parse(current?.heardAt ?? waitingSince))
+        : undefined,
+    ),
     ...(current?.batch && !finished ? { batch: batchOf(current.batch, now) } : {}),
     ...(current?.compacting && !finished
       ? {
@@ -404,6 +428,9 @@ export function reasonOf(message: string | undefined): string {
   const rest = message.replace(/^model [^:]+:\s*/, "");
   return rest.split(/:\s/)[0]?.trim() || rest.slice(0, 40);
 }
+
+/** A streamed answer reports every few seconds; this long without a piece is worth saying. */
+export const QUIET_MS = 45_000;
 
 export function clock(ms: number): string {
   const s = Math.floor(ms / 1000);
@@ -499,7 +526,12 @@ export function formatActivity(a: Activity, options: FormatOptions = {}): string
       const retry = a.retrying ? `, retry ${a.retrying.attempt} after ${a.retrying.reason}` : "";
       // a streamed answer shows that it is coming: "waiting 4:10" alone read as a hung gateway (pilot)
       const coming = a.receiving && !a.retrying ? `, ${receivingText(a.receiving)}` : "";
-      wait = `, waiting ${clock(a.waitingMs)}${coming}${retry || (late && !coming) ? st.warn(`${retry}${coming ? "" : late}`) : ""}`;
+      // a stream that began and went quiet: a slow or stuck provider (pilot: three minutes of nothing)
+      const quiet =
+        coming && a.quietMs !== undefined && a.quietMs >= QUIET_MS
+          ? st.warn(`, nothing from the model for ${clock(a.quietMs)}`)
+          : "";
+      wait = `, waiting ${clock(a.waitingMs)}${coming}${quiet}${retry || (late && !coming) ? st.warn(`${retry}${coming ? "" : late}`) : ""}`;
     }
     // while waiting, name the call in flight: "0 calls, waiting 2:02" read as if nothing was asked (pilot)
     parts.push(

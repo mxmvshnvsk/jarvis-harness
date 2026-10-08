@@ -801,6 +801,69 @@ describe("New task on the page", () => {
     expect((await post(`/runs/${short}/pause`, { t: token })).location).toContain("notice=not-running");
   });
 
+  it("a later step on its next round fixes nothing; a fix shows only the round that sent it back", async () => {
+    await serve();
+    const run = createRun("ABC-42: Delivery slots on the order form");
+    rt.runs.update(run.id, { currentStep: "review", currentIteration: 2 });
+    rt.runs.transition(run.id, "RUNNING");
+    rt.runs.acquireLease(run.id, "cli:elsewhere", 90_000);
+    const ev = (kind: string, stepId: string, payload: Record<string, unknown>) =>
+      rt.events.emit({ kind, runId: run.id, stepId, payload });
+    ev("step.start", "review", { stepId: "review", iteration: 1 });
+    ev("step.finish", "review", { stepId: "review", status: "success" });
+    ev("step.start", "verify", { stepId: "verify", iteration: 1 });
+    ev("step.finish", "checks", {
+      stepId: "checks",
+      status: "success",
+      outcome: "defects_found",
+      reason: "typecheck-app failed",
+    });
+    ev("workflow.loop", "verify", { edge: "verify->implementation#defects_found", iteration: 1, max: 2 });
+    ev("step.start", "implementation", { stepId: "implementation", iteration: 2 });
+    ev("step.finish", "implementation", { stepId: "implementation", status: "success" });
+    ev("step.start", "verify", { stepId: "verify", iteration: 2 });
+    ev("step.finish", "checks", { stepId: "checks", status: "success" });
+    ev("step.start", "review", { stepId: "review", iteration: 2 });
+    ev("agent.start", "review", { agent: "review" });
+    const short = run.id.replace(/^run_/, "").slice(0, 8);
+    const body = await page(`/runs/${short}`);
+    expect(body).not.toContain('class="planw fixw"');
+    expect(body).not.toContain("typecheck-app failed");
+  });
+
+  it("a fix round lists only the reasons of the round that sent it back", async () => {
+    await serve();
+    const run = createRun("ABC-42: Delivery slots on the order form");
+    rt.runs.update(run.id, { currentStep: "implementation", currentIteration: 3 });
+    rt.runs.transition(run.id, "RUNNING");
+    rt.runs.acquireLease(run.id, "cli:elsewhere", 90_000);
+    const ev = (kind: string, stepId: string, payload: Record<string, unknown>) =>
+      rt.events.emit({ kind, runId: run.id, stepId, payload });
+    ev("step.start", "implementation", { stepId: "implementation", iteration: 2 });
+    ev("step.finish", "implementation", { stepId: "implementation", status: "success" });
+    ev("step.start", "verify", { stepId: "verify", iteration: 2 });
+    ev("step.finish", "checks", {
+      stepId: "checks",
+      status: "success",
+      outcome: "defects_found",
+      reason: "old: route missing",
+    });
+    ev("step.start", "verify", { stepId: "verify", iteration: 3 });
+    ev("step.finish", "checks", {
+      stepId: "checks",
+      status: "success",
+      outcome: "defects_found",
+      reason: "new: type mismatch",
+    });
+    ev("workflow.loop", "verify", { edge: "verify->implementation#defects_found", iteration: 2, max: 3 });
+    ev("step.start", "implementation", { stepId: "implementation", iteration: 3 });
+    ev("agent.start", "implementation", { agent: "implementation" });
+    const short = run.id.replace(/^run_/, "").slice(0, 8);
+    const body = await page(`/runs/${short}`);
+    expect(body).toContain("new: type mismatch");
+    expect(body).not.toContain("old: route missing");
+  });
+
   it("a round sent back at the review gate shows who sent it and the comment, open", async () => {
     await serve();
     const run = createRun("ABC-42: Delivery slots on the order form");
@@ -839,6 +902,7 @@ describe("New task on the page", () => {
       },
       "user:dev@example.com",
     );
+    ev("step.start", "approve-impl", { stepId: "approve-impl", iteration: 1 });
     ev("step.finish", "approve-impl", {
       stepId: "approve-impl",
       status: "success",
