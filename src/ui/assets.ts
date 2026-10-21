@@ -71,7 +71,9 @@ a{color:var(--accent)}a:hover{color:var(--accent-dark)}
 .top nav a:hover{background:var(--hover);color:var(--ink)}
 .top nav a[aria-current=page]{background:var(--panel);color:var(--ink);font-weight:500;box-shadow:0 0 0 1px var(--line)}
 .back{font-size:14px;padding:10px 0}
-.repo{display:flex;align-items:center;gap:8px;font-size:14px;color:var(--muted)}
+.repo{display:flex;align-items:center;gap:8px;font-size:14px;color:var(--muted);min-width:0}
+/* pilot: one long repository name stretched the select across the top bar and pushed the status off it */
+.repo select{width:auto;max-width:220px;height:32px;text-overflow:ellipsis}
 select,textarea,input[type=text],input[type=search]{font-family:inherit;font-size:14px;color:var(--ink);border:1px solid var(--field-line);border-radius:var(--r);background:var(--panel)}
 textarea:focus,input[type=text]:focus,select:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
 textarea::placeholder,input::placeholder{color:var(--faint);opacity:1}

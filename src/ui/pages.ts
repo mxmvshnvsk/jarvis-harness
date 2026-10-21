@@ -484,11 +484,11 @@ function recentState(run: Run): Html {
 
 export function repoPicker(page: RunsPage): Html {
   if (page.repos.length < 2) return html``;
-  return html`<form class="repo" method="get" action="/"><label class="repo" for="repo">repository</label>
-<select id="repo" name="repo" data-autosubmit>
-<option value=""${page.repo ? "" : html` selected`}>all repositories</option>
-${page.repos.map((r) => html`<option value="${r.root}"${r.root === page.repo ? html` selected` : ""}>${r.name} (${r.runs})</option>`)}
-</select><button type="submit" class="btn sr">Show</button></form>`;
+  return html`<form class="repo" method="get" action="/"><label class="sr" for="repo">${t("Repository")}</label>
+<select id="repo" name="repo" data-autosubmit title="${page.repos.find((r) => r.root === page.repo)?.root ?? t("all repositories")}">
+<option value=""${page.repo ? "" : html` selected`}>${t("all repositories")}</option>
+${page.repos.map((r) => html`<option value="${r.root}" title="${r.root}"${r.root === page.repo ? html` selected` : ""}>${r.name.length > 32 ? `${r.name.slice(0, 31)}…` : r.name} (${r.runs})</option>`)}
+</select><button type="submit" class="btn sr">${t("Show")}</button></form>`;
 }
 
 /** What the page started (src/ui/launcher.ts) and has no run of yet: preparing, or failed before one. */

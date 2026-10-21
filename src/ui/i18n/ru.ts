@@ -1611,6 +1611,10 @@ export const RU: Readonly<Record<string, string>> = {
   "autonomous: the task stays in this service": "автономно: задача остаётся в этом сервисе",
   "autonomous: the contract stays as agreed": "автономно: контракт остаётся как договорились",
   "autonomous: nobody to decide — the run ends": "автономно: решать некому — прогон закончен",
+  // ---- the repository picker
+  Repository: "Репозиторий",
+  "all repositories": "все репозитории",
+  Show: "Показать",
 };
 
 /**
