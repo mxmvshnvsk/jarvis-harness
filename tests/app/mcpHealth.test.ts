@@ -88,7 +88,7 @@ describe("mcpHealth", () => {
     });
   });
 
-  it("a check without an answer, a forbidden network or an unknown profile is down", () => {
+  it("a check without an answer or an unknown profile is down; a network the project keeps the agents off is a warning", () => {
     expect(
       mcpHealth(
         input({
@@ -99,8 +99,9 @@ describe("mcpHealth", () => {
     const restricted = mcpHealth(
       input({ dataClass: "confidential", reports: [report({ network: "internet" })] }),
     );
-    expect(restricted.state).toBe("down");
+    expect(restricted.state).toBe("busy");
     expect(restricted.servers[0]?.egressAllowed).toBe(false);
+    expect(restricted.servers[0]?.reasons[0]).toContain("agents do not get it");
     // the project's exception: out of the data class's network on purpose, said, not a fault
     const excepted = mcpHealth(
       input({

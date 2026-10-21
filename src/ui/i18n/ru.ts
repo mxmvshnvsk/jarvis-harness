@@ -1615,6 +1615,14 @@ export const RU: Readonly<Record<string, string>> = {
   Repository: "Репозиторий",
   "all repositories": "все репозитории",
   Show: "Показать",
+  // ---- MCP servers and their network
+  attention: "внимание",
+  "Agents do not get it: the project's dataClass keeps them off the {network} network. To let them in, add it to {key} in .jarvis/project.yaml — the top bar then warns about it on every page.":
+    "Агентам он недоступен: dataClass проекта не пускает их в сеть {network}. Чтобы пустить, добавьте сервер в {key} в .jarvis/project.yaml — тогда на каждой странице под шапкой будет предупреждение.",
+  "the project's dataClass keeps the agents off this network":
+    "dataClass проекта не пускает агентов в эту сеть",
+  "{network}: off for agents": "{network}: агентам закрыт",
+  "{network} by exception": "{network} по исключению",
 };
 
 /**

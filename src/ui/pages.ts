@@ -2635,7 +2635,7 @@ export function mcpSummary(h: McpHealth): string {
   if (h.servers.length === 0) return t("MCP: no servers configured");
   const worst = h.servers.find((s) => s.state === h.state);
   const why = worst?.reasons[0];
-  return `MCP: ${t(HEALTH[h.state].label)}${worst && h.state !== "ok" && h.state !== "idle" ? ` — ${worst.id}${why ? `: ${why}` : ""}` : ""}`;
+  return `MCP: ${t(h.state === "busy" ? "attention" : HEALTH[h.state].label)}${worst && h.state !== "ok" && h.state !== "idle" ? ` — ${worst.id}${why ? `: ${why}` : ""}` : ""}`;
 }
 
 const day = (ts: string) => `${ts.slice(0, 10)} ${wall(ts)}`;
@@ -2724,8 +2724,17 @@ function serverHtml(s: McpServerHealth): Html {
       : []),
   ];
   return html`<li class="mh">
-<div class="row"><span class="dot" data-state="${s.checking && !p ? "pending" : s.state}" aria-hidden="true"></span><b class="mono">${s.id}</b><span class="pill ${HEALTH[s.state].pill}">${t(HEALTH[s.state].label)}</span><span class="meta">${s.profile ? t("profile {name}", { name: s.profile }) : s.readOnly ? "readOnly" : t("no profile")} · ${s.network}${s.egressException ? " ⚠" : s.egressAllowed ? "" : " ✗"} · ${s.transport}</span></div>
-${s.reasons.length > 0 ? html`<ul class="why">${s.reasons.map((x) => html`<li>${x}</li>`)}</ul>` : ""}
+<div class="row"><span class="dot" data-state="${s.checking && !p ? "pending" : s.state}" aria-hidden="true"></span><b class="mono">${s.id}</b>${s.egressAllowed ? html`<span class="pill ${HEALTH[s.state].pill}">${t(HEALTH[s.state].label)}</span>` : html`<span class="pill wait" title="${t("the project's dataClass keeps the agents off this network")}">${t("{network}: off for agents", { network: s.network })}</span>`}${s.egressException ? html`<span class="pill wait" title="${s.egressException}">⚠ ${t("{network} by exception", { network: s.network })}</span>` : ""}<span class="meta">${s.profile ? t("profile {name}", { name: s.profile }) : s.readOnly ? "readOnly" : t("no profile")} · ${s.network} · ${s.transport}</span></div>
+${
+  s.reasons.length > 0
+    ? html`<ul class="why">${s.reasons.map((x) =>
+        // the network the project keeps the agents off: said in the page's language, with what to do
+        x.startsWith("agents do not get it:")
+          ? html`<li>${th("Agents do not get it: the project's dataClass keeps them off the {network} network. To let them in, add it to {key} in .jarvis/project.yaml — the top bar then warns about it on every page.", { network: s.network, key: html`<code>egressExceptions</code>` })}</li>`
+          : html`<li>${x}</li>`,
+      )}</ul>`
+    : ""
+}
 <span class="meta mono">${s.target}${s.auth ? ` · auth ${s.auth}` : ""}</span>
 <dl class="perf">${rows.map(([k, v]) => html`<dt>${k}</dt><dd>${v}</dd>`)}</dl>
 </li>`;
@@ -2734,7 +2743,10 @@ ${s.reasons.length > 0 ? html`<ul class="why">${s.reasons.map((x) => html`<li>${
 /** The popover's body: each server, a check on demand, then where the rest is. */
 export function mcpPopover(h: McpHealth, options: { readonly checkToken?: string } = {}): Html {
   const checking = h.servers.some((s) => s.checking);
-  return html`<div class="pop-head"><b>MCP</b><span class="pill ${HEALTH[h.state].pill}">${t(HEALTH[h.state].label)}</span><span class="meta">${t("at {at}", { at: wall(h.at) })}</span>${
+  // a server only kept off its network is a warning, not work in progress
+  const head = h.state === "busy" ? { label: "attention", pill: "wait" } : HEALTH[h.state];
+  // t("attention")
+  return html`<div class="pop-head"><b>MCP</b><span class="pill ${head.pill}">${t(head.label)}</span><span class="meta">${t("at {at}", { at: wall(h.at) })}</span>${
     options.checkToken && h.servers.length > 0
       ? checking
         ? html`<span class="spin" aria-hidden="true"></span>`

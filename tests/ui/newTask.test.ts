@@ -56,7 +56,9 @@ describe("New task", () => {
     expect(one).toContain("data-go>Run</button>");
     expect(one).toContain("<b>Specification</b> — up to an approved spec");
     // autonomous runs are offered, marked as experimental
-    expect(one).toContain('<input type="checkbox" name="autonomous" value="1"> Autonomous <span class="pill wait">experimental</span>');
+    expect(one).toContain(
+      '<input type="checkbox" name="autonomous" value="1"> Autonomous <span class="pill wait">experimental</span>',
+    );
     // research alone is not offered: a spec starts with it (Ask is for questions)
     expect(one).not.toContain('value="research"');
     expect(one).not.toContain(" disabled>");

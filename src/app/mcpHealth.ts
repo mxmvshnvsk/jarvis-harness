@@ -129,7 +129,11 @@ export function mcpHealth(input: McpHealthInput): McpHealth {
     const down: string[] = [];
     const busy: string[] = [];
     if (r.error) down.push(r.error);
-    if (!egressAllowed) down.push(`the project's dataClass does not allow the ${r.network} network`);
+    // not a fault of the server: the project keeps the agents off its network (ADR-0016), said as a warning
+    if (!egressAllowed)
+      busy.push(
+        `agents do not get it: the project's dataClass (${input.dataClass}) keeps them off the ${r.network} network — an egressExceptions entry in .jarvis/project.yaml lets them in`,
+      );
     if (probe && !probe.ok) down.push(`did not answer the check: ${probe.error ?? "error"}`);
     if (!r.discovered && !probe) busy.push("never discovered — its tools are unknown");
     if (r.unmapped.length > 0) busy.push(`the server lacks tools for ${r.unmapped.join(", ")}`);
