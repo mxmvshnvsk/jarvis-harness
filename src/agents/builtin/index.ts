@@ -56,7 +56,7 @@ Method:
 - Search the repository for the concepts, identifiers, routes, events and tests involved. Open the files that matter; quote paths and line numbers. For a class or a method you know by name, graph.symbol answers in one call where it is, its implementations and who calls it.
 - Record where similar behaviour already exists and how it is implemented.
 - Separate facts you verified in files from assumptions. Anything you could not verify goes to "unknowns" — never invent.
-- Decide which requirements are this repository's to implement and which belong to other systems (other teams' services and APIs): from the project knowledge, the repository's structure and how sources are labelled (e.g. a page titled «… | FRONT» or «… | BACK»). Another system's requirements are a contract this repository consumes: list what it needs from that system in "dependencies", not as work. When the sources input ends with API methods checked against the contract map, that check is settled: a method in the map exists (status "exists"), one not in it does not yet ("missing") — take it as is and do not search the code for those methods again.
+- Decide which requirements are this repository's to implement and which belong to other systems (other teams' services and APIs): from the project knowledge, the repository's structure and how sources are labelled (e.g. a page titled «… | FRONT» or «… | BACK»). Another system's requirements are a contract this repository consumes: list what it needs from that system in "dependencies", not as work. A related-work input shows what related tasks already changed in their branches (contract fields, endpoints): that is the other side's contract as it is being built — use it, and say it is in a branch, not merged. When the sources input ends with API methods checked against the contract map, that check is settled: a method in the map exists (status "exists"), one not in it does not yet ("missing") — take it as is and do not search the code for those methods again.
 - Check the requirements against each other and the design. Two sources that disagree, one rule giving the same condition to two different branches («A: flag = true», «not A: flag = true or null»), text against design — each goes to "contradictions" with both sides, sources and one question for the analyst. Never pick a reading silently. Code that differs from a requirement is the change to make, not a contradiction — unless the code shows the requirement cannot hold as written. A contradiction inside another system's spec counts only when it changes what this repository receives; its "owner" is then that system.
 - Keep findings specific: a finding names a topic, what the code does, and the sources.
 - When a business term of the task led you to code under another name («повторная регистрация» → canRestartOnboarding), record it in "termLinks": the term as the task says it and the symbols or module paths you verified in files. These become glossary proposals for a person.
@@ -101,12 +101,13 @@ Method:
 - State non-goals explicitly. List risks and open questions instead of guessing.
 - A question for a person (open questions, the clarification) is read at the gate by someone who will not open your tools: name what it is about as they see it — the screen by its title or its section («To be - …»), the field by its label, the text in «» — and give the answers you see. A Figma node id, a requirement id or a path goes to refs and sources, never into the question. A design frame labelled To be or AS IS by its section answers which variant is the target: do not ask it.
 - Consult the repository only to make requirements concrete (names of modules, existing behaviour); do not design the implementation.
+- A related-work input is what related tasks already did in their branches, not merged yet: build on the contract it shows (fields, endpoints) and list each such branch in dependencies with its issue, branch, commit and PR state; never assume what the branch does not have.
 Produce the result document when every requirement has acceptance criteria.`,
   capabilities: ["repo.read", "repo.list", "repo.search"],
   requires: { tools: true, structuredOutput: "json" },
   output: { type: "spec", schema: SpecResult, outcomes: ["ok"] },
   limits: { ...DEFAULT_LIMITS, maxToolCalls: 20 },
-  contextInputs: ["research", "design", "requirement-correction"],
+  contextInputs: ["research", "design", "requirement-correction", "related-work"],
 };
 
 export const IMPACT_AGENT: AgentDefinition = {
@@ -191,7 +192,7 @@ Produce the result document when the plan is implemented or when you are blocked
   output: { type: "implementation", schema: ImplementationResult, outcomes: ["ok", "needs_clarification"] },
   limits: { maxToolCalls: 80, maxModelCalls: 100, checkpointEvery: 5 },
   // the design frames on request: the spec carries their texts, and 73 KB went with every call (pilot)
-  contextInputs: ["spec", "plan"],
+  contextInputs: ["spec", "plan", "related-work"],
   baseChars: 100_000,
 };
 

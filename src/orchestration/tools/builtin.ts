@@ -14,6 +14,7 @@ import { failingOnBase, junitFailures } from "./baseline.ts";
 import { CROSS_TOOLS } from "./cross.ts";
 import { excerptText } from "./excerpt.ts";
 import { rebuildsFor } from "./rebuild.ts";
+import { RELATED_TOOLS } from "./related.ts";
 import { classSelection, coveringTests, testRunnerOf } from "./relatedTests.ts";
 import {
   changedLinesOf,
@@ -108,6 +109,9 @@ export const BUILTIN_TOOLS: Record<string, DeterministicTool> = {
 
   /** A task across services (ADR-0025 §6): catalog, spawn, wait, contract check, delivery. */
   ...CROSS_TOOLS,
+
+  /** The work of related tasks (ADR-0026): read before the spec, checked again before implementation. */
+  ...RELATED_TOOLS,
 
   /** The task's inputs read by code (src/design/collect.ts): its issues and pages, API methods, design frames. */
   "sources.collect": collectSources,

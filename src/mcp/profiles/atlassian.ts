@@ -25,6 +25,16 @@ const jiraSearch: ProfileCapability = {
   args: (a) => ({ jql: a.jql, maxResults: a.limit ?? 20, limit: a.limit ?? 20 }),
 };
 
+/** ADR-0026: the issue's Development panel — its branches, commits and pull requests. */
+const jiraDevInfo: ProfileCapability = {
+  tools: ["jira_get_issue_development_info", "getJiraIssueDevelopmentInfo", "get_issue_development_info"],
+  description: "Read an issue's development info: the branches, commits and pull requests linked to it.",
+  access: "read",
+  effect: false,
+  parameters: params({ key: "issue key, e.g. ABC-42" }, ["key"]),
+  args: (a) => ({ issueKey: a.key ?? a.issueKey, issue_key: a.key ?? a.issueKey }),
+};
+
 const jiraComment: ProfileCapability = {
   tools: ["addCommentToJiraIssue", "jira_add_comment", "jira_postIssueComment", "add_comment"],
   description: "Add a comment to a Jira issue. An effect: journaled and verified by marker.",
@@ -179,6 +189,7 @@ export const atlassianProfile: McpProfile = {
   map: {
     "jira.get": jiraGet,
     "jira.search": jiraSearch,
+    "jira.devInfo": jiraDevInfo,
     "jira.comment": jiraComment,
     "jira.transition": jiraTransition,
     "confluence.get": confluenceGet,

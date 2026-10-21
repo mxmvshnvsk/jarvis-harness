@@ -584,6 +584,22 @@ export type DeliveryConfig = z.infer<typeof DeliveryConfigSchema>;
  * effect (a push, a PR) only with `actAsOwner` — on the owner's own machine, the default.
  */
 /**
+ * ADR-0026: the work of related tasks — their branches and PRs — read before the spec. `enabled` is the
+ * project's default; a run may say otherwise (`--related` / `--no-related`, New task).
+ */
+export const RelatedWorkConfigSchema = z.strictObject({
+  enabled: z.boolean().default(true),
+  /** How many related tasks are read, at most. */
+  maxIssues: z.int().positive().max(20).default(5),
+  /** The Jira issue type → the side of the work, to read the other side first ("Back Task": back). */
+  sides: z
+    .record(z.string().min(1), z.string().min(1))
+    .default({ "Back Task": "back", "Front Task": "front" }),
+  /** What a branch is compared with; default — the repository's default branch. */
+  base: z.string().min(1).optional(),
+});
+
+/**
  * «Report a problem» in `jarvis ui`: the GitHub repository whose new-issue form it opens, filled in.
  * `repo: false` hides it; `host` is a GitHub Enterprise address.
  */
@@ -739,6 +755,8 @@ const ProjectFieldsSchema = z.strictObject({
   delivery: DeliveryConfigSchema.optional(),
   /** Where «Report a problem» opens an issue (a fork's own repository). */
   feedback: FeedbackConfigSchema.optional(),
+  /** The work of related tasks read before the spec (ADR-0026). */
+  relatedWork: RelatedWorkConfigSchema.optional(),
 });
 
 /**
@@ -809,6 +827,7 @@ export const ResolvedConfigSchema = z.strictObject({
   delivery: DeliveryConfigSchema.prefault({}),
   daemon: DaemonConfigSchema.prefault({}),
   feedback: FeedbackConfigSchema.prefault({}),
+  relatedWork: RelatedWorkConfigSchema.prefault({}),
   /** Capability patterns denied by the active profile (ADR-0009 §1); applied by the Tool Router. */
   deniedCapabilities: z.array(z.string().min(1)).default([]),
   /** Name of the applied profile, if any. */

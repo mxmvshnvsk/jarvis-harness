@@ -80,6 +80,8 @@ flowchart LR
 |---|---|---|---|
 | discover | deterministic `project.discover` | — | `project-capabilities` |
 | sources | deterministic `sources.collect` (прежнее имя `design.collect` работает) | — | `sources` (задача, её страницы, места их имён и текстов в коде, сверка методов API с `contracts`), `design` (если есть фреймы) |
+| related-work | deterministic `related.collect` ([ADR-0026](adr/0026-related-work.md)) | — | `related-work`: смежные задачи эпика, их ветки и PR, что они меняют в контракте; выключается на прогон |
+| related-check | deterministic `related.check`, перед implementation | `related-work` | новая версия `related-work`, если ветка ушла вперёд или влита; событие `related.moved` |
 | research | agent `research` | sources, design | `research` |
 | requirements | agent `requirements` | sources, research, design | `requirements` |
 | spec | agent `specification` | research, requirements, design | `spec` |

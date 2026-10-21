@@ -44,6 +44,7 @@ import { AgenticExecutor, ApprovalExecutor, CompositeExecutor, DeterministicExec
 import { InterruptedError, interruption } from "./interrupt.ts";
 import { HeldLease, type HeldLeaseOptions } from "./lease.ts";
 import { roundCostOf } from "./roundCost.ts";
+import { relatedOn } from "./tools/related.ts";
 import {
   type ExecutionResult,
   LeaseHeldError,
@@ -428,6 +429,9 @@ export class LocalWorkflowEngine {
 
   /** Why a conditional step (`when:`) has nothing to do in this run; undefined when it runs. */
   private skipReason(run: Run, step: StepDefinition): string | undefined {
+    // ADR-0026: reading related work is the person's choice per run
+    if ((step.tool === "related.collect" || step.tool === "related.check") && !relatedOn(this.rt, run))
+      return "related work is off for this run";
     const affects = step.when?.affects;
     if (!affects) return undefined;
     const impact = this.rt.artifacts.listLatest(run.id, "impact")[0];

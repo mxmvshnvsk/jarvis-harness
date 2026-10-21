@@ -260,6 +260,7 @@ describe("sdd end to end", () => {
     expect(done.steps.map((s) => s.stepId)).toEqual([
       "discover",
       "sources",
+      "related-work",
       "research",
       "requirements",
       "spec",
@@ -267,6 +268,7 @@ describe("sdd end to end", () => {
       "approve-spec",
       "impact",
       "plan",
+      "related-check",
       "implementation",
       "verify",
       // tests takes the result of checks: it starts after them

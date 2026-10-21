@@ -233,6 +233,11 @@ Jarvis как MCP-сервер на stdio (только чтение) для IDE
 
 ### `jarvis work <task> [--workflow <name>] [--base <ref>] [--no-run] [--fresh design] [--kind <вид>] [--deliver pr] [--autonomous]`
 
+`--related` / `--no-related` — читать ли до спеки работу смежных задач (ветки и PR задач эпика, что они меняют в
+контракте; [ADR-0026](adr/0026-related-work.md)). Без флага — `relatedWork.enabled` проекта (по умолчанию да).
+Хранится в прогоне и переходит в продолжение, перезапуск и сабтаски; в `jarvis ui` — галочка «Смотреть смежные
+задачи и их ветки» в «Ещё настройки».
+
 `--autonomous` (experimental) — прогон без человека. Там, где обычный прогон ждал бы человека, он решает по
 правилу и пишет это в ленту (событие `autonomy.decided`, актор `service:autonomous` от имени владельца):
 - утверждения спеки и кода проходят сами (`approval.skipped`, причина `autonomous`);

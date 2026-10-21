@@ -1608,6 +1608,18 @@ export const RU: Readonly<Record<string, string>> = {
     "dataClass проекта не пускает агентов в эту сеть",
   "{network}: off for agents": "{network}: агентам закрыт",
   "{network} by exception": "{network} по исключению",
+  // ---- related work (ADR-0026)
+  "related work: {issues}, {branches} with a branch, {contract} contract changes":
+    "смежная работа: {issues}, с веткой — {branches}, изменений контракта — {contract}",
+  "related work not read: {why}": "смежная работа не прочитана: {why}",
+  "{issue}: its branch was merged since the spec": "{issue}: ветка влита после спеки",
+  "{issue}: its branch moved on and its contract changed since the spec — check the spec":
+    "{issue}: ветка ушла вперёд, и контракт изменился после спеки — проверьте спеку",
+  "{issue}: its branch moved on since the spec, the contract is the same":
+    "{issue}: ветка ушла вперёд после спеки, контракт тот же",
+  "Look at related tasks and their branches": "Смотреть смежные задачи и их ветки",
+  "the branches and PRs of the epic's other tasks and the contract they change, before the spec":
+    "ветки и PR других задач эпика и что они меняют в контракте — до спеки",
 };
 
 /**
@@ -1617,6 +1629,7 @@ export const RU: Readonly<Record<string, string>> = {
 export const RU_PLURALS: Readonly<Record<string, readonly [string, string, string]>> = {
   run: ["прогон", "прогона", "прогонов"],
   research: ["исследование", "исследования", "исследований"],
+  "related task": ["смежная задача", "смежные задачи", "смежных задач"],
   call: ["вызов", "вызова", "вызовов"],
   "model call": ["вызов модели", "вызова модели", "вызовов модели"],
   "tool call": ["вызов инструмента", "вызова инструмента", "вызовов инструментов"],

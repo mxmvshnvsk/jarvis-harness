@@ -1782,6 +1782,12 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
       ...(freshDesign ? { freshDesign } : {}),
       ...(kind.success ? { kind: kind.data } : {}),
       ...(form.get("autonomous") === "1" ? { autonomous: true } : {}),
+      // the box says the project's default; only a change from it is passed on
+      // an unticked box sends nothing: «related-box» says the form had it
+      ...((related) =>
+        form.get("related-box") !== "1" || related === runtime.loaded.config.relatedWork.enabled
+          ? {}
+          : { related })(form.get("related") === "1"),
     });
     // straight to the launch: it becomes the run's page as soon as the run begins
     return redirect(r, `/launches/${launch.id}`);
@@ -2411,6 +2417,7 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
           options.launcher && actions
             ? {
                 places: startPlaces(),
+                related: runtime.loaded.config.relatedWork.enabled,
                 ...(noticeOf(r) ? { notice: noticeOf(r) as Html } : {}),
                 ...((repo ?? options.projectRoot)
                   ? { current: (repo ?? options.projectRoot) as string }

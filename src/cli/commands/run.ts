@@ -513,6 +513,7 @@ async function startContinuation(
     ...((o) => (Object.keys(o).length > 0 ? { options: o } : {}))({
       ...(from.options?.kind ? { kind: from.options.kind } : {}),
       ...(from.options?.autonomous ? { autonomous: true as const } : {}),
+      ...(from.options?.related !== undefined ? { related: from.options.related } : {}),
     }),
   });
   const carried = handOff(runtime, from, run, startAt);
@@ -637,6 +638,7 @@ export async function runRestart(
         ...(from.options?.fresh?.length ? { fresh: [...from.options.fresh] } : {}),
         ...(from.options?.kind ? { kind: from.options.kind } : {}),
         ...(from.options?.autonomous ? { autonomous: true as const } : {}),
+        ...(from.options?.related !== undefined ? { related: from.options.related } : {}),
       }),
     });
     const carried = handOff(runtime, from, run, startAt, (a) => !a.stepId || keepSteps.has(a.stepId));
@@ -762,6 +764,8 @@ export async function runWork(
     deliver?: "pr";
     /** `--autonomous`: no person in the loop (src/app/autonomy.ts); else `human.autonomous`. */
     autonomous?: boolean;
+    /** `--related` / `--no-related` (ADR-0026); else `relatedWork.enabled`. */
+    related?: boolean;
   },
 ): Promise<void> {
   const loaded = await loadForCli(ctx);
@@ -815,6 +819,7 @@ export async function runWork(
         ...(options.kind ? { kind: options.kind } : {}),
         ...(options.deliver ? { delivery: options.deliver } : {}),
         ...(options.autonomous || loaded.config.human.autonomous ? { autonomous: true as const } : {}),
+        ...(options.related !== undefined ? { related: options.related } : {}),
       }),
     });
     runtime.events.emit({

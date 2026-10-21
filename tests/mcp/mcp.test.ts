@@ -269,7 +269,7 @@ describe("profiled server", () => {
     const after = (rt as Runtime).mcp.provider.report("jira");
     expect(after.discovered?.count).toBe(7);
     expect(after.exposed).toEqual(["confluence.get", "jira.comment", "jira.get", "jira.search"]);
-    expect(after.unmapped).toEqual(["confluence.create", "confluence.search"]);
+    expect(after.unmapped).toEqual(["confluence.create", "confluence.search", "jira.devInfo"]);
   });
 
   it("routes a read through the policy and the normalized name", async () => {

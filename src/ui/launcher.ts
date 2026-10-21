@@ -87,6 +87,8 @@ export interface Launcher {
     kind?: TaskKind;
     /** No person in the loop (`--autonomous`; experimental). */
     autonomous?: boolean;
+    /** Read the work of related tasks (`--related` / `--no-related`); none — the project's default. */
+    related?: boolean;
   }): Launch;
   /** A finished research/spec goes on as its next workflow: `jarvis continue <run>` in the background. */
   continueRun(from: Run, workflow: Workflow): Launch;
@@ -283,6 +285,7 @@ export function createLauncher(options: LauncherOptions): Launcher {
         ...(input.freshDesign ? ["--fresh", "design"] : []),
         ...(input.kind ? ["--kind", input.kind] : []),
         ...(input.autonomous ? ["--autonomous"] : []),
+        ...(input.related === undefined ? [] : [input.related ? "--related" : "--no-related"]),
       ];
       spawnCli(args, input.repoRoot, log, (code) => {
         launch.exitCode = code ?? 1;

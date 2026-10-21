@@ -19,19 +19,26 @@ steps:
     kind: deterministic
     tool: sources.collect
     outputs: [sources, design]
+    transitions: { onSuccess: related-work }
+  # ADR-0026: the branches and PRs of related tasks and the contract they change, by code; off for a run
+  # that does not want it (--no-related, relatedWork.enabled)
+  - id: related-work
+    kind: deterministic
+    tool: related.collect
+    outputs: [related-work]
     transitions: { onSuccess: research }
   - id: research
     kind: agentic
     agent: research
     phase: research
-    inputs: [sources, design]
+    inputs: [sources, design, related-work]
     outputs: [research]
     transitions: { onSuccess: requirements }
   - id: requirements
     kind: agentic
     agent: requirements
     phase: requirements
-    inputs: [sources, research, design, requirement-correction]
+    inputs: [sources, research, design, requirement-correction, related-work]
     outputs: [requirements]
     transitions: { onSuccess: spec }
   - id: spec
@@ -39,7 +46,7 @@ steps:
     agent: specification
     onLimit: ask  # a half-done result costs more than a question: at its limit the run asks
     phase: spec
-    inputs: [research, requirements, design, requirement-correction]
+    inputs: [research, requirements, design, requirement-correction, related-work]
     outputs: [spec]
     transitions: { onSuccess: approve-spec }
   - id: approve-spec
@@ -68,15 +75,21 @@ steps:
     inputs: [spec, impact]
     outputs: [plan]
     transitions:
-      onSuccess: implementation
+      onSuccess: related-check
       onOutcome:
         spec_infeasible: { to: spec, maxIterations: 1 }
+  # ADR-0026 §6: a branch the spec built on — moved on or merged since — said before the code is written
+  - id: related-check
+    kind: deterministic
+    tool: related.check
+    outputs: [related-work]
+    transitions: { onSuccess: implementation }
   - id: implementation
     kind: agentic
     agent: implementation
     onLimit: ask
     phase: implementation
-    inputs: [spec, plan, design]
+    inputs: [spec, plan, design, related-work]
     outputs: [implementation]
     transitions: { onSuccess: verify }
   # ADR-0019 §8 DAG: implementation → {tests, docs, telemetry} → review; children run in parallel,
@@ -195,12 +208,19 @@ steps:
     kind: deterministic
     tool: sources.collect
     outputs: [sources, design]
+    transitions: { onSuccess: related-work }
+  # ADR-0026: the branches and PRs of related tasks and the contract they change, by code; off for a run
+  # that does not want it (--no-related, relatedWork.enabled)
+  - id: related-work
+    kind: deterministic
+    tool: related.collect
+    outputs: [related-work]
     transitions: { onSuccess: research }
   - id: research
     kind: agentic
     agent: research
     phase: research
-    inputs: [sources, design]
+    inputs: [sources, design, related-work]
     outputs: [research]
     transitions: { onSuccess: DONE }
 `;
@@ -223,19 +243,26 @@ steps:
     kind: deterministic
     tool: sources.collect
     outputs: [sources, design]
+    transitions: { onSuccess: related-work }
+  # ADR-0026: the branches and PRs of related tasks and the contract they change, by code; off for a run
+  # that does not want it (--no-related, relatedWork.enabled)
+  - id: related-work
+    kind: deterministic
+    tool: related.collect
+    outputs: [related-work]
     transitions: { onSuccess: research }
   - id: research
     kind: agentic
     agent: research
     phase: research
-    inputs: [sources, design]
+    inputs: [sources, design, related-work]
     outputs: [research]
     transitions: { onSuccess: requirements }
   - id: requirements
     kind: agentic
     agent: requirements
     phase: requirements
-    inputs: [sources, research, design, requirement-correction]
+    inputs: [sources, research, design, requirement-correction, related-work]
     outputs: [requirements]
     transitions: { onSuccess: spec }
   - id: spec
@@ -243,7 +270,7 @@ steps:
     agent: specification
     onLimit: ask
     phase: spec
-    inputs: [research, requirements, design, requirement-correction]
+    inputs: [research, requirements, design, requirement-correction, related-work]
     outputs: [spec]
     transitions: { onSuccess: approve-spec }
   - id: approve-spec
@@ -336,12 +363,19 @@ steps:
     kind: deterministic
     tool: sources.collect
     outputs: [sources, design]
+    transitions: { onSuccess: related-work }
+  # ADR-0026: the branches and PRs of related tasks and the contract they change, by code; off for a run
+  # that does not want it (--no-related, relatedWork.enabled)
+  - id: related-work
+    kind: deterministic
+    tool: related.collect
+    outputs: [related-work]
     transitions: { onSuccess: research }
   - id: research
     kind: agentic
     agent: research
     phase: research
-    inputs: [sources, design]
+    inputs: [sources, design, related-work]
     outputs: [research]
     transitions: { onSuccess: spec }
   - id: spec
@@ -349,16 +383,21 @@ steps:
     agent: specification
     onLimit: ask
     phase: spec
-    inputs: [research, design]
+    inputs: [research, design, related-work]
     outputs: [spec]
     transitions: { onSuccess: approve-spec }
   - id: approve-spec
     kind: approval
     artifactType: spec
     transitions:
-      onSuccess: implementation
+      onSuccess: related-check
       onOutcome:
         request_changes: { to: spec, maxIterations: 3 }
+  - id: related-check
+    kind: deterministic
+    tool: related.check
+    outputs: [related-work]
+    transitions: { onSuccess: implementation }
   - id: implementation
     kind: agentic
     agent: implementation
@@ -453,7 +492,7 @@ steps:
     agent: specification
     onLimit: ask
     phase: spec
-    inputs: [research, design]
+    inputs: [research, design, related-work]
     outputs: [spec]
     transitions: { onSuccess: approve-spec }
   - id: approve-spec
@@ -567,7 +606,7 @@ steps:
     agent: specification
     onLimit: ask
     phase: spec
-    inputs: [research, design]
+    inputs: [research, design, related-work]
     outputs: [spec]
     transitions: { onSuccess: approve-spec }
   - id: approve-spec

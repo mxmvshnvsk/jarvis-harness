@@ -123,6 +123,84 @@ const prComment: ProfileCapability = {
   },
 };
 
+/* ---- reading a branch (ADR-0026: the work of a related task, before its PR is merged) ---- */
+
+const where = (a: Record<string, unknown>) => ({
+  workspace: a.workspace,
+  project: a.workspace,
+  projectKey: a.workspace,
+  repository: a.repo,
+  repo_slug: a.repo,
+  repositorySlug: a.repo,
+});
+
+const branchList: ProfileCapability = {
+  tools: ["list_branches", "bitbucket_list_branches", "listBranches"],
+  description: "List the branches of a repository, optionally those whose name contains a text.",
+  access: "read",
+  effect: false,
+  parameters: params(
+    { workspace: "workspace or project key", repo: "repository slug", filter: "text in the name" },
+    ["workspace", "repo"],
+  ),
+  args: (a) => ({ ...where(a), filter: a.filter, filterText: a.filter, query: a.filter, limit: 50 }),
+};
+
+const branchCommits: ProfileCapability = {
+  tools: ["list_branch_commits", "bitbucket_list_branch_commits", "listBranchCommits"],
+  description: "List the latest commits of a branch.",
+  access: "read",
+  effect: false,
+  parameters: params(
+    { workspace: "workspace or project key", repo: "repository slug", branch: "branch name" },
+    ["workspace", "repo", "branch"],
+  ),
+  args: (a) => ({ ...where(a), branch: a.branch, branch_name: a.branch, branchName: a.branch, limit: 30 }),
+};
+
+const commitGet: ProfileCapability = {
+  tools: ["get_commit_detail", "bitbucket_get_commit", "getCommit"],
+  description: "Read one commit: message, author and the files it changed.",
+  access: "read",
+  effect: false,
+  parameters: params(
+    { workspace: "workspace or project key", repo: "repository slug", commit: "commit id" },
+    ["workspace", "repo", "commit"],
+  ),
+  args: (a) => ({
+    ...where(a),
+    commit: a.commit,
+    commit_id: a.commit,
+    commitId: a.commit,
+    commit_hash: a.commit,
+  }),
+};
+
+const fileGet: ProfileCapability = {
+  tools: ["get_file_content", "bitbucket_get_file_content", "getFileContent"],
+  description: "Read a file of a repository at a branch or commit.",
+  access: "read",
+  effect: false,
+  parameters: params(
+    {
+      workspace: "workspace or project key",
+      repo: "repository slug",
+      path: "file path",
+      ref: "branch or commit",
+    },
+    ["workspace", "repo", "path"],
+  ),
+  args: (a) => ({
+    ...where(a),
+    path: a.path,
+    file_path: a.path,
+    filePath: a.path,
+    ref: a.ref,
+    branch: a.ref,
+    at: a.ref,
+  }),
+};
+
 export const bitbucketProfile: McpProfile = {
   name: "bitbucket",
   version: 1,
@@ -133,5 +211,9 @@ export const bitbucketProfile: McpProfile = {
     "bitbucket.pr.diff": prDiff,
     "bitbucket.pr.create": prCreate,
     "bitbucket.pr.comment": prComment,
+    "bitbucket.branch.list": branchList,
+    "bitbucket.branch.commits": branchCommits,
+    "bitbucket.commit.get": commitGet,
+    "bitbucket.file.get": fileGet,
   },
 };

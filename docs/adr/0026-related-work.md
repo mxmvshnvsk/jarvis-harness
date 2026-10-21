@@ -1,6 +1,7 @@
 # ADR-0026: Смежная работа — ветки и PR связанных задач как источник спеки
 
-- Статус: предложено; инструменты MCP-серверов пилота проверены (2026-10-21)
+- Статус: принято; сделано 2026-10-21: шаги `related-work` и `related-check`, опция прогона `related`,
+  capability `jira.devInfo`, `bitbucket.branch.list|commits`, `bitbucket.commit.get`, `bitbucket.file.get`
 - Дата: 2026-10-21
 - Основание: [ADR-0025](0025-knowledge-repo-and-cross-service-tasks.md) (карта сервисов, каталог контрактов,
   проверка полей DTO), [ADR-0017](0017-models-and-mcp-configuration.md) (профили MCP),

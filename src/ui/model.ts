@@ -1125,6 +1125,30 @@ export function feedItem(e: StoredEvent): FeedItem | undefined {
       return at(`⏸ ${t("pause asked")}${by}${from(p.channel)}`, "warn");
     case "run.applied":
       return at(`${t("applied")}${by}`, "ok");
+    case "related.collected":
+      return at(
+        t("related work: {issues}, {branches} with a branch, {contract} contract changes", {
+          issues: plural(Number(p.issues) || 0, "related task"),
+          branches: Number(p.branches) || 0,
+          contract: Number(p.contract) || 0,
+        }),
+        "ok",
+      );
+    case "related.skipped":
+      return at(t("related work not read: {why}", { why: str(p.reason) ?? "?" }));
+    case "related.moved":
+      return at(
+        p.merged === true
+          ? t("{issue}: its branch was merged since the spec", { issue: str(p.issue) ?? "?" })
+          : p.contractChanged === true
+            ? t("{issue}: its branch moved on and its contract changed since the spec — check the spec", {
+                issue: str(p.issue) ?? "?",
+              })
+            : t("{issue}: its branch moved on since the spec, the contract is the same", {
+                issue: str(p.issue) ?? "?",
+              }),
+        p.contractChanged === true ? "bad" : "warn",
+      );
     case AUTONOMY_DECIDED: {
       const what = str(p.what);
       const text =

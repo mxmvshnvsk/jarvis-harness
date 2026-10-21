@@ -302,6 +302,7 @@ describe("clarification threads", () => {
     expect(after.steps.map((s) => `${s.stepId}:${s.status}`)).toEqual([
       "discover:success",
       "sources:success",
+      "related-work:success",
       "research:success",
       "requirements:suspended",
       "requirements:success",

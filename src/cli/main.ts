@@ -120,6 +120,8 @@ function parseKind(value: string): TaskKind {
   return parsed.data;
 }
 
+const RELATED_HELP =
+  "read the branches and PRs of related tasks before the spec (ADR-0026); default: relatedWork.enabled";
 const AUTONOMOUS_HELP =
   "experimental: no person in the loop — gates pass, a question gets the most cautious assumption, a dead end ends the run (human.autonomous)";
 const DELIVER_HELP =
@@ -247,6 +249,8 @@ export function buildProgram(options: RunOptions = {}): Command {
     .option("--fresh <sources>", FRESH_HELP, parseFresh)
     .option("--kind <kind>", KIND_HELP, parseKind)
     .option("--autonomous", AUTONOMOUS_HELP)
+    .option("--related", RELATED_HELP)
+    .option("--no-related", "do not read the work of related tasks for this run")
     .option("--deliver <how>", DELIVER_HELP, parseDeliver)
     .action(
       async (
@@ -259,6 +263,7 @@ export function buildProgram(options: RunOptions = {}): Command {
           kind?: TaskKind;
           deliver?: "pr";
           autonomous?: boolean;
+          related?: boolean;
         },
       ) => {
         await runWork(ctxFor(), task, {
@@ -269,6 +274,7 @@ export function buildProgram(options: RunOptions = {}): Command {
           ...(opts.kind ? { kind: opts.kind } : {}),
           ...(opts.deliver ? { deliver: opts.deliver } : {}),
           ...(opts.autonomous ? { autonomous: true } : {}),
+          ...(opts.related !== undefined ? { related: opts.related } : {}),
         });
       },
     );
@@ -280,10 +286,18 @@ export function buildProgram(options: RunOptions = {}): Command {
     .option("--fresh <sources>", FRESH_HELP, parseFresh)
     .option("--kind <kind>", KIND_HELP, parseKind)
     .option("--autonomous", AUTONOMOUS_HELP)
+    .option("--related", RELATED_HELP)
+    .option("--no-related", "do not read the work of related tasks for this run")
     .action(
       async (
         task: string,
-        opts: { base?: string; fresh?: FreshSource[]; kind?: TaskKind; autonomous?: boolean },
+        opts: {
+          base?: string;
+          fresh?: FreshSource[];
+          kind?: TaskKind;
+          autonomous?: boolean;
+          related?: boolean;
+        },
       ) => {
         await runWork(ctxFor(), task, {
           workflow: "research",
@@ -303,10 +317,18 @@ export function buildProgram(options: RunOptions = {}): Command {
     .option("--fresh <sources>", FRESH_HELP, parseFresh)
     .option("--kind <kind>", KIND_HELP, parseKind)
     .option("--autonomous", AUTONOMOUS_HELP)
+    .option("--related", RELATED_HELP)
+    .option("--no-related", "do not read the work of related tasks for this run")
     .action(
       async (
         task: string,
-        opts: { base?: string; fresh?: FreshSource[]; kind?: TaskKind; autonomous?: boolean },
+        opts: {
+          base?: string;
+          fresh?: FreshSource[];
+          kind?: TaskKind;
+          autonomous?: boolean;
+          related?: boolean;
+        },
       ) => {
         await runWork(ctxFor(), task, {
           workflow: "fix",
@@ -324,10 +346,18 @@ export function buildProgram(options: RunOptions = {}): Command {
     .option("--fresh <sources>", FRESH_HELP, parseFresh)
     .option("--kind <kind>", KIND_HELP, parseKind)
     .option("--autonomous", AUTONOMOUS_HELP)
+    .option("--related", RELATED_HELP)
+    .option("--no-related", "do not read the work of related tasks for this run")
     .action(
       async (
         task: string,
-        opts: { base?: string; fresh?: FreshSource[]; kind?: TaskKind; autonomous?: boolean },
+        opts: {
+          base?: string;
+          fresh?: FreshSource[];
+          kind?: TaskKind;
+          autonomous?: boolean;
+          related?: boolean;
+        },
       ) => {
         await runWork(ctxFor(), task, {
           workflow: "spec",
