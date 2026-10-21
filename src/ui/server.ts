@@ -1781,6 +1781,7 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
       repoRoot: repo,
       ...(freshDesign ? { freshDesign } : {}),
       ...(kind.success ? { kind: kind.data } : {}),
+      ...(form.get("autonomous") === "1" ? { autonomous: true } : {}),
     });
     // straight to the launch: it becomes the run's page as soon as the run begins
     return redirect(r, `/launches/${launch.id}`);

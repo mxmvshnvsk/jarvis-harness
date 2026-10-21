@@ -120,6 +120,8 @@ function parseKind(value: string): TaskKind {
   return parsed.data;
 }
 
+const AUTONOMOUS_HELP =
+  "experimental: no person in the loop — gates pass, a question gets the most cautious assumption, a dead end ends the run (human.autonomous)";
 const DELIVER_HELP =
   'when the workflow is done: "pr" — push the branch and open the pull request without waiting for you (delivery.pr applies)';
 
@@ -244,6 +246,7 @@ export function buildProgram(options: RunOptions = {}): Command {
     .option("--no-run", "only create the run")
     .option("--fresh <sources>", FRESH_HELP, parseFresh)
     .option("--kind <kind>", KIND_HELP, parseKind)
+    .option("--autonomous", AUTONOMOUS_HELP)
     .option("--deliver <how>", DELIVER_HELP, parseDeliver)
     .action(
       async (
@@ -255,6 +258,7 @@ export function buildProgram(options: RunOptions = {}): Command {
           fresh?: FreshSource[];
           kind?: TaskKind;
           deliver?: "pr";
+          autonomous?: boolean;
         },
       ) => {
         await runWork(ctxFor(), task, {
@@ -264,6 +268,7 @@ export function buildProgram(options: RunOptions = {}): Command {
           ...(opts.fresh ? { fresh: opts.fresh } : {}),
           ...(opts.kind ? { kind: opts.kind } : {}),
           ...(opts.deliver ? { deliver: opts.deliver } : {}),
+          ...(opts.autonomous ? { autonomous: true } : {}),
         });
       },
     );
@@ -274,14 +279,21 @@ export function buildProgram(options: RunOptions = {}): Command {
     .option("--base <ref>", "base ref for the run's worktree (default: HEAD)")
     .option("--fresh <sources>", FRESH_HELP, parseFresh)
     .option("--kind <kind>", KIND_HELP, parseKind)
-    .action(async (task: string, opts: { base?: string; fresh?: FreshSource[]; kind?: TaskKind }) => {
-      await runWork(ctxFor(), task, {
-        workflow: "research",
-        ...(opts.base ? { base: opts.base } : {}),
-        ...(opts.fresh ? { fresh: opts.fresh } : {}),
-        ...(opts.kind ? { kind: opts.kind } : {}),
-      });
-    });
+    .option("--autonomous", AUTONOMOUS_HELP)
+    .action(
+      async (
+        task: string,
+        opts: { base?: string; fresh?: FreshSource[]; kind?: TaskKind; autonomous?: boolean },
+      ) => {
+        await runWork(ctxFor(), task, {
+          workflow: "research",
+          ...(opts.autonomous ? { autonomous: true } : {}),
+          ...(opts.base ? { base: opts.base } : {}),
+          ...(opts.fresh ? { fresh: opts.fresh } : {}),
+          ...(opts.kind ? { kind: opts.kind } : {}),
+        });
+      },
+    );
   program
     .command("fix <task>")
     .description(
@@ -290,28 +302,42 @@ export function buildProgram(options: RunOptions = {}): Command {
     .option("--base <ref>", "base ref for the run's worktree (default: HEAD)")
     .option("--fresh <sources>", FRESH_HELP, parseFresh)
     .option("--kind <kind>", KIND_HELP, parseKind)
-    .action(async (task: string, opts: { base?: string; fresh?: FreshSource[]; kind?: TaskKind }) => {
-      await runWork(ctxFor(), task, {
-        workflow: "fix",
-        ...(opts.base ? { base: opts.base } : {}),
-        ...(opts.fresh ? { fresh: opts.fresh } : {}),
-        ...(opts.kind ? { kind: opts.kind } : {}),
-      });
-    });
+    .option("--autonomous", AUTONOMOUS_HELP)
+    .action(
+      async (
+        task: string,
+        opts: { base?: string; fresh?: FreshSource[]; kind?: TaskKind; autonomous?: boolean },
+      ) => {
+        await runWork(ctxFor(), task, {
+          workflow: "fix",
+          ...(opts.autonomous ? { autonomous: true } : {}),
+          ...(opts.base ? { base: opts.base } : {}),
+          ...(opts.fresh ? { fresh: opts.fresh } : {}),
+          ...(opts.kind ? { kind: opts.kind } : {}),
+        });
+      },
+    );
   program
     .command("spec <task>")
     .description("research, requirements and a specification up to its approval (built-in workflow `spec`)")
     .option("--base <ref>", "base ref for the run's worktree (default: HEAD)")
     .option("--fresh <sources>", FRESH_HELP, parseFresh)
     .option("--kind <kind>", KIND_HELP, parseKind)
-    .action(async (task: string, opts: { base?: string; fresh?: FreshSource[]; kind?: TaskKind }) => {
-      await runWork(ctxFor(), task, {
-        workflow: "spec",
-        ...(opts.base ? { base: opts.base } : {}),
-        ...(opts.fresh ? { fresh: opts.fresh } : {}),
-        ...(opts.kind ? { kind: opts.kind } : {}),
-      });
-    });
+    .option("--autonomous", AUTONOMOUS_HELP)
+    .action(
+      async (
+        task: string,
+        opts: { base?: string; fresh?: FreshSource[]; kind?: TaskKind; autonomous?: boolean },
+      ) => {
+        await runWork(ctxFor(), task, {
+          workflow: "spec",
+          ...(opts.autonomous ? { autonomous: true } : {}),
+          ...(opts.base ? { base: opts.base } : {}),
+          ...(opts.fresh ? { fresh: opts.fresh } : {}),
+          ...(opts.kind ? { kind: opts.kind } : {}),
+        });
+      },
+    );
 
   program
     .command("onboard")

@@ -119,6 +119,13 @@ describe("a task whose design changed at the same link", () => {
   });
 });
 
+describe("an autonomous run from the page", () => {
+  it("the box starts the CLI with --autonomous", async () => {
+    launcher.start({ task: "ABC-43", workflow: "fix", repoRoot: sb.project, autonomous: true });
+    expect((await calls(1))[0]).toBe(`${sb.project}|off|fix ABC-43 --autonomous`);
+  });
+});
+
 describe("the kind of task", () => {
   it("the box on the page starts the CLI with --kind; the run keeps it and the skills are picked by it", async () => {
     launcher.start({ task: "ABC-42", workflow: "sdd", repoRoot: sb.project, kind: "refactor" });

@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { basename } from "node:path";
 import { type Activity, activityOf, compactingText, noticeOf } from "../app/activity.ts";
+import { AUTONOMY_DECIDED } from "../app/autonomy.ts";
 import { type BudgetGrant, type BudgetStop, budgetGranted, budgetStopOf } from "../app/budgetStop.ts";
 import { type BudgetWait, budgetWaitOf } from "../app/budgetWait.ts";
 import { candidatesOf } from "../app/candidates.ts";
@@ -1124,6 +1125,22 @@ export function feedItem(e: StoredEvent): FeedItem | undefined {
       return at(`⏸ ${t("pause asked")}${by}${from(p.channel)}`, "warn");
     case "run.applied":
       return at(`${t("applied")}${by}`, "ok");
+    case AUTONOMY_DECIDED: {
+      const what = str(p.what);
+      const text =
+        what === "gate"
+          ? t("autonomous: {type} passed without a person", { type: str(p.type) ?? "?" })
+          : what === "assumption"
+            ? t("autonomous: {agent} asked, nobody answers — the most cautious assumption, the step again", {
+                agent: str(p.agent) ?? t("the agent"),
+              })
+            : what === "scope"
+              ? t("autonomous: the task stays in this service")
+              : what === "contract"
+                ? t("autonomous: the contract stays as agreed")
+                : t("autonomous: nobody to decide — the run ends");
+      return at(text, what === "stopped" ? "bad" : "warn");
+    }
     case "run.delivered":
       return at(`${t("PR opened")}${str(p.url) ? `: ${str(p.url)}` : ""}${by}`, "ok");
     case "delivery.failed":

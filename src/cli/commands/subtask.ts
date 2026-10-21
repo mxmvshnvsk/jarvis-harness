@@ -167,7 +167,11 @@ export async function runSubtaskRun(ctx: CliContext, masterRef: string, which: s
       workspace,
       dataClass: loaded.config.dataClass,
       ...(loaded.config.profile ? { profile: loaded.config.profile } : {}),
-      options: { parent: { runId: master.id, key: sub.key } },
+      // an autonomous task across services: its subtasks are too
+      options: {
+        parent: { runId: master.id, key: sub.key },
+        ...(master.options?.autonomous ? { autonomous: true as const } : {}),
+      },
     });
     // the master's research and approved spec: the subtask starts at its impact
     const carried = handOff(runtime, master, run, "impact");

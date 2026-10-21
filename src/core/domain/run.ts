@@ -141,6 +141,8 @@ export const RunOptionsSchema = z.strictObject({
    * branch and opens the PR itself instead of waiting for a person's Apply (`jarvis work --deliver pr`).
    */
   delivery: z.enum(["pr"]).optional(),
+  /** No person in the loop (src/app/autonomy.ts; experimental): `jarvis work --autonomous`. */
+  autonomous: z.literal(true).optional(),
 });
 export type RunOptions = z.infer<typeof RunOptionsSchema>;
 

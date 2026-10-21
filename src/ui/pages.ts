@@ -1493,6 +1493,11 @@ export function runContent(
     [
       r.workflow,
       html`<span title="${t("the kind of task the skills and standards were picked by")} — ${kindWhy(page.kind)}">${t(KIND_NAME[page.kind.kind])}</span>`,
+      ...(r.options?.autonomous
+        ? [
+            html`<span class="pill wait" title="${t("No person in the loop: gates pass, a question gets the most cautious assumption, a dead end ends the run")}">${t("autonomous")} · experimental</span>`,
+          ]
+        : []),
       `run ${shortRunId(r.id)}`,
       page.time ? timeHtml(page.time) : duration(page.workedMs),
       plural(tk.calls, "model call"),

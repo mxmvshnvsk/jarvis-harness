@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { applyRun } from "../../app/applyRun.ts";
+import { isAutonomous, noteAutonomy } from "../../app/autonomy.ts";
 import {
   CONTRACT_CHANGED,
   contractChangeAsked,
@@ -288,6 +289,11 @@ async function contractStep(ctx: StepContext): Promise<StepOutcome> {
   const master = masterId ? ctx.runtime.runs.get(masterId) : undefined;
   if (!asked || !master) return { status: "success" };
   const decided = contractDecisionOf(ctx.runtime, master.id, asked.id);
+  if (!decided && isAutonomous(ctx.run)) {
+    // nobody to decide on the master: on with the contract as agreed, the ask said in the journal
+    noteAutonomy(ctx.runtime, ctx.run, "contract", { kept: "agreed", item: asked.ask.item }, ctx.step.id);
+    return { status: "success" };
+  }
   if (!decided) {
     recordContractRequest(ctx.runtime, master, ctx.run, asked);
     throw new SuspendRun("WAITING_HUMAN", `asks the master to change the contract: ${asked.ask.item}`, {
@@ -319,6 +325,11 @@ const scopeStep: DeterministicTool = async (ctx) => {
   if (report.spans.length === 0 || scopeDecision(ctx.runtime, ctx.run.id) === "single")
     return { status: "success", outputs: [ref] };
   const others = [...new Set(report.spans.map((r) => r.service))];
+  if (isAutonomous(ctx.run)) {
+    // nobody to choose: the task stays in this service, the others named in the report
+    noteAutonomy(ctx.runtime, ctx.run, "scope", { kept: "single", others }, ctx.step.id);
+    return { status: "success", outputs: [ref] };
+  }
   throw new SuspendRun(
     "WAITING_HUMAN",
     `the task reaches ${others.length === 1 ? "another service" : `${others.length} more services`}: ${others.join(", ")}`,

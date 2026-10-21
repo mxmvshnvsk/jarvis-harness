@@ -230,6 +230,9 @@ human:
   clarification: { multiTurn: true, maxTurns: 8 }
 ```
 
+Автономный режим вернулся 2026-10-21 (experimental) не пресетом `mode`, а флагом прогона `--autonomous` и
+`human.autonomous`: решения без человека по правилу, тупик — `FAILED` (docs/cli.md, `jarvis work`).
+
 Убрано в пилоте (2026-10-07), потому что не понадобилось и кода под них не было: `mode` (`autonomous | balanced |
 strict` — пресет поверх `gates`, которые задают то же явно), `review.knowledgePromotion` (кандидаты не мешали;
 вернуть, если появится шум), `manualEdits.enabled` (ручные правки фиксируются всегда, отбрасывать их не нужно).

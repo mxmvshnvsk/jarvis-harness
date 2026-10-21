@@ -509,8 +509,11 @@ async function startContinuation(
     workspace,
     dataClass: runtime.loaded.config.dataClass,
     ...(runtime.loaded.config.profile ? { profile: runtime.loaded.config.profile } : {}),
-    // a spec goes on as sdd: the kind the person picked goes with it
-    ...(from.options?.kind ? { options: { kind: from.options.kind } } : {}),
+    // a spec goes on as sdd: the kind the person picked goes with it, and an autonomous run stays one
+    ...((o) => (Object.keys(o).length > 0 ? { options: o } : {}))({
+      ...(from.options?.kind ? { kind: from.options.kind } : {}),
+      ...(from.options?.autonomous ? { autonomous: true as const } : {}),
+    }),
   });
   const carried = handOff(runtime, from, run, startAt);
   runtime.events.emit({
@@ -633,6 +636,7 @@ export async function runRestart(
       ...((o) => (Object.keys(o).length > 0 ? { options: o } : {}))({
         ...(from.options?.fresh?.length ? { fresh: [...from.options.fresh] } : {}),
         ...(from.options?.kind ? { kind: from.options.kind } : {}),
+        ...(from.options?.autonomous ? { autonomous: true as const } : {}),
       }),
     });
     const carried = handOff(runtime, from, run, startAt, (a) => !a.stepId || keepSteps.has(a.stepId));
@@ -756,6 +760,8 @@ export async function runWork(
     kind?: TaskKind;
     /** `--deliver pr`: the run opens its own PR when its workflow is done (ADR-0003 §4). */
     deliver?: "pr";
+    /** `--autonomous`: no person in the loop (src/app/autonomy.ts); else `human.autonomous`. */
+    autonomous?: boolean;
   },
 ): Promise<void> {
   const loaded = await loadForCli(ctx);
@@ -808,6 +814,7 @@ export async function runWork(
         ...(options.fresh?.length ? { fresh: [...options.fresh] } : {}),
         ...(options.kind ? { kind: options.kind } : {}),
         ...(options.deliver ? { delivery: options.deliver } : {}),
+        ...(options.autonomous || loaded.config.human.autonomous ? { autonomous: true as const } : {}),
       }),
     });
     runtime.events.emit({

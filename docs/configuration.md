@@ -228,6 +228,7 @@ human:                         # ADR-0019 §9
     removeMarkersAfterApproval: true
   clarification: { multiTurn: true, maxTurns: 8 }
   suggestAnswers: true                   # перед гейтом — ответы на открытые вопросы документа (один вызов модели)
+  autonomous: false                      # experimental: прогоны без человека по умолчанию (как --autonomous, cli.md)
   checks:
     ask: same-failure                    # когда упавшие проверки останавливают прогон до следующего круга:
                                          # same-failure — упали так же, как в прошлом круге, или тесты не запустились;

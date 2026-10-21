@@ -484,6 +484,11 @@ export const HumanConfigSchema = z.strictObject({
       ask: z.enum(["same-failure", "every-failure", "when-rounds-end"]).default("same-failure"),
     })
     .prefault({}),
+  /**
+   * Runs go without a person by default (src/app/autonomy.ts; experimental): gates pass, a question gets
+   * the most cautious assumption, a dead end ends the run. `--autonomous` asks it for one run.
+   */
+  autonomous: z.boolean().default(false),
 });
 export type HumanConfig = z.infer<typeof HumanConfigSchema>;
 

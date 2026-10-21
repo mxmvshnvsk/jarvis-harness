@@ -1,4 +1,5 @@
 import { reasonOf } from "../app/activity.ts";
+import { isAutonomous, noteAutonomy } from "../app/autonomy.ts";
 import { proposeGlossaryCandidates } from "../app/candidates.ts";
 import { goOnRequested, rerunBackTo } from "../app/decide.ts";
 import { DeliveryError, deliverPr, deliversItself, PR_REQUEST, prOf } from "../app/deliver.ts";
@@ -539,6 +540,18 @@ export class LocalWorkflowEngine {
           ...(headCommit ? { headCommit } : {}),
           state: { loopExhausted: transition.edgeId },
         });
+        if (isAutonomous(run)) {
+          // nobody to decide: the run ends here, its rounds kept in the loop-exhausted document
+          const reason = `autonomous: back edge ${transition.edgeId} exhausted after ${max} round(s) — nobody to decide; restart it from a step with a person`;
+          noteAutonomy(this.rt, run, "stopped", { why: "loop", edge: transition.edgeId }, step.id);
+          const failed = this.rt.runs.transition(run.id, "FAILED", { reason });
+          this.emit(failed, "workflow.loopExhausted", {
+            edge: transition.edgeId,
+            artifact: `${exhausted.artifactId}@${exhausted.version}`,
+          });
+          this.emit(failed, "run.state", { state: failed.state, reason: failed.stateReason });
+          return { run: failed, stop: true };
+        }
         const parked = this.rt.runs.transition(run.id, "WAITING_HUMAN", {
           reason: stop
             ? `checks of round ${iteration} ${stop.why === "not-started" ? "ran no test" : stop.why === "same-failure" ? "failed as the round before" : "failed"}: a person decides before ${transition.edgeId} is taken again`
@@ -897,6 +910,15 @@ export class LocalWorkflowEngine {
         ...(suspend.resumeAfter ? { resumeAfter: suspend.resumeAfter.toISOString() } : {}),
       },
     });
+    if (isAutonomous(run) && suspend.waitingFor?.kind === "budget") {
+      // a spent budget with nobody to grant more: the run ends with what it has, not half-delivered
+      noteAutonomy(this.rt, run, "stopped", { why: "budget", detail: suspend.waitingFor.detail }, step.id);
+      const failed = this.rt.runs.transition(run.id, "FAILED", {
+        reason: `autonomous: ${suspend.reason} — nobody to grant more; restart it with a bigger budget or with a person`,
+      });
+      this.emit(failed, "run.state", { state: failed.state, reason: failed.stateReason });
+      return failed;
+    }
     const parked = this.rt.runs.transition(run.id, suspend.state, {
       reason: suspend.reason,
       ...(suspend.waitingFor ? { waitingFor: suspend.waitingFor } : {}),

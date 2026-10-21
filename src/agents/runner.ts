@@ -1,3 +1,4 @@
+import { isAutonomous } from "../app/autonomy.ts";
 import { pausedText } from "../app/pause.ts";
 import { BudgetExceededError, grantsFromEvents } from "../budget/runBudget.ts";
 import {
@@ -298,6 +299,7 @@ export class AgentRuntimeRunner implements AgentRunner {
     const ask =
       (config.agents[def.id]?.onLimit ?? ctx.step.onLimit ?? "finish") === "ask" &&
       config.interactive !== false &&
+      !isAutonomous(ctx.run) &&
       !grants.finish;
     // files read in this step, from the conversation itself (src/agents/rereads.ts)
     const reads = ReadLedger.from(transcript);

@@ -85,6 +85,8 @@ export interface Launcher {
     freshDesign?: boolean;
     /** The kind of task the person picked (`--kind`); without, the workflow's. */
     kind?: TaskKind;
+    /** No person in the loop (`--autonomous`; experimental). */
+    autonomous?: boolean;
   }): Launch;
   /** A finished research/spec goes on as its next workflow: `jarvis continue <run>` in the background. */
   continueRun(from: Run, workflow: Workflow): Launch;
@@ -280,6 +282,7 @@ export function createLauncher(options: LauncherOptions): Launcher {
         ...(input.workflow === "sdd-cross" ? ["--workflow", "sdd-cross"] : []),
         ...(input.freshDesign ? ["--fresh", "design"] : []),
         ...(input.kind ? ["--kind", input.kind] : []),
+        ...(input.autonomous ? ["--autonomous"] : []),
       ];
       spawnCli(args, input.repoRoot, log, (code) => {
         launch.exitCode = code ?? 1;

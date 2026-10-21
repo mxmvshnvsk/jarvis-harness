@@ -215,6 +215,7 @@ export function newTaskHtml(start: StartForm, actions: Actions): Html {
 ${kindLineHtml()}
 <div class="startfrom" data-from aria-live="polite"></div>
 <details class="more"><summary>${t("More options")}</summary>
+<label class="check"><input type="checkbox" name="autonomous" value="1"> ${t("Autonomous")} <span class="pill wait">experimental</span> <span class="meta">— ${t("no person in the loop: gates pass, a question gets the most cautious assumption, a dead end ends the run; what goes outside after internet content still waits for you")}</span></label>
 <label class="check"><input type="checkbox" name="fresh" value="design"> ${t("Read the Figma frames again")} <span class="meta">— ${t("the design changed at the same link; past Jarvis's one-day cache, each frame is a Figma API call")}</span></label>
 </details>
 <p class="hint">${th("Runs in the background, as {cmd} (or the one chosen) would without a terminal; where it needs you, it waits here — decide on the page and it goes on.", { cmd: html`<code>jarvis spec "…"</code>` })}</p>

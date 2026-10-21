@@ -1,4 +1,5 @@
 import type { Run } from "../core/domain/run.ts";
+import { isAutonomous } from "./autonomy.ts";
 import type { AskWhen } from "./rounds.ts";
 import type { Runtime } from "./runtime.ts";
 
@@ -30,6 +31,8 @@ export function runChecksAsk(runtime: Runtime, runId: string): AskWhen | undefin
 
 /** What failed checks do in this run: its own setting, else the project's. */
 export function checksAskOf(runtime: Runtime, runId: string): AskWhen {
+  // nobody to ask: every round is taken before the run stops (src/app/autonomy.ts)
+  if (isAutonomous(runtime.runs.get(runId))) return "when-rounds-end";
   return runChecksAsk(runtime, runId) ?? runtime.loaded.config.human.checks.ask;
 }
 

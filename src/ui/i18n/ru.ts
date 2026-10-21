@@ -1598,6 +1598,19 @@ export const RU: Readonly<Record<string, string>> = {
   "Too long for one address: GitHub gets it shortened. Copy the whole text into the issue.":
     "Для одной ссылки текст слишком длинный, и GitHub получит его сокращённым. Скопируйте полный текст в issue.",
   "Back to the run": "Назад к прогону",
+  // ---- autonomous runs
+  "No person in the loop: gates pass, a question gets the most cautious assumption, a dead end ends the run":
+    "Без человека: утверждения проходят сами, на вопрос агента — самое осторожное допущение, в тупике прогон заканчивается",
+  autonomous: "автономно",
+  Autonomous: "Автономно",
+  "no person in the loop: gates pass, a question gets the most cautious assumption, a dead end ends the run; what goes outside after internet content still waits for you":
+    "без человека: утверждения проходят сами, на вопрос агента — самое осторожное допущение, в тупике прогон заканчивается; действия наружу после данных из интернета всё равно ждут вас",
+  "autonomous: {type} passed without a person": "автономно: {type} пройден без человека",
+  "autonomous: {agent} asked, nobody answers — the most cautious assumption, the step again":
+    "автономно: {agent} задал вопрос, отвечать некому — самое осторожное допущение, шаг заново",
+  "autonomous: the task stays in this service": "автономно: задача остаётся в этом сервисе",
+  "autonomous: the contract stays as agreed": "автономно: контракт остаётся как договорились",
+  "autonomous: nobody to decide — the run ends": "автономно: решать некому — прогон закончен",
 };
 
 /**

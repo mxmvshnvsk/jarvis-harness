@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { AUTONOMOUS_ACTOR, AUTONOMOUS_RULE, isAutonomous, noteAutonomy } from "../app/autonomy.ts";
 import { layoutOf } from "../core/paths.ts";
 import { prepareSuggestions } from "../interaction/answers.ts";
 import { questionsOf } from "../interaction/questions.ts";
@@ -93,7 +94,17 @@ export class AgenticExecutor implements StepExecutor {
     }
     if (!this.runner)
       return { status: "failure", reason: `no agent runner registered for agent "${ctx.step.agent}"` };
-    const outcome = await this.runner.run(ctx);
+    let outcome = await this.runner.run(ctx);
+    if (outcome.status === "success" && outcome.outcome === CLARIFICATION_OUTCOME && isAutonomous(ctx.run)) {
+      // nobody to answer: the most cautious assumption becomes the rule, and the step goes again once
+      assumeForAutonomous(ctx, outcome.outputs?.[0]);
+      outcome = await this.runner.run({ ...ctx, restored: undefined });
+      if (outcome.status === "success" && outcome.outcome === CLARIFICATION_OUTCOME)
+        return {
+          status: "failure",
+          reason: `autonomous: ${ctx.step.agent} still needs a person's answer after an assumption was made — run it with a person`,
+        };
+    }
     if (outcome.status === "success" && outcome.outcome === CLARIFICATION_OUTCOME) {
       // ADR-0019 §4: the agent cannot continue without a human answer — open a thread and park.
       // The step runs again, with the resolution in its context, once the thread is resolved.
@@ -135,6 +146,51 @@ export class AgenticExecutor implements StepExecutor {
 }
 
 export const CLARIFICATION_OUTCOME = "needs_clarification";
+
+/**
+ * An autonomous run's answer to an agent's question: a clarification document (as a person's answer
+ * would be) that says nobody answered, with the rule to take the most cautious reading — the agent's
+ * context carries it like any accepted rule. Made by the run, not by a person.
+ */
+function assumeForAutonomous(ctx: StepContext, ref: string | undefined): void {
+  const rt = ctx.runtime;
+  const question = (ref ? questionOf(rt, ref) : undefined) ?? "clarification needed";
+  const artifact = rt.artifacts.put({
+    runId: ctx.run.id,
+    type: "clarification",
+    name: `autonomous-${ctx.step.id}-${ctx.iteration}.json`,
+    content: JSON.stringify(
+      {
+        origin: `agent:${ctx.step.agent}`,
+        stepId: ctx.step.id,
+        question,
+        answers: [],
+        rule: AUTONOMOUS_RULE,
+        requirementCorrections: [],
+        assumptions: [],
+        resolvedBy: `${AUTONOMOUS_ACTOR.kind}:${AUTONOMOUS_ACTOR.id}`,
+      },
+      null,
+      2,
+    ),
+    mediaType: "application/json",
+    provenance: { kind: "tool", capability: "autonomy.assume" },
+    sourceRefs: ref ? [ref] : [],
+    stepId: ctx.step.id,
+    iteration: ctx.iteration,
+  });
+  noteAutonomy(
+    rt,
+    ctx.run,
+    "assumption",
+    {
+      agent: ctx.step.agent,
+      question: question.slice(0, 400),
+      artifact: `${artifact.artifactId}@${artifact.version}`,
+    },
+    ctx.step.id,
+  );
+}
 
 /** The answers the agent sees to its question (`clarification.answers`): one click each on the page. */
 function answersOf(rt: StepContext["runtime"], ref: string): string[] {
@@ -233,6 +289,17 @@ export class ApprovalExecutor implements StepExecutor {
           reason: "gate not required",
         },
       });
+      return { status: "success", outputs: [`${latest.artifactId}@${latest.version}`] };
+    }
+    if (isAutonomous(ctx.run)) {
+      // nobody to approve: the gate passes and says so (src/app/autonomy.ts)
+      ctx.runtime.events.emit({
+        kind: "approval.skipped",
+        runId: ctx.run.id,
+        stepId: ctx.step.id,
+        payload: { artifactId: latest.artifactId, version: latest.version, type, reason: "autonomous" },
+      });
+      noteAutonomy(ctx.runtime, ctx.run, "gate", { type, version: latest.version }, ctx.step.id);
       return { status: "success", outputs: [`${latest.artifactId}@${latest.version}`] };
     }
     const latestApproval = ctx.runtime.artifacts.approvalsFor(latest.artifactId, latest.version)[0];
