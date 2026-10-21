@@ -94,6 +94,19 @@ input.amount{height:36px;width:11em;padding:0 10px;font-family:inherit;font-size
 .notify[aria-pressed=true]{color:var(--accent);border-color:var(--accent)}
 .notify[data-state=blocked],.notify[data-state=unsupported]{opacity:.55}
 .theme svg{width:16px;height:16px}
+a.theme{text-decoration:none}
+.report{padding:20px 24px;display:flex;flex-direction:column;gap:14px;max-width:820px}
+.report .grow{flex:1 1 auto}
+.report h2{margin:0;font-size:16px}
+.report .field>span{color:var(--ink);font-weight:500}
+.report .field>span .hint{font-weight:400;margin-left:4px}
+.report input[type=text]{height:40px;padding:0 12px;border-radius:8px}
+.rgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+@media (max-width:640px){.rgrid{grid-template-columns:1fr}}
+.rattach{margin:0;padding:4px 14px 12px;border:1px solid var(--line);border-radius:8px}
+.rattach legend{padding:0 6px;font-size:13px;font-weight:500}
+.rattach code{font-size:12px}
+.rtext{margin:0;padding:14px 16px;background:var(--sunken);border-radius:8px;font-size:12.5px;line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere;max-height:480px;overflow:auto}
 /* the switch shows where it goes: a moon on the light theme, a sun on the dark one */
 .theme .sun{display:none}
 :root[data-theme=dark] .theme .sun{display:block}

@@ -121,6 +121,8 @@ export interface Chrome {
   readonly services?: number;
   /** The page's path: which section of the top bar is current. */
   readonly path?: string;
+  /** «Report a problem» is on (`feedback.repo`). */
+  readonly report?: boolean;
 }
 
 /** The top bar's sections: Runs with what waits, Knowledge, Services of a knowledge repository. */
@@ -168,6 +170,7 @@ ${chrome.repos ?? ""}
 <span class="live" data-state="connecting" role="status" title="${chrome.address}"><span class="dot" aria-hidden="true"></span><span class="label">${t("connecting…")}</span></span>
 <button type="button" class="theme notify" data-notify aria-pressed="false" aria-label="${t("System notifications when a run waits for you")}" title="${t("System notifications when a run waits for you")}"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.75a4 4 0 0 0-4 4v2.6L2.75 11h10.5L12 8.35v-2.6a4 4 0 0 0-4-4zM6.5 13a1.5 1.5 0 0 0 3 0" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"></path></svg></button>
 <button type="button" class="theme" data-theme-switch aria-label="${t("Switch the theme")}" title="${t("Switch the theme")}"><svg class="moon" viewBox="0 0 16 16" aria-hidden="true"><path d="M13.5 9.6A5.75 5.75 0 0 1 6.4 2.5a5.75 5.75 0 1 0 7.1 7.1z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"></path></svg><svg class="sun" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="3" fill="none" stroke="currentColor" stroke-width="1.5"></circle><path d="M8 1v1.75M8 13.25V15M1 8h1.75M13.25 8H15M3.05 3.05l1.24 1.24M11.71 11.71l1.24 1.24M3.05 12.95l1.24-1.24M11.71 4.29l1.24-1.24" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path></svg></button>
+${chrome.report ? html`<a class="theme" href="/report${chrome.runId ? `?run=${shortRunId(chrome.runId)}` : ""}" aria-label="${t("Report a problem in Jarvis")}" title="${t("Report a problem in Jarvis")}"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 6h5v3.5a2.5 2.5 0 0 1-5 0zM6 6V4.75a2 2 0 0 1 4 0V6M2.5 8.5h3M10.5 8.5h3M3 5l2.5 1.5M13 5l-2.5 1.5M3 13l2.5-1.5M13 13l-2.5-1.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"></path></svg></a>` : ""}
 ${langSwitch(chrome.path ?? "/")}
 ${chrome.canStart ? html`<a class="btn primary small newtask-btn" href="/#new" data-new-task title="${t("New task (N)")}"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"></path></svg>${t("New task")}<kbd aria-hidden="true">N</kbd></a>` : ""}
 </div>

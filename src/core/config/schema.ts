@@ -578,6 +578,20 @@ export type DeliveryConfig = z.infer<typeof DeliveryConfigSchema>;
  * ADR-0006 §4: the daemon resumes runs as `service:daemon`; it uses the owner's credentials for an
  * effect (a push, a PR) only with `actAsOwner` — on the owner's own machine, the default.
  */
+/**
+ * «Report a problem» in `jarvis ui`: the GitHub repository whose new-issue form it opens, filled in.
+ * `repo: false` hides it; `host` is a GitHub Enterprise address.
+ */
+export const FeedbackConfigSchema = z.strictObject({
+  repo: z
+    .union([z.literal(false), z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/, "owner/name")])
+    .default("mxmvshnvsk/jarvis-harness"),
+  host: z
+    .string()
+    .regex(/^https:\/\/[^\s/]+$/, "https://host, without a path")
+    .default("https://github.com"),
+});
+
 export const DaemonConfigSchema = z.strictObject({
   actAsOwner: z.boolean().default(true),
 });
@@ -672,6 +686,7 @@ export const UserConfigSchema = z.strictObject({
   /** Scheduled eval suites this machine's daemon runs (ADR-0012 §5). */
   evals: EvalsConfigSchema.optional(),
   daemon: DaemonConfigSchema.optional(),
+  feedback: FeedbackConfigSchema.optional(),
 });
 export type UserConfig = z.infer<typeof UserConfigSchema>;
 
@@ -717,13 +732,19 @@ const ProjectFieldsSchema = z.strictObject({
   evals: EvalsConfigSchema.optional(),
   /** How a finished run may go out as a pull request (ADR-0003 §4). */
   delivery: DeliveryConfigSchema.optional(),
+  /** Where «Report a problem» opens an issue (a fork's own repository). */
+  feedback: FeedbackConfigSchema.optional(),
 });
 
 /**
  * `services.<name>` of a knowledge repository's project.yaml: the same keys as the project's, over
  * the shared ones, and where its repository is when the folder is named differently.
  */
-export const ServiceConfigSchema = ProjectFieldsSchema.omit({ version: true, evals: true }).extend({
+export const ServiceConfigSchema = ProjectFieldsSchema.omit({
+  version: true,
+  evals: true,
+  feedback: true,
+}).extend({
   /** Its repository: a folder under `repos`, or a path (relative to `repos`); default — the name. */
   repo: z.string().min(1).optional(),
   /** The path segment the balancer routes to it (`http://${SERVICE_HOST}/<path>`), when not its name. */
@@ -782,6 +803,7 @@ export const ResolvedConfigSchema = z.strictObject({
   evals: EvalsConfigSchema.prefault({}),
   delivery: DeliveryConfigSchema.prefault({}),
   daemon: DaemonConfigSchema.prefault({}),
+  feedback: FeedbackConfigSchema.prefault({}),
   /** Capability patterns denied by the active profile (ADR-0009 §1); applied by the Tool Router. */
   deniedCapabilities: z.array(z.string().min(1)).default([]),
   /** Name of the applied profile, if any. */

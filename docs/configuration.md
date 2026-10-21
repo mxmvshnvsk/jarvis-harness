@@ -29,6 +29,9 @@ actor:
   display: Maxim
 daemon:
   actAsOwner: true             # daemon пушит и открывает PR вашими credentials; false — прогон ждёт вас (ADR-0006 §4)
+feedback:                      # «Сообщить о проблеме» в jarvis ui; то же можно задать в проекте
+  repo: mxmvshnvsk/jarvis-harness   # куда открывается issue; false — кнопки нет
+  host: https://github.com     # GitHub Enterprise — свой адрес
 
 quotaPools:                    # ADR-0018 §4
   corp-default:

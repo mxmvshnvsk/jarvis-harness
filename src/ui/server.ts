@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { isAbsolute, join as joinPath, relative, resolve as resolvePath, sep } from "node:path";
 import { applyRun } from "../app/applyRun.ts";
 import { budgetGranted, budgetStopOf, grantBudget } from "../app/budgetStop.ts";
+import { type BugReportInput, bugReportOf, environmentLines, type FeedbackTarget } from "../app/bugReport.ts";
 import {
   addCandidate,
   CANDIDATES_WORKFLOW,
@@ -174,6 +175,7 @@ import {
   runsContent,
   startFromHtml,
 } from "./pages.ts";
+import { reportContent } from "./report.ts";
 import { type ServicesPage, serviceContent, servicesContent } from "./services.ts";
 
 /**
@@ -428,6 +430,10 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
   // ADR-0016 §6: servers out of the data class's network by an exception, said on every page
   const egress = egressNotices(runtime.loaded.config);
   const modelEgress = modelEgressNotices(runtime.loaded.config);
+  // «Report a problem»: the repository its issue goes to; none — the button is not there
+  const feedbackRepo = runtime.loaded.config.feedback.repo;
+  const feedback: FeedbackTarget | undefined =
+    feedbackRepo === false ? undefined : { repo: feedbackRepo, host: runtime.loaded.config.feedback.host };
   const page = (
     r: Request,
     status: number,
@@ -447,6 +453,7 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
           waits: runtime.runs.list({ state: ["WAITING_HUMAN"], limit: 500 }).length,
           ...(runtime.loaded.meta ? { services: Object.keys(runtime.loaded.meta.repos).length } : {}),
           path: r.url.pathname,
+          ...(feedback ? { report: true } : {}),
           ...(egress.length > 0 ? { egress } : {}),
           ...(modelEgress.length > 0 ? { modelEgress } : {}),
         },
@@ -1695,6 +1702,50 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
     });
   };
 
+  /** «Report a problem» (src/app/bugReport.ts): the form, its text, or off to GitHub's new-issue form. */
+  const reportPage = async (r: Request, toGitHub: boolean): Promise<void> => {
+    if (!feedback) return notFound(r, "Reporting a problem is off here (feedback.repo: false).");
+    const q = r.url.searchParams;
+    const ref = q.get("run");
+    const run = ref ? resolveRun(ref) : undefined;
+    const filled = q.has("title");
+    const input: BugReportInput = {
+      title: (q.get("title") ?? "").slice(0, 200),
+      happened: (q.get("happened") ?? "").slice(0, 4000),
+      expected: (q.get("expected") ?? "").slice(0, 4000),
+      steps: (q.get("steps") ?? "").slice(0, 4000),
+      include: {
+        env: q.get("env") === "1",
+        run: q.get("withRun") === "1",
+        errors: q.get("errors") === "1",
+        task: q.get("task") === "1",
+      },
+      ...(run ? { run } : {}),
+      lang: lang(),
+    };
+    const report = filled ? bugReportOf(runtime, feedback, input) : undefined;
+    if (toGitHub && report) return redirect(r, report.url);
+    return page(
+      r,
+      200,
+      {
+        title: t("Report a problem in Jarvis"),
+        page: "error",
+        ...(run ? { back: { href: `/runs/${shortRunId(run.id)}`, label: t("Back to the run") } } : {}),
+      },
+      reportContent({
+        repo: feedback.repo,
+        host: feedback.host,
+        env: environmentLines()
+          .map((l) => l.replace(/^- /, ""))
+          .join(" · "),
+        ...(run ? { run } : {}),
+        ...(filled ? { input } : {}),
+        ...(report && q.get("show") === "1" ? { report } : {}),
+      }),
+    );
+  };
+
   /** "New task": the CLI started in the background, driven by the page (src/ui/launcher.ts). */
   const startTask = async (r: Request): Promise<void> => {
     const launcher = options.launcher;
@@ -2384,6 +2435,7 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
     if (path === "/knowledge/modules") return modulesPageOf(r);
     if (path === "/knowledge" || path.startsWith("/knowledge/")) return knowledgeGet(r);
     if (path === "/runs/from") return startFrom(r);
+    if (path === "/report" || path === "/report/github") return reportPage(r, path === "/report/github");
     if (path === "/open") return openRef(r);
     const runMatch = /^\/runs\/([^/]+)$/.exec(path);
     if (runMatch) {

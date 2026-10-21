@@ -1573,6 +1573,31 @@ export const RU: Readonly<Record<string, string>> = {
   "proposed by": "кто предложил",
   skill: "скилл",
   "Pick a candidate.": "Выберите кандидата.",
+  // ---- Report a problem
+  "Report a problem in Jarvis": "Сообщить о проблеме в Jarvis",
+  "A new issue opens in {repo} on GitHub with this text filled in: read it there and submit it.":
+    "Откроется новый issue в {repo} на GitHub с этим текстом: проверьте его там и отправьте.",
+  "In short, what is wrong": "Коротко, что не так",
+  "What happened": "Что случилось",
+  "What you expected": "Что ожидали",
+  "How to repeat": "Как повторить",
+  "Attach to the issue": "Приложить к issue",
+  "Jarvis version, OS, Node": "Версия Jarvis, ОС, Node",
+  "The run: workflow, step, state, reason": "Прогон: workflow, шаг, состояние, причина",
+  "The run's last errors, secrets masked": "Последние ошибки прогона, секреты замаскированы",
+  "The task's text": "Текст задачи",
+  "may hold the company's data": "может содержать данные компании",
+  "Opened from a run's page, the report can carry that run's step, state and errors.":
+    "Если открыть форму со страницы прогона, к issue можно приложить его шаг, состояние и ошибки.",
+  "The issue is public. The company's code, paths and service names do not get into it unless you write them yourself.":
+    "Issue будет публичным. Код, пути и имена сервисов компании в него не попадут, если вы сами их не впишете.",
+  "Show the text": "Показать текст",
+  "Open the issue on GitHub": "Открыть issue на GitHub",
+  "The issue's text": "Текст issue",
+  "Open on GitHub": "Открыть на GitHub",
+  "Too long for one address: GitHub gets it shortened. Copy the whole text into the issue.":
+    "Для одной ссылки текст слишком длинный, и GitHub получит его сокращённым. Скопируйте полный текст в issue.",
+  "Back to the run": "Назад к прогону",
 };
 
 /**
