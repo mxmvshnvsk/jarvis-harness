@@ -1603,8 +1603,8 @@ export const RU: Readonly<Record<string, string>> = {
     "Без человека: утверждения проходят сами, на вопрос агента — самое осторожное допущение, в тупике прогон заканчивается",
   autonomous: "автономно",
   Autonomous: "Автономно",
-  "no person in the loop: gates pass, a question gets the most cautious assumption, a dead end ends the run; what goes outside after internet content still waits for you":
-    "без человека: утверждения проходят сами, на вопрос агента — самое осторожное допущение, в тупике прогон заканчивается; действия наружу после данных из интернета всё равно ждут вас",
+  "full autonomy: no person needed, except when the task gets stuck or internet content comes into it":
+    "режим полной автономии — человек не нужен, кроме двух случаев: задача застряла или в неё пришли данные из интернета",
   "autonomous: {type} passed without a person": "автономно: {type} пройден без человека",
   "autonomous: {agent} asked, nobody answers — the most cautious assumption, the step again":
     "автономно: {agent} задал вопрос, отвечать некому — самое осторожное допущение, шаг заново",
