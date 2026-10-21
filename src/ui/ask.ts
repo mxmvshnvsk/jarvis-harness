@@ -99,8 +99,7 @@ export function askOfRun(runtime: Runtime, roots: KnowledgeRoots, run: Run, now:
     ...(verified ? { verified } : {}),
     ...(run.state === "FAILED" || run.state === "CANCELLED"
       ? {
-          problem:
-            run.stateReason ?? t("the answering run ended {state}", { state: t(run.state).toLowerCase() }),
+          problem: run.stateReason ?? t("the answering run ended {state}", { state: run.state }),
         }
       : {}),
   };
@@ -122,7 +121,7 @@ export function recentAsks(runtime: Runtime, roots: KnowledgeRoots, limit = 10):
           : v?.general
             ? t("general knowledge only")
             : t("not in the knowledge");
-      } else if (run.state === "FAILED" || run.state === "CANCELLED") label = t(run.state).toLowerCase();
+      } else if (run.state === "FAILED" || run.state === "CANCELLED") label = run.state;
       else label = t("answering…");
       return { run, question: asked.question, label };
     });

@@ -246,7 +246,7 @@ const pausable = (page: Pick<RunPage, "run" | "leaseLive">): boolean =>
 
 function statePill(run: Run, extra?: string): Html {
   if (cancelling(run))
-    return html`<span class="pill bad"><span class="spin" aria-hidden="true"></span> ${t("CANCELLING")}</span>`;
+    return html`<span class="pill bad"><span class="spin" aria-hidden="true"></span> CANCELLING</span>`;
   const s = run.state;
   const tone =
     s === "COMPLETED"
@@ -259,7 +259,8 @@ function statePill(run: Run, extra?: string): Html {
             ? "plain"
             : "wait";
   const glyph = { ok: "✓", bad: "✗", info: "◌", plain: "–", wait: "⏸" }[tone];
-  const label = s === "WAITING_BUDGET" ? t("PAUSED · waits for quota") : t(s);
+  // a run's state stays as the engine names it, in every language (pilot: «ГОТОВО», «УПАЛ» read worse)
+  const label = s === "WAITING_BUDGET" ? `PAUSED · ${t("waits for quota")}` : s;
   return html`<span class="pill ${tone}">${glyph} ${label}${extra ? ` · ${extra}` : ""}</span>`;
 }
 
@@ -468,11 +469,11 @@ function recentState(run: Run): Html {
   const why = run.stateReason ? ` · ${cut(reasonText(run.stateReason), 48)}` : "";
   switch (run.state) {
     case "COMPLETED":
-      return html`<span class="ok">✓ ${t("COMPLETED")}</span>`;
+      return html`<span class="ok">✓ COMPLETED</span>`;
     case "FAILED":
-      return html`<span class="bad">✗ ${t("FAILED")}${why}</span>`;
+      return html`<span class="bad">✗ FAILED${why}</span>`;
     case "CANCELLED":
-      return html`<span class="muted">– ${t("CANCELLED")}${why}</span>`;
+      return html`<span class="muted">– CANCELLED${why}</span>`;
     case "RUNNING":
       return html`<span class="warn">⏸ ${t("interrupted")} · <code>jarvis resume</code></span>`;
     case "WAITING_BUDGET":

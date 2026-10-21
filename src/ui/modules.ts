@@ -95,7 +95,7 @@ export function researchOf(
       const check = moduleCheckOf(runtime, run.id);
       const reason = check
         ? t("no claim survived the check against the code")
-        : `${t("the run ended {state}", { state: t(run.state).toLowerCase() })}${run.stateReason ? `: ${run.stateReason}` : ""}`;
+        : `${t("the run ended {state}", { state: run.state })}${run.stateReason ? `: ${run.stateReason}` : ""}`;
       out.set(module, { kind: "failed", run, reason });
     }
   }

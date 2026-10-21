@@ -322,7 +322,7 @@ ${
     ? html`<p class="hint">${t("None yet.")}</p>`
     : html`<ul class="sv-runs">${s.runs.map(
         (r) =>
-          html`<li><span class="sv-dot ${STATE_DOT[r.state] ?? (isTerminal(r.state) ? "plain" : "info")}" aria-hidden="true"></span><a href="/runs/${encodeURIComponent(shortRunId(r.id))}">${r.task.split("\n")[0] ?? ""}</a> <span class="muted">${r.workflow} · ${t(r.state).toLowerCase().replace(/_/g, " ")}</span></li>`,
+          html`<li><span class="sv-dot ${STATE_DOT[r.state] ?? (isTerminal(r.state) ? "plain" : "info")}" aria-hidden="true"></span><a href="/runs/${encodeURIComponent(shortRunId(r.id))}">${r.task.split("\n")[0] ?? ""}</a> <span class="muted">${r.workflow} · ${r.state}</span></li>`,
       )}</ul>`
 }
 </section>

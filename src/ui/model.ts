@@ -1072,10 +1072,10 @@ export function feedItem(e: StoredEvent): FeedItem | undefined {
       const state = str(p.state) ?? "?";
       const why = str(p.reason);
       if (state === "RUNNING") return at(`${t("running")}${why ? ` — ${why}` : ""}${behalf ? by : ""}`);
-      if (state === "COMPLETED") return at(`✓ ${t("completed")}`, "ok");
-      if (state === "FAILED") return at(`✗ ${t("failed")}${why ? `: ${why}` : ""}`, "bad");
-      // t("waiting budget") t("waiting human") t("suspended") t("cancelled") t("created")
-      return at(`⏸ ${t(state.toLowerCase().replace("_", " "))}${why ? ` — ${why}` : ""}`, "warn");
+      // states as the engine names them, in every language
+      if (state === "COMPLETED") return at("✓ COMPLETED", "ok");
+      if (state === "FAILED") return at(`✗ FAILED${why ? `: ${why}` : ""}`, "bad");
+      return at(`⏸ ${state}${why ? ` — ${why}` : ""}`, "warn");
     }
     case "approval.recorded": {
       const d = str(p.decision) ?? "decision";

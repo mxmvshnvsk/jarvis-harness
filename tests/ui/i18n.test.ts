@@ -48,8 +48,7 @@ describe("the page in Russian", () => {
 
   it("no translation is left over from a string the code no longer has", () => {
     const used = new Set(keysInCode().keys());
-    // the run states are passed to t() as values, not literals
-    const states = new Set(["RUNNING", "WAITING_HUMAN", "SUSPENDED", "CREATED"]);
+    const states = new Set<string>();
     expect(Object.keys(RU).filter((k) => !used.has(k) && !states.has(k))).toEqual([]);
   });
 
