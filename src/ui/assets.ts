@@ -56,7 +56,8 @@ a{color:var(--accent)}a:hover{color:var(--accent-dark)}
    on a narrow screen it wraps into rows and would eat the page, so it scrolls away there */
 @media (min-width:720px){.top{position:sticky;top:0;z-index:40}html{scroll-padding-top:72px}}
 .wrap{max-width:1240px;margin:0 auto;padding:0 24px}
-.top .bar{min-height:56px;padding:10px 24px;display:flex;flex-wrap:wrap;align-items:center;gap:8px 6px}
+/* not the progress .bar below: that one clips (overflow:hidden), which hid the mcp and models popovers */
+.top .bar{min-height:56px;height:auto;padding:10px 24px;display:flex;flex-wrap:wrap;align-items:center;gap:8px 6px;overflow:visible;border-radius:0;background:none}
 .brand{display:inline-flex;align-items:center;gap:8px;margin-right:14px;font-family:var(--mono);font-weight:600;font-size:15px;color:var(--ink);text-decoration:none}
 .brand .mark{width:16px;height:16px;border-radius:5px;background:var(--ink)}
 .top nav a{display:inline-flex;align-items:center;gap:7px;height:32px;padding:0 10px;border-radius:var(--r);color:var(--muted);text-decoration:none;font-size:14px}
