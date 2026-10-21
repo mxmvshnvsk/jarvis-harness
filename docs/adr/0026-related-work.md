@@ -1,6 +1,6 @@
 # ADR-0026: Смежная работа — ветки и PR связанных задач как источник спеки
 
-- Статус: предложено
+- Статус: предложено; инструменты MCP-серверов пилота проверены (2026-10-21)
 - Дата: 2026-10-21
 - Основание: [ADR-0025](0025-knowledge-repo-and-cross-service-tasks.md) (карта сервисов, каталог контрактов,
   проверка полей DTO), [ADR-0017](0017-models-and-mcp-configuration.md) (профили MCP),
@@ -110,13 +110,24 @@ relatedWork:
   base: dev                    # с чем сравнивать ветку; по умолчанию — ветка по умолчанию репозитория
 ```
 
-## Что нужно проверить до реализации
+## Что есть у MCP-серверов (проверено 2026-10-21)
 
-- Отдаёт ли подключённый Atlassian MCP-сервер панель Development (ветки, PR задачи). У `mcp-atlassian` это
-  отдельный вызов dev-status; если инструмента нет — шаг начинается с пути 2–3, и это видно в документе
-  (`found`).
-- Есть ли у Bitbucket MCP-сервера список веток и чтение файла на ветке; без них путь 3 ограничен PR, и ветка
-  без PR видна только в Jira или локально.
+Инструменты серверов пилота (`mcp-atlassian`, Bitbucket Server MCP) покрывают все три пути §3:
+
+| Нужно | Инструмент | Capability профиля |
+|---|---|---|
+| ветки, PR, коммиты задачи (панель Development) | `jira_get_issue_development_info`, пачкой — `jira_get_issues_development_info` | `jira.devInfo` |
+| эпик и его задачи | `jira_get_project_epic_hierarchy`, `jira_search` | `jira.epic`, `jira.search` |
+| связи между проектами | `jira_get_cross_project_dependencies` | `jira.dependencies` |
+| ветки репозитория, одна ветка | `list_branches`, `get_branch` | `bitbucket.branch.list`, `bitbucket.branch.get` |
+| коммиты ветки, коммит с файлами | `list_branch_commits`, `get_commit_detail` | `bitbucket.branch.commits`, `bitbucket.commit.get` |
+| файл на ветке | `get_file_content` | `bitbucket.file.get` |
+| PR и его дифф | `list_pull_requests`, `get_pull_request`, `get_pull_request_diff` | есть |
+
+Дифф ветки без PR: коммиты ветки после её базы (`list_branch_commits` до коммита dev) → файлы из
+`get_commit_detail` → файлы контракта читаются `get_file_content` на ветке и на базе и сравниваются. Все
+инструменты — чтения; эффекты сервера (`create_pull_request`, `merge_pull_request`, `delete_branch`) профиль
+агентам не выдаёт.
 
 ## Последствия
 
