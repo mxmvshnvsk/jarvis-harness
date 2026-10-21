@@ -42,6 +42,8 @@ export default withMermaid(
           items: [
             { text: "Машина и модели", link: "/setup/machine" },
             { text: "Проект и команда", link: "/setup/project" },
+            { text: "Скиллы", link: "/setup/skills" },
+            { text: "Сценарии задач", link: "/setup/workflows" },
             { text: "Много сервисов", link: "/setup/services" },
           ],
         },
