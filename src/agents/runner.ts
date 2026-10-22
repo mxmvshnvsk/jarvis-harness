@@ -303,7 +303,8 @@ export class AgentRuntimeRunner implements AgentRunner {
     // after it (pilot: the night's calls counted against the day's limits, and the step stopped at 8:00)
     const toolLimit = override?.maxToolCalls ?? def.limits.maxToolCalls;
     const modelLimit = override?.maxModelCalls ?? def.limits.maxModelCalls;
-    const scale = () => rt.budget.scaleNow(route.pool);
+    const scale = () =>
+      Math.min(rt.budget.scaleNow(route.pool), def.limits.maxScale ?? Number.POSITIVE_INFINITY);
     let freeToolCalls = restored?.freeToolCalls ?? 0;
     let freeModelCalls = restored?.freeModelCalls ?? 0;
     const free = () => scale() > 1;

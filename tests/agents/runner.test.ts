@@ -785,6 +785,49 @@ context: { maxContext: 8000 }
     expect(rt.events.list({ runId: run.id }).filter((e) => e.kind === "tool.call")).toHaveLength(6);
   });
 
+  it("impact grows at most twice in the unlimited hours, whatever the pool's scale (maxScale)", async () => {
+    const home = join(sb.root, "home", ".jarvis", "config.yaml");
+    writeFileSync(
+      home,
+      `${readFileSync(home, "utf8").replace("    maxOutput: 2000\n", "    maxOutput: 2000\n    quotaPool: night\n")}quotaPools:\n  night:\n    window: { minutes: 20 }\n    unlimited: [{ days: [mon, tue, wed, thu, fri, sat, sun] }]\n    unlimitedScale: 5\n`,
+    );
+    sb.write(
+      "project/.jarvis/project.yaml",
+      "version: 1\nworkspace: { mode: cwd }\nagents: { impact: { limits: { maxToolCalls: 2, maxModelCalls: 4 } } }\n",
+    );
+    rt = await testRuntime(sb, { PATH: process.env.PATH ?? "" });
+    const doc = {
+      summary: "s",
+      affected: [],
+      dependencies: [],
+      risks: [],
+      unknowns: [],
+      sources: [],
+      outcome: "ok",
+    };
+    server.respond((req) =>
+      req.body.tools ? toolCallCompletion("repo.list", {}) : completion(JSON.stringify(doc)),
+    );
+    const wf = workflowOf({
+      name: "im",
+      entry: "impact",
+      steps: [
+        {
+          id: "impact",
+          kind: "agentic",
+          agent: "impact",
+          outputs: ["impact"],
+          transitions: { onSuccess: "DONE" },
+        },
+      ],
+    });
+    const run = createRun(rt, "im");
+    await engineWith(rt, wf).execute(run.id, { owner: "cli:t" });
+    const start = rt.events.list({ runId: run.id }).find((e) => e.kind === "agent.start");
+    expect(start?.payload).toMatchObject({ maxToolCalls: 4, maxModelCalls: 8 });
+    expect(rt.events.list({ runId: run.id }).filter((e) => e.kind === "tool.call")).toHaveLength(4);
+  });
+
   it("onLimit: ask — the run waits at the limit with the conversation kept; more goes on, finish ends it", async () => {
     sb.write(
       "project/.jarvis/project.yaml",

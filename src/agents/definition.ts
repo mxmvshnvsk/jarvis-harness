@@ -15,6 +15,11 @@ export interface AgentLimits {
   readonly maxModelCalls: number;
   /** Intra-step checkpoint every N tool calls (ADR-0002 §4). */
   readonly checkpointEvery: number;
+  /**
+   * How far a pool's unlimited hours may raise the two limits above (`unlimitedScale`); none — as far as
+   * the pool says. An agent whose work has a natural end (impact) does not search more because it is night.
+   */
+  readonly maxScale?: number;
 }
 
 export interface AgentOutput<T = unknown> {
