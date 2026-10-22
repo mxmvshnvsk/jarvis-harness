@@ -242,6 +242,36 @@ describe("jarvis apply --pr", () => {
     expect((prs[0] as FakePr).args.target).toBe("release");
   });
 
+  it("the team's formats: the branch, the commit and the PR title; the author is the person", async () => {
+    await setup(
+      'delivery:\n  branch: "feature/{key}"\n  commit: { format: "{type}({scope}): {key} {subject}", scope: orders }\n  prTitle: "{type}({scope}): {key} {subject}"\n',
+    );
+    const run = await completed();
+    const done = await deliverPr(rt, run, { actor: ACTOR, channel: "cli" });
+    expect(done.source).toBe("feature/ABC-42");
+    expect(remoteHead("feature/ABC-42")).toBe(done.commit);
+    const message = execFileSync("git", ["log", "-1", "--format=%B%n--%an", done.commit], {
+      cwd: remote,
+      encoding: "utf8",
+      env,
+    });
+    expect(message).toMatch(/^feat\(orders\): ABC-42 order totals\n\nJarvis-Run: \S+\nAssisted-By: Jarvis /);
+    expect(message).not.toMatch(/--Jarvis/);
+    expect((prs[0] as FakePr).args.title).toBe("feat(orders): ABC-42 order totals");
+  });
+
+  it("a format that wants the issue key refuses a task without one, before anything is pushed", async () => {
+    await setup('delivery:\n  branch: "feature/{key}"\n');
+    const run = await completed();
+    rt.db.db.prepare("UPDATE runs SET task = ? WHERE id = ?").run("order totals", run.id);
+    await expect(
+      deliverPr(rt, rt.runs.require(run.id), { actor: ACTOR, channel: "cli" }),
+    ).rejects.toMatchObject({
+      code: "format",
+    });
+    expect(prs).toHaveLength(0);
+  });
+
   it("a task in a Story goes into the Story's branch the run started from (relatedWork.story)", async () => {
     await setup();
     const run = await runOf();

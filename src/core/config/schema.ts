@@ -586,6 +586,39 @@ export const DeliveryConfigSchema = z.strictObject({
   /** The repository on the server: `workspace` (project key) and `repo`; unset — from the remote's URL. */
   workspace: z.string().min(1).optional(),
   repo: z.string().min(1).optional(),
+  /**
+   * The branch the PR is pushed as, by the team's rule: `{key}` the task's issue key, `{slug}` its
+   * title in a few words, `{run}` the run's short id (`feature/{key}`, `feature/{key}_{slug}`); unset —
+   * the run's own `jarvis/…` branch.
+   */
+  branch: z.string().min(1).optional(),
+  /** The PR's commit message by the team's standard (Conventional Commits with the issue key, say). */
+  commit: z
+    .strictObject({
+      /** `{type}`, `{scope}`, `{key}`, `{subject}`: `"{type}({scope}): {key} {subject}"`; an empty scope drops its parentheses. */
+      format: z.string().min(1).default("{subject}"),
+      /** The run's kind of task → `{type}`. */
+      types: z.record(z.string().min(1), z.string().min(1)).default({
+        feature: "feat",
+        change: "feat",
+        fix: "fix",
+        refactor: "refactor",
+        test: "test",
+        docs: "docs",
+      }),
+      /** `{scope}`: `auto` — the module or service most of the change is in; `none` — empty; else that text. */
+      scope: z.string().min(1).default("auto"),
+      /** A commit made for a PR comment. */
+      fix: z.string().min(1).default("{subject}"),
+    })
+    .prefault({}),
+  /** The PR's title; the same keys as `commit.format`. */
+  prTitle: z.string().min(1).default("{subject}"),
+  /**
+   * Trailers that say Jarvis made it: `Jarvis-Run` (always — `jarvis explain` follows it) and
+   * `Assisted-By` (`{version}` is Jarvis's), false — none.
+   */
+  assistedBy: z.union([z.literal(false), z.string().min(1)]).default("Jarvis {version}"),
 });
 export type DeliveryConfig = z.infer<typeof DeliveryConfigSchema>;
 

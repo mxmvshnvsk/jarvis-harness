@@ -88,20 +88,22 @@ function shannonEntropy(s: string): number {
  * A repository path made of words: `packages/shared/eslint-config/base`. Its entropy passes the
  * threshold, and right after `"path":` it sits in an assignment context, so tool arguments in the
  * technical log lost their paths (pilot, 2026-10). Words are lowercase kebab/snake case, camelCase or
- * ALL CAPS (`documentation/billing/CURRENCY_CODES.md`), at most 20 characters; a random token cut by slashes has longer or mixed-case runs and stays a secret.
+ * ALL CAPS (`documentation/billing/CURRENCY_CODES.md`), at most 20 characters, or a PascalCase class
+ * name of any length (pilot: Java paths in a PR's changed files were masked); a random token cut by
+ * slashes has longer or mixed-case runs and stays a secret.
  */
 function looksLikePath(s: string): boolean {
   const segments = s.split("/").filter((seg) => seg.length > 0);
   if (segments.length < 2) return false;
   return segments.every((seg) =>
-    seg
-      .split(/[-_.]/)
-      .every(
-        (word) =>
-          word.length === 0 ||
-          (word.length <= 20 && /^(?:[a-z]+|[A-Z]+|[a-z]*(?:[A-Z][a-z]+)+)[0-9]{0,4}$/.test(word)) ||
-          /^[0-9]{1,4}$/.test(word),
-      ),
+    seg.split(/[-_.]/).every(
+      (word) =>
+        word.length === 0 ||
+        (word.length <= 20 && /^(?:[a-z]+|[A-Z]+|[a-z]*(?:[A-Z][a-z]+)+)[0-9]{0,4}$/.test(word)) ||
+        // a class name longer than 20 (`IndividualProcessingService`): its words each are short
+        /^[A-Z][a-z]+(?:[A-Z][a-z]+)+[0-9]{0,4}$/.test(word) ||
+        /^[0-9]{1,4}$/.test(word),
+    ),
   );
 }
 

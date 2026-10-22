@@ -556,7 +556,19 @@ delivery:
   capability: bitbucket.pr.create   # если PR умеют открывать несколько MCP-серверов
   workspace: SHOP              # репозиторий на сервере; без них — из URL remote'а
   repo: orders-api
+  branch: "feature/{key}"      # имя ветки PR по правилу команды: {key} {slug} {run}; без него — jarvis/...
+  commit:                      # сообщение коммита PR (и Apply, если формат задан)
+    format: "{type}({scope}): {key} {subject}"   # по умолчанию "{subject}" — заголовок спеки как есть
+    types: { feature: feat, change: feat, fix: fix, refactor: refactor, test: test, docs: docs }   # вид задачи → {type}
+    scope: auto                # auto — модуль/сервис, где больше всего изменений; none — без scope; иначе этот текст
+  prTitle: "{type}({scope}): {key} {subject}"
+  assistedBy: "Jarvis {version}"   # trailer Assisted-By; false — только Jarvis-Run
 ```
+
+Формат с `{key}` требует ключ задачи в тексте прогона: без него PR не выставляется, Jarvis говорит почему.
+Первая строка коммита не длиннее 72 символов — subject обрезается по слову; пустой scope убирает скобки
+(`feat: ABC-42 …`). Автор коммита — вы (git config), участие Jarvis видно по trailers `Jarvis-Run` и
+`Assisted-By`. В мета-репе формат сервиса задаётся в `services.<name>.delivery`.
 
 PR открывает MCP-сервер с профилем `bitbucket` (`bitbucket.pr.create`, [integrations.md](integrations.md)); push —
 ваш git. При `approve` одобрение — артефакт `pr-request` с заголовком, описанием и ветками, решение пишется с

@@ -14,6 +14,7 @@ import { git } from "../tools/local/exec.ts";
 import { capabilityMatches } from "../tools/registry.ts";
 import type { Capability, ToolContext, ToolOutput } from "../tools/types.ts";
 import { removeReviewMarkers } from "./applyRun.ts";
+import { branchOf, commitMessageOf, FormatError, headerOf } from "./deliveryFormat.ts";
 import type { Runtime } from "./runtime.ts";
 
 /**
@@ -47,6 +48,7 @@ export type DeliveryErrorCode =
   | "credentials"
   | "no-capability"
   | "no-branch"
+  | "format"
   | "empty"
   | "held"
   | "push"
@@ -68,7 +70,7 @@ export class DeliveryError extends Error {
 export interface PrRequest {
   readonly title: string;
   readonly description: string;
-  /** The branch pushed: the run's own `jarvis/…`. */
+  /** The branch pushed: `delivery.branch` filled, else the run's own `jarvis/…`. */
   readonly source: string;
   readonly target: string;
   readonly remote: string;
@@ -197,13 +199,33 @@ export async function preparePr(
       `the run changed nothing since ${base.slice(0, 10)}: nothing to deliver`,
     );
   const docs = documentsOf(runtime, run);
-  const title = (options.title?.trim() || docs.title || subjectOf(run.task)).slice(0, 200);
-  const commit = await squashed(runtime, run, base, branch, title);
+  // the team's formats (`delivery`): the branch pushed, the commit's message, the PR's title
+  const format = {
+    task: run.task,
+    title: options.title?.trim() || docs.title || subjectOf(run.task),
+    ...(run.options?.kind ? { kind: run.options.kind } : {}),
+    files,
+    // a service of a map of services: its name is the scope
+    ...(runtime.loaded.meta?.service ? { service: runtime.loaded.meta.service } : {}),
+    runId: run.id,
+  };
+  let title: string;
+  let message: string;
+  let source: string;
+  try {
+    title = (options.title?.trim() || headerOf(config, format, config.prTitle)).slice(0, 200);
+    message = commitMessageOf(config, format);
+    source = branchOf(config, format) ?? branch;
+  } catch (error) {
+    if (error instanceof FormatError) throw new DeliveryError("format", error.message);
+    throw error;
+  }
+  const commit = await squashed(runtime, run, base, branch, message);
   const coordinates = await repositoryOf(ws.repoRoot, remote);
   const request: PrRequest = {
     title,
     description: descriptionOf(run, docs, files),
-    source: branch,
+    source,
     // a task in a Story goes into the Story's branch the run started from (`relatedWork.story`)
     target:
       options.target?.trim() ||
@@ -391,7 +413,7 @@ async function squashed(
   run: Run,
   base: string,
   branch: string,
-  title: string,
+  message: string,
 ): Promise<string> {
   const repo = run.workspace.repoRoot;
   const tree = await must(git(["rev-parse", `${branch}^{tree}`], repo), "read the run's tree");
@@ -401,10 +423,7 @@ async function squashed(
     GIT_AUTHOR_DATE: date,
     GIT_COMMITTER_DATE: date,
   };
-  return must(
-    git(["commit-tree", tree, "-p", base, "-m", `${title}\n\nJarvis-Run: ${run.id}`], repo, { env }),
-    "make the PR's commit",
-  );
+  return must(git(["commit-tree", tree, "-p", base, "-m", message], repo, { env }), "make the PR's commit");
 }
 
 async function push(runtime: Runtime, run: Run, request: PrRequest): Promise<{ pushed: string }> {

@@ -62,6 +62,9 @@ describe("Redactor", () => {
       '{"path":"packages/shared/eslint-config/base.js"}',
       "file: packages/shared-lib/src/billing/invoice-rules/billingSettings.ts",
       "knowledge: documentation/billing/CURRENCY_CODES.md",
+      // a PR's changed files: class names longer than a word (pilot)
+      '{"path":"src/main/java/com/example/shop/orders/service/individual/IndividualProcessingService.java"}',
+      '{"path":"src/test/groovy/com/example/shop/orders/AbstractOrderCalculationServiceTest.groovy"}',
     ]) {
       expect(redactor.redact(text)).toMatchObject({ text, count: 0 });
     }

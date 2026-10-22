@@ -110,17 +110,18 @@ export function readableIdFor(task: string, runId: string): string {
 /** A ticket key stays as it is (`ABC-123`), Cyrillic is spelt in Latin letters, punctuation goes. */
 function taskSlug(task: string, max: number): string {
   const key = /^\s*([A-Z][A-Z0-9]+-\d+)\b/.exec(task)?.[1];
-  return (
-    key ??
-    ([...task.toLowerCase()]
-      .map((ch) => CYRILLIC[ch] ?? ch)
-      .join("")
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .slice(0, max)
-      .replace(/-+$/, "") ||
-      "task")
-  );
+  return key ?? (slugOf(task, max) || "task");
+}
+
+/** Words of a text as a branch-safe slug: lower case, Cyrillic in Latin letters, `-` between words. */
+export function slugOf(text: string, max: number, sep = "-"): string {
+  return [...text.toLowerCase()]
+    .map((ch) => CYRILLIC[ch] ?? ch)
+    .join("")
+    .replace(/[^a-z0-9]+/g, sep)
+    .replace(new RegExp(`^\\${sep}+|\\${sep}+$`, "g"), "")
+    .slice(0, max)
+    .replace(new RegExp(`\\${sep}+$`), "");
 }
 
 async function must(promise: ReturnType<typeof git>, what: string): Promise<string> {

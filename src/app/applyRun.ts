@@ -4,6 +4,8 @@ import type { Run } from "../core/domain/run.ts";
 import { removeMarkers } from "../interaction/review/collector.ts";
 import { WorktreeWorkspace } from "../orchestration/worktree.ts";
 import { shortRunId } from "../storage/runStore.ts";
+import { git } from "../tools/local/exec.ts";
+import { commitMessageOf, FormatError } from "./deliveryFormat.ts";
 import type { Runtime } from "./runtime.ts";
 
 /**
@@ -30,7 +32,8 @@ export async function applyRun(
     ? message.includes(trailer)
       ? message
       : `${message.trimEnd()}\n\n${trailer}`
-    : `${subject}: apply jarvis run ${shortRunId(run.id)}\n\n${trailer}`;
+    : ((await teamMessage(runtime, run)) ??
+      `${subject}: apply jarvis run ${shortRunId(run.id)}\n\n${trailer}`);
   const result = await wt.apply(text);
   runtime.events.emit({
     kind: "run.applied",
@@ -39,6 +42,33 @@ export async function applyRun(
     payload: { commit: result.commit, files: result.files.length },
   });
   return result;
+}
+
+/**
+ * The commit's message by the team's standard (`delivery.commit.format`), when the project set one:
+ * the same as a PR's. Without the issue key the format wants, the plain message.
+ */
+async function teamMessage(runtime: Runtime, run: Run): Promise<string | undefined> {
+  const cfg = runtime.loaded.config.delivery;
+  if (cfg.commit.format === "{subject}") return undefined;
+  const ws = run.workspace;
+  const diff =
+    ws.branch && ws.baseCommit
+      ? await git(["diff", "--name-only", `${ws.baseCommit}..${ws.branch}`], ws.repoRoot)
+      : undefined;
+  try {
+    return commitMessageOf(cfg, {
+      task: run.task,
+      title: (run.task.split("\n")[0] ?? run.task).trim(),
+      ...(run.options?.kind ? { kind: run.options.kind } : {}),
+      files: diff?.code === 0 ? diff.stdout.split("\n").filter(Boolean) : [],
+      ...(runtime.loaded.meta?.service ? { service: runtime.loaded.meta.service } : {}),
+      runId: run.id,
+    });
+  } catch (error) {
+    if (error instanceof FormatError) return undefined;
+    throw error;
+  }
 }
 
 /**
