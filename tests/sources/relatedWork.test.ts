@@ -362,3 +362,16 @@ describe("issueFacts: Epic Link as a custom field", () => {
     expect(issueFacts(text).epic).toBe("ABC-1");
   });
 });
+
+describe("issueFacts: Epic Link as a nameless custom field", () => {
+  it("the custom field holding an issue key of the same project", () => {
+    const text = JSON.stringify({
+      key: "ABC-42",
+      customfield_100: { value: null },
+      customfield_101: { value: "XYZ-7" },
+      customfield_102: { value: "ABC-1" },
+      customfield_103: { value: 0.0 },
+    });
+    expect(issueFacts(text).epic).toBe("ABC-1");
+  });
+});

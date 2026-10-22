@@ -127,6 +127,21 @@ function epicField(doc: unknown, fields: Record<string, unknown>): string | unde
   return undefined;
 }
 
+/**
+ * Without the fields' names (mcp-atlassian gives custom fields as `customfield_NNNNN: {value}`) the
+ * Epic Link is the custom field whose value is an issue's key — of the issue's own project first.
+ */
+function keyInCustomField(fields: Record<string, unknown>, self: string | undefined): string | undefined {
+  const keys: string[] = [];
+  for (const [id, v] of Object.entries(fields)) {
+    if (!id.startsWith("customfield_")) continue;
+    const k = str(v) ?? (v && typeof v === "object" ? str((v as Record<string, unknown>).value) : undefined);
+    if (k && ISSUE_KEY.test(k) && k !== self) keys.push(k);
+  }
+  const project = self?.split("-")[0];
+  return keys.find((k) => k.split("-")[0] === project) ?? keys[0];
+}
+
 export function issueFacts(text: string): IssueFacts {
   const doc = json(text);
   const raw = body(text);
@@ -142,6 +157,7 @@ export function issueFacts(text: string): IssueFacts {
   const epic =
     parentOf(pick("epic", "epic_link", "epicLink", "epic_key", "Epic Link")) ??
     epicField(doc, fields) ??
+    keyInCustomField(fields, key) ??
     /"epic[_ ]?(?:link|key)?"\s*:\s*"([A-Z][A-Z0-9]+-\d+)"/i.exec(raw)?.[1] ??
     /"name"\s*:\s*"Epic Link"[^{}]{0,200}?"([A-Z][A-Z0-9]+-\d+)"/i.exec(raw)?.[1] ??
     /"([A-Z][A-Z0-9]+-\d+)"[^{}]{0,200}?"name"\s*:\s*"Epic Link"/i.exec(raw)?.[1];
