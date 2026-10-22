@@ -47,6 +47,8 @@ export class MemoryCalibrationStore implements CalibrationStore {
   }
 }
 
+const CALIBRATION_FRESH_MS = 30_000;
+
 /** `~/.jarvis/cache/models/<id>.calib.json` */
 export class FileCalibrationStore implements CalibrationStore {
   private readonly dir: string;
@@ -56,16 +58,23 @@ export class FileCalibrationStore implements CalibrationStore {
   private path(modelId: string): string {
     return join(this.dir, `${encodeURIComponent(modelId)}.calib.json`);
   }
+  /** Read a few times per model call: kept for a while (another process's update shows up after it). */
+  private readonly memo = new Map<string, { value: Calibration | undefined; at: number }>();
   get(modelId: string): Calibration | undefined {
+    const seen = this.memo.get(modelId);
+    if (seen && Date.now() - seen.at < CALIBRATION_FRESH_MS) return seen.value;
     const path = this.path(modelId);
-    if (!existsSync(path)) return undefined;
+    let value: Calibration | undefined;
     try {
-      return JSON.parse(readFileSync(path, "utf8")) as Calibration;
+      value = existsSync(path) ? (JSON.parse(readFileSync(path, "utf8")) as Calibration) : undefined;
     } catch {
-      return undefined;
+      value = undefined;
     }
+    this.memo.set(modelId, { value, at: Date.now() });
+    return value;
   }
   set(modelId: string, calibration: Calibration): void {
+    this.memo.set(modelId, { value: calibration, at: Date.now() });
     mkdirSync(this.dir, { recursive: true });
     writeFileSync(this.path(modelId), `${JSON.stringify(calibration, null, 2)}\n`);
   }

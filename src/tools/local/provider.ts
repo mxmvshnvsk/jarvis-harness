@@ -166,6 +166,12 @@ export class LocalToolProvider implements ToolProvider {
   /** Per checkout and rebuild command: the state of its sources at the last build (src/orchestration/tools/rebuild.ts). */
   private readonly built = new Map<string, string>();
   private readonly queues = new Map<string, Promise<unknown>>();
+  /**
+   * `knowledge.search`: the index brought up to date once per step, and again after a write — not on
+   * every search (each refresh reads every knowledge document and the run's artifacts, and asks git).
+   */
+  private readonly indexed = new Map<string, string>();
+  private writes = 0;
   /** `code.diagnostics`: each checker's output for a state of the workspace (its fingerprint). */
   private readonly diagnosed = new Map<string, { at: string; out: ToolOutput }>();
 
@@ -344,7 +350,11 @@ export class LocalToolProvider implements ToolProvider {
         },
         handler: async (args, ctx) => {
           const roots = knowledgeRootsOf(ctx.runtime.loaded, ctx.workspacePath);
-          await refreshIndex(ctx.runtime, roots, ctx.run.id);
+          const at = `${ctx.stepId}#${ctx.iteration}:${this.writes}`;
+          if (this.indexed.get(ctx.run.id) !== at) {
+            await refreshIndex(ctx.runtime, roots, ctx.run.id);
+            this.indexed.set(ctx.run.id, at);
+          }
           // `jarvis ask` answers from the knowledge base alone: its answerer is never shown code
           const allowed = ctx.run.workflow === "ask" ? UNIT_KINDS.filter((k) => k !== "code") : UNIT_KINDS;
           const asked = Array.isArray(args.kinds)
@@ -537,6 +547,7 @@ export class LocalToolProvider implements ToolProvider {
             const before = existsSync(absolute) ? readFileSync(absolute, "utf8") : undefined;
             const content = withFinalNewline(str(args, "content"), before);
             writeFileSync(absolute, content, "utf8");
+            this.writes += 1;
             const fixed = await this.fixWritten(rel, absolute, ctx);
             return {
               ok: true,
@@ -585,6 +596,7 @@ export class LocalToolProvider implements ToolProvider {
             // take it away, and a file written without one is mended by the next edit
             const next = withFinalNewline(replaced, undefined);
             writeFileSync(absolute, next, "utf8");
+            this.writes += 1;
             const fixed = await this.fixWritten(rel, absolute, ctx);
             return {
               ok: true,

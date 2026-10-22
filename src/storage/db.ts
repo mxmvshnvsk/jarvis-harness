@@ -76,6 +76,9 @@ export function openDatabase(path: string, options: OpenOptions = {}): OpenedDat
   const db = new DatabaseSync(path);
   db.exec("PRAGMA busy_timeout = 5000");
   if (!inMemory) db.exec("PRAGMA journal_mode = WAL");
+  // with WAL, NORMAL loses at most the last transactions on a power cut, never the database's
+  // integrity, and spares an fsync on every event (several per model call)
+  if (!inMemory) db.exec("PRAGMA synchronous = NORMAL");
   db.exec("PRAGMA foreign_keys = ON");
 
   const found = currentSchemaVersion(db);

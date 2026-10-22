@@ -51,7 +51,7 @@ describe("jarvis init", () => {
     expect(existsSync(join(sb.project, ".jarvis", "project.yaml"))).toBe(true);
     expect(existsSync(join(sb.project, ".jarvis", "knowledge", "README.md"))).toBe(true);
     expect(readFileSync(join(sb.project, ".gitignore"), "utf8")).toContain(".jarvis/runs/");
-    expect(r.out).toContain("schema v6");
+    expect(r.out).toContain("schema v7");
   });
 
   it("is idempotent and reports existing files", async () => {
@@ -147,11 +147,12 @@ describe("jarvis db", () => {
         { version: 4 },
         { version: 5 },
         { version: 6 },
+        { version: 7 },
       ],
     });
     const migrate = await jarvis(["--json", "db", "migrate"]);
     expect(JSON.parse(migrate.out)).toMatchObject({
-      schemaVersion: 6,
+      schemaVersion: 7,
       applied: [
         "1-init",
         "2-interactions",
@@ -159,9 +160,10 @@ describe("jarvis db", () => {
         "4-retrieval",
         "5-run_options",
         "6-events_on_behalf_of",
+        "7-events_run_kind",
       ],
     });
     const after = await jarvis(["--json", "db", "status"]);
-    expect(JSON.parse(after.out)).toMatchObject({ exists: true, schemaVersion: 6, pending: [] });
+    expect(JSON.parse(after.out)).toMatchObject({ exists: true, schemaVersion: 7, pending: [] });
   });
 });

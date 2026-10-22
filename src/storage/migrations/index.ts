@@ -268,6 +268,15 @@ ALTER TABLE runs ADD COLUMN options_json TEXT;
 ALTER TABLE events ADD COLUMN on_behalf_of TEXT;
 `,
   },
+  {
+    version: 7,
+    name: "events_run_kind",
+    sql: `
+-- A run's events of one kind (its model calls before each next one, its notes, its reads): SQLite took
+-- events_kind and scanned every run's model calls — ~90 ms a call at 200k events, growing with the log.
+CREATE INDEX events_run_kind ON events(run_id, kind, step_id, iteration);
+`,
+  },
 ];
 
 export const LATEST_SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]?.version ?? 0;
