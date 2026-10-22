@@ -265,7 +265,8 @@ describe("New task on the page", () => {
     expect(runs).toContain('<input type="radio" name="workflow" value="spec" data-label="Specification"');
     expect(runs).toMatch(/value="spec"[^>]* checked><span>Specification<\/span>/);
     expect(runs).not.toContain('name="workflow" value="research"');
-    expect(runs).toMatch(/value="fix"[^>]* data-one-only><span>Bugfix<\/span>/);
+    // a bug fix stays in the terminal (jarvis fix): not offered on the page
+    expect(runs).not.toContain('name="workflow" value="fix"');
     expect(runs).toContain("data-go>Run</button>");
     expect((await post("/runs/new", { task: "x", workflow: "fix" })).status).toBe(403); // no token
     const token = ui.token;

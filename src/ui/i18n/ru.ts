@@ -444,10 +444,7 @@ export const RU: Readonly<Record<string, string>> = {
   // the four of New task keep their English names (the team says them so)
   Specification: "Specification",
   Implementation: "Implementation",
-  Bugfix: "Bugfix",
   "All services": "Все сервисы",
-  "research, a spec to approve, the fix, checks, review":
-    "research, спека на одобрение, исправление, проверки, review",
   "requirements, a spec to approve, impact, plan, code, checks, review":
     "требования, спека на одобрение, анализ влияния, план, код, проверки, review",
   "one spec, a subtask per service, the contract between them, delivery in order":

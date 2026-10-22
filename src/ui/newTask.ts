@@ -59,7 +59,7 @@ interface HowFarDef {
 
 /**
  * The three as the team names them, in English in every language and in the order a task grows:
- * specify, build; a bug fix on its own.
+ * specify, build.
  */
 export const HOW_FAR: readonly HowFarDef[] = [
   {
@@ -78,16 +78,12 @@ export const HOW_FAR: readonly HowFarDef[] = [
       what: "one spec, a subtask per service, the contract between them, delivery in order",
     },
   },
-  {
-    id: "fix",
-    label: "Bugfix",
-    one: { what: "research, a spec to approve, the fix, checks, review" },
-  },
+  // a bug fix (`jarvis fix`) stays in the terminal: not offered here until it is grown as a process
 ];
 
 export const ONE_SERVICE_ONLY = "In one service only — pick it in Where";
-// t("Specification") t("Implementation") t("Bugfix") t("All services") t("In one service only — pick it in Where")
-// t("research, a spec to approve, the fix, checks, review") t("requirements, a spec to approve, impact, plan, code, checks, review")
+// t("Specification") t("Implementation") t("All services") t("In one service only — pick it in Where")
+// t("requirements, a spec to approve, impact, plan, code, checks, review")
 // t("one spec, a subtask per service, the contract between them, delivery in order") t("up to an approved spec; implement later")
 // t("one spec for all the services, approved; split later") t("Across services") t("One service") t("Other repositories with runs")
 

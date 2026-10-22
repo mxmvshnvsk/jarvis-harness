@@ -155,16 +155,14 @@ describe("Services in jarvis ui", () => {
 });
 
 describe("New task in a knowledge repository", () => {
-  it("Where: all services first and chosen, then the services with their kind; Fix is disabled with why", async () => {
+  it("Where: all services first and chosen, then the services with their kind; no Fix on the page", async () => {
     const runs = (await page("/")).text;
     expect(runs).toMatch(new RegExp(`value="${meta()}" data-name="All services" data-across checked`));
     expect(runs).toContain('<span class="badge">knowledge repo</span>');
     expect(runs).toContain("· 2 services");
     expect(runs).toContain('<span class="nm">orders-api</span><span class="badge">backend</span>');
     expect(runs).toContain('<span class="nm">notifications-worker</span><span class="p">');
-    expect(runs).toMatch(
-      /title="In one service only — pick it in Where"><input[^>]*value="fix"[^>]* disabled>/,
-    );
+    expect(runs).not.toContain('name="workflow" value="fix"');
     expect(runs).toContain("data-go>Run</button>");
   });
 
