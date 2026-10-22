@@ -166,8 +166,9 @@ async function runOf(options?: RunOptions, owner: Actor = ACTOR): Promise<Run> {
   });
 }
 
+/** A run done without the PR flow: its PR is put up by hand (Apply, «Prepare PR», `jarvis apply --pr`). */
 async function completed(): Promise<Run> {
-  const run = await runOf();
+  const run = await runOf({ prFlow: false });
   const done = await engine().execute(run.id, { owner: "cli:test:1" });
   expect(done.run.state).toBe("COMPLETED");
   return done.run;
@@ -183,6 +184,37 @@ function remoteHead(branch: string): string {
 }
 
 describe("jarvis apply --pr", () => {
+  it("the PR flow (delivery.flow, on by default): the run puts up its PR itself when its work is done", async () => {
+    await setup('delivery:\n  branch: "feature/{key}"\n');
+    const run = await runOf();
+    const done = await engine().execute(run.id, { owner: "cli:test:1" });
+    expect(done.run.state).toBe("COMPLETED");
+    expect(prs).toHaveLength(1);
+    expect(prOf(rt, done.run)?.source).toBe("feature/ABC-42");
+  });
+
+  it("the PR flow off for the run, or nothing to put up: the run ends as before", async () => {
+    await setup();
+    const off = await runOf({ prFlow: false });
+    expect((await engine().execute(off.id, { owner: "cli:test:1" })).run.state).toBe("COMPLETED");
+    expect(prs).toHaveLength(0);
+    const quiet = engineFor(
+      rt,
+      [WORKFLOW],
+      { impl: async () => ({ status: "success" }) },
+      undefined,
+      workspaceFactory(env),
+    );
+    const empty = await runOf();
+    const done = await quiet.execute(empty.id, { owner: "cli:test:1" });
+    expect(done.run.state).toBe("COMPLETED");
+    expect(done.run.stateReason ?? "").not.toContain("no PR");
+    expect(rt.events.list({ runId: empty.id, kind: "delivery.skipped" })[0]?.payload).toMatchObject({
+      code: "empty",
+    });
+    expect(prs).toHaveLength(0);
+  });
+
   it("pushes the run's changes as one commit on its base and opens the PR once", async () => {
     await setup();
     const run = await completed();

@@ -172,6 +172,7 @@ export async function runSubtaskRun(ctx: CliContext, masterRef: string, which: s
         parent: { runId: master.id, key: sub.key },
         ...(master.options?.autonomous ? { autonomous: true as const } : {}),
         ...(master.options?.related !== undefined ? { related: master.options.related } : {}),
+        ...(master.options?.prFlow !== undefined ? { prFlow: master.options.prFlow } : {}),
       },
     });
     // the master's research and approved spec: the subtask starts at its impact

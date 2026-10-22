@@ -107,6 +107,34 @@ export function deliversItself(run: Run, workflow?: WorkflowDefinition): boolean
   return run.options?.delivery === "pr" || workflow?.deliver === "pr";
 }
 
+/**
+ * Why the PR flow cannot be on here: PRs are off for the project, or no MCP server allowed here opens
+ * them (`*.pr.create`, its `allow`). Undefined — it can.
+ */
+export function prFlowUnavailable(runtime: Runtime): "deny" | "no-server" | undefined {
+  if (prPolicy(runtime) === "deny") return "deny";
+  const opens = runtime.registry
+    .list()
+    .some(
+      (c) => c.effect && capabilityMatches(c.name, "*.pr.create") && runtime.tools.policy(c, ["*"]).allowed,
+    );
+  return opens ? undefined : "no-server";
+}
+
+/** The PR flow by default for new runs: `delivery.flow.enabled`, where it can be on. */
+export function prFlowDefault(runtime: Runtime): boolean {
+  return runtime.loaded.config.delivery.flow.enabled && !prFlowUnavailable(runtime);
+}
+
+/** The run is in the PR flow: its own choice, else the project's; a run in its own checkout only. */
+export function prFlowOn(runtime: Runtime, run: Run): boolean {
+  return (
+    run.workspace.mode === "worktree" &&
+    (run.options?.prFlow ?? runtime.loaded.config.delivery.flow.enabled) &&
+    !prFlowUnavailable(runtime)
+  );
+}
+
 /** The PR a run was delivered as, if it was. */
 export function prOf(runtime: Runtime, run: Run): Delivered | undefined {
   const artifact = runtime.artifacts.listLatest(run.id, PR_ARTIFACT)[0];

@@ -122,6 +122,8 @@ function parseKind(value: string): TaskKind {
 
 const RELATED_HELP =
   "read the branches and PRs of related tasks before the spec (ADR-0026); default: relatedWork.enabled";
+const PR_FLOW_HELP =
+  "the run puts up its PR once its work is approved and follows the PR's comments until it is ready for merge; default: delivery.flow.enabled";
 const AUTONOMOUS_HELP =
   "experimental: no person in the loop — gates pass, a question gets the most cautious assumption, a dead end ends the run (human.autonomous)";
 const DELIVER_HELP =
@@ -251,6 +253,8 @@ export function buildProgram(options: RunOptions = {}): Command {
     .option("--autonomous", AUTONOMOUS_HELP)
     .option("--related", RELATED_HELP)
     .option("--no-related", "do not read the work of related tasks for this run")
+    .option("--pr-flow", PR_FLOW_HELP)
+    .option("--no-pr-flow", "no PR flow for this run: it ends after the review, Apply or «Create PR» by hand")
     .option("--deliver <how>", DELIVER_HELP, parseDeliver)
     .action(
       async (
@@ -264,6 +268,7 @@ export function buildProgram(options: RunOptions = {}): Command {
           deliver?: "pr";
           autonomous?: boolean;
           related?: boolean;
+          prFlow?: boolean;
         },
       ) => {
         await runWork(ctxFor(), task, {
@@ -275,6 +280,7 @@ export function buildProgram(options: RunOptions = {}): Command {
           ...(opts.deliver ? { deliver: opts.deliver } : {}),
           ...(opts.autonomous ? { autonomous: true } : {}),
           ...(opts.related !== undefined ? { related: opts.related } : {}),
+          ...(opts.prFlow !== undefined ? { prFlow: opts.prFlow } : {}),
         });
       },
     );
@@ -288,6 +294,8 @@ export function buildProgram(options: RunOptions = {}): Command {
     .option("--autonomous", AUTONOMOUS_HELP)
     .option("--related", RELATED_HELP)
     .option("--no-related", "do not read the work of related tasks for this run")
+    .option("--pr-flow", PR_FLOW_HELP)
+    .option("--no-pr-flow", "no PR flow for this run: it ends after the review, Apply or «Create PR» by hand")
     .action(
       async (
         task: string,
@@ -297,6 +305,7 @@ export function buildProgram(options: RunOptions = {}): Command {
           kind?: TaskKind;
           autonomous?: boolean;
           related?: boolean;
+          prFlow?: boolean;
         },
       ) => {
         await runWork(ctxFor(), task, {
@@ -319,6 +328,8 @@ export function buildProgram(options: RunOptions = {}): Command {
     .option("--autonomous", AUTONOMOUS_HELP)
     .option("--related", RELATED_HELP)
     .option("--no-related", "do not read the work of related tasks for this run")
+    .option("--pr-flow", PR_FLOW_HELP)
+    .option("--no-pr-flow", "no PR flow for this run: it ends after the review, Apply or «Create PR» by hand")
     .action(
       async (
         task: string,
@@ -328,6 +339,7 @@ export function buildProgram(options: RunOptions = {}): Command {
           kind?: TaskKind;
           autonomous?: boolean;
           related?: boolean;
+          prFlow?: boolean;
         },
       ) => {
         await runWork(ctxFor(), task, {
@@ -348,6 +360,8 @@ export function buildProgram(options: RunOptions = {}): Command {
     .option("--autonomous", AUTONOMOUS_HELP)
     .option("--related", RELATED_HELP)
     .option("--no-related", "do not read the work of related tasks for this run")
+    .option("--pr-flow", PR_FLOW_HELP)
+    .option("--no-pr-flow", "no PR flow for this run: it ends after the review, Apply or «Create PR» by hand")
     .action(
       async (
         task: string,
@@ -357,6 +371,7 @@ export function buildProgram(options: RunOptions = {}): Command {
           kind?: TaskKind;
           autonomous?: boolean;
           related?: boolean;
+          prFlow?: boolean;
         },
       ) => {
         await runWork(ctxFor(), task, {

@@ -1649,6 +1649,15 @@ export const RU: Readonly<Record<string, string>> = {
   "{issue}: its branch moved on since the spec, the contract is the same":
     "{issue}: ветка ушла вперёд после спеки, контракт тот же",
   "Look at related tasks and their branches": "Смотреть смежные задачи и их ветки",
+  "no PR: the run changed no code": "PR не нужен: прогон не менял код",
+  "no PR: the run worked in your checkout, there is no branch to push":
+    "PR не выставлен: прогон работал в вашем checkout, ветки для push нет",
+  "Put up the PR after the review and follow its comments": "Выставить PR после ревью и вести комментарии",
+  "once you approve the work Jarvis pushes the branch and opens the PR, then reads its comments; the merge stays yours":
+    "после вашего аппрува Jarvis пушит ветку и открывает PR, затем читает комментарии; merge остаётся за вами",
+  "pull requests are off for this project (delivery.pr: deny)": "PR в проекте выключены (delivery.pr: deny)",
+  "no MCP server here opens pull requests: add bitbucket.pr.create to the server's allow":
+    "нет MCP-сервера, который открывает PR: добавьте bitbucket.pr.create в allow сервера",
   "the branches and PRs of the epic's or Story's other tasks and the contract they change, before the spec; a task in a Story starts from the Story's branch and its PR goes into it":
     "ветки и PR других задач эпика или Story и что они меняют в контракте — до спеки; задача из Story начинается от ветки Story, и её PR идёт в неё",
   "Story {story}: its tasks read first, compared with {branch}":

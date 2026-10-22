@@ -150,6 +150,8 @@ export const RunOptionsSchema = z.strictObject({
   autonomous: z.literal(true).optional(),
   /** Read the work of related tasks before the spec (ADR-0026); none — the project's `relatedWork.enabled`. */
   related: z.boolean().optional(),
+  /** The PR flow for this run (`--pr-flow` / `--no-pr-flow`, New task); none — `delivery.flow.enabled`. */
+  prFlow: z.boolean().optional(),
 });
 export type RunOptions = z.infer<typeof RunOptionsSchema>;
 

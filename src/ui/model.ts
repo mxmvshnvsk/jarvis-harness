@@ -1211,6 +1211,12 @@ export function feedItem(e: StoredEvent): FeedItem | undefined {
       return at(`${t("PR opened")}${str(p.url) ? `: ${str(p.url)}` : ""}${by}`, "ok");
     case "delivery.failed":
       return at(`${t("No PR:")} ${str(p.reason) ?? ""}`.trim(), "warn");
+    case "delivery.skipped":
+      return at(
+        p.code === "empty"
+          ? t("no PR: the run changed no code")
+          : t("no PR: the run worked in your checkout, there is no branch to push"),
+      );
     case "context.compacting": {
       const c = {
         kind: str(p.kind) ?? "compact",

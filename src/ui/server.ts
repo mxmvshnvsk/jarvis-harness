@@ -48,6 +48,8 @@ import {
   type PrRequest,
   prDraftOf,
   preparePr,
+  prFlowDefault,
+  prFlowUnavailable,
   prOf,
   prPolicy,
 } from "../app/deliver.ts";
@@ -1878,6 +1880,10 @@ ${candidateReviewHtml(c, run, run.workspace.repoRoot, actions, { back: `/runs/${
         form.get("related-box") !== "1" || related === runtime.loaded.config.relatedWork.enabled
           ? {}
           : { related })(form.get("related") === "1"),
+      ...((prFlow) =>
+        form.get("pr-flow-box") !== "1" || prFlow === prFlowDefault(runtime) ? {} : { prFlow })(
+        form.get("pr-flow") === "1",
+      ),
     });
     // straight to the launch: it becomes the run's page as soon as the run begins
     return redirect(r, `/launches/${launch.id}`);
@@ -2521,6 +2527,19 @@ ${candidateReviewHtml(c, run, run.workspace.repoRoot, actions, { back: `/runs/${
             ? {
                 places: startPlaces(),
                 related: runtime.loaded.config.relatedWork.enabled,
+                prFlow: prFlowDefault(runtime),
+                ...((off) =>
+                  off
+                    ? {
+                        prFlowOff:
+                          // t("no MCP server here opens pull requests: add bitbucket.pr.create to the server's allow")
+                          off === "deny"
+                            ? t("pull requests are off for this project (delivery.pr: deny)")
+                            : t(
+                                "no MCP server here opens pull requests: add bitbucket.pr.create to the server's allow",
+                              ),
+                      }
+                    : {})(prFlowUnavailable(runtime)),
                 ...(noticeOf(r) ? { notice: noticeOf(r) as Html } : {}),
                 ...((repo ?? options.projectRoot)
                   ? { current: (repo ?? options.projectRoot) as string }

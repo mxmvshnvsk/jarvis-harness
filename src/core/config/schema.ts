@@ -619,6 +619,22 @@ export const DeliveryConfigSchema = z.strictObject({
    * `Assisted-By` (`{version}` is Jarvis's), false — none.
    */
   assistedBy: z.union([z.literal(false), z.string().min(1)]).default("Jarvis {version}"),
+  /**
+   * The PR flow: a run that changed code puts up its PR itself once its work is approved, then follows
+   * the PR's comments until it is ready for merge (the merge is always a person's). `enabled` is the
+   * default for runs; a run may say otherwise (`--pr-flow` / `--no-pr-flow`, New task).
+   */
+  flow: z
+    .strictObject({
+      enabled: z.boolean().default(true),
+      /** How often the PR's comments are read while the session is on, minutes. */
+      pollMinutes: z.int().min(1).max(120).default(5),
+      /** The agent agrees with a comment: it fixes and pushes; false — it asks first. */
+      fixWhenAgreed: z.boolean().default(true),
+      /** Ready for merge: this many approvals (the front 2, the back 1 — per repository or service). */
+      ready: z.strictObject({ approvals: z.int().min(0).max(10).default(1) }).prefault({}),
+    })
+    .prefault({}),
 });
 export type DeliveryConfig = z.infer<typeof DeliveryConfigSchema>;
 

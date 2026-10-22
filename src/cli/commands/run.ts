@@ -546,6 +546,7 @@ async function startContinuation(
       ...(from.options?.kind ? { kind: from.options.kind } : {}),
       ...(from.options?.autonomous ? { autonomous: true as const } : {}),
       ...(from.options?.related !== undefined ? { related: from.options.related } : {}),
+      ...(from.options?.prFlow !== undefined ? { prFlow: from.options.prFlow } : {}),
     }),
   });
   const carried = handOff(runtime, from, run, startAt);
@@ -680,6 +681,8 @@ export async function runRestart(
         ...(from.options?.kind ? { kind: from.options.kind } : {}),
         ...(from.options?.autonomous ? { autonomous: true as const } : {}),
         ...(from.options?.related !== undefined ? { related: from.options.related } : {}),
+        ...(from.options?.prFlow !== undefined ? { prFlow: from.options.prFlow } : {}),
+        ...(from.options?.prFlow !== undefined ? { prFlow: from.options.prFlow } : {}),
       }),
     });
     const carried = handOff(runtime, from, run, startAt, (a) => !a.stepId || keepSteps.has(a.stepId));
@@ -807,6 +810,8 @@ export async function runWork(
     autonomous?: boolean;
     /** `--related` / `--no-related` (ADR-0026); else `relatedWork.enabled`. */
     related?: boolean;
+    /** `--pr-flow` / `--no-pr-flow`; else `delivery.flow.enabled`. */
+    prFlow?: boolean;
   },
 ): Promise<void> {
   const loaded = await loadForCli(ctx);
@@ -870,6 +875,7 @@ export async function runWork(
         ...(options.deliver ? { delivery: options.deliver } : {}),
         ...(options.autonomous || loaded.config.human.autonomous ? { autonomous: true as const } : {}),
         ...(options.related !== undefined ? { related: options.related } : {}),
+        ...(options.prFlow !== undefined ? { prFlow: options.prFlow } : {}),
       }),
     });
     runtime.events.emit({

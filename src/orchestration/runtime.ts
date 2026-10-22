@@ -2,7 +2,7 @@ import { reasonOf } from "../app/activity.ts";
 import { isAutonomous, noteAutonomy } from "../app/autonomy.ts";
 import { proposeGlossaryCandidates } from "../app/candidates.ts";
 import { goOnRequested, rerunBackTo } from "../app/decide.ts";
-import { DeliveryError, deliverPr, deliversItself, PR_REQUEST, prOf } from "../app/deliver.ts";
+import { DeliveryError, deliverPr, deliversItself, PR_REQUEST, prFlowOn, prOf } from "../app/deliver.ts";
 import { checkMasterBudget } from "../app/masterBudget.ts";
 import { pausedText, pauseRequested } from "../app/pause.ts";
 import { pendingRedo } from "../app/redo.ts";
@@ -698,7 +698,11 @@ export class LocalWorkflowEngine {
     reason: string,
   ): Promise<Run> {
     let why = reason;
-    if (deliversItself(run, this.workflow(run.workflow)) && !prOf(this.rt, run)) {
+    // asked for (`--deliver pr`, the workflow's `deliver: pr`), or the PR flow (`delivery.flow`): a run
+    // in the flow that has nothing to put up (no change, its own checkout) ends as before, said once
+    const asked = deliversItself(run, this.workflow(run.workflow));
+    const byFlow = !asked && prFlowOn(this.rt, run);
+    if ((asked || byFlow) && !prOf(this.rt, run)) {
       const driver = this.drivers.get(run.id) ?? { actor: run.owner };
       try {
         await deliverPr(this.rt, run, {
@@ -714,6 +718,14 @@ export class LocalWorkflowEngine {
         if (error instanceof LeaseLostError) throw error;
         const message = error instanceof Error ? error.message : String(error);
         this.closeDeliveryThread(run);
+        if (byFlow && error instanceof DeliveryError && ["empty", "no-branch"].includes(error.code)) {
+          this.emit(run, "delivery.skipped", { reason: message, code: error.code });
+          const done = this.rt.runs.transition(run.id, "COMPLETED", { reason });
+          this.emit(done, "run.state", { state: done.state });
+          noteEvalCandidate(this.rt, done);
+          this.completed(done);
+          return done;
+        }
         this.emit(run, "delivery.failed", {
           reason: message,
           ...(error instanceof DeliveryError ? { code: error.code } : {}),

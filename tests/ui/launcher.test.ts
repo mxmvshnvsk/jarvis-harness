@@ -128,6 +128,10 @@ describe("an autonomous run from the page", () => {
     launcher.start({ task: "ABC-44", workflow: "spec", repoRoot: sb.project, related: false });
     expect((await calls(1))[0]).toBe(`${sb.project}|off|spec ABC-44 --no-related`);
   });
+  it("and without the PR flow", async () => {
+    launcher.start({ task: "ABC-45", workflow: "sdd", repoRoot: sb.project, prFlow: false });
+    expect((await calls(1))[0]).toBe(`${sb.project}|off|work ABC-45 --no-pr-flow`);
+  });
 });
 
 describe("the kind of task", () => {

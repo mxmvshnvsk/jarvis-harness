@@ -35,6 +35,10 @@ export interface StartForm {
   readonly notice?: Html;
   /** The project reads related work by default (`relatedWork.enabled`, ADR-0026): the box starts ticked. */
   readonly related?: boolean;
+  /** The PR flow is on by default (`delivery.flow.enabled`): the box starts ticked. */
+  readonly prFlow?: boolean;
+  /** Why the PR flow cannot be on here (`delivery.pr: deny`, no server that opens PRs): the box is off. */
+  readonly prFlowOff?: string;
 }
 
 /**
@@ -219,6 +223,11 @@ ${kindLineHtml()}
 <details class="more"><summary>${t("More options")}</summary>
 <label class="check"><input type="checkbox" name="autonomous" value="1"> ${t("Autonomous")} <span class="pill wait">experimental</span> <span class="meta">— ${t("full autonomy: no person needed, except when the task gets stuck or internet content comes into it")}</span></label>
 <input type="hidden" name="related-box" value="1"><label class="check"><input type="checkbox" name="related" value="1"${start.related === false ? "" : " checked"}> ${t("Look at related tasks and their branches")} <span class="meta">— ${t("the branches and PRs of the epic's or Story's other tasks and the contract they change, before the spec; a task in a Story starts from the Story's branch and its PR goes into it")}</span></label>
+${
+  start.prFlowOff
+    ? html`<label class="check"><input type="checkbox" disabled> ${t("Put up the PR after the review and follow its comments")} <span class="meta">— ${start.prFlowOff}</span></label>`
+    : html`<input type="hidden" name="pr-flow-box" value="1"><label class="check"><input type="checkbox" name="pr-flow" value="1"${start.prFlow === false ? "" : " checked"}> ${t("Put up the PR after the review and follow its comments")} <span class="meta">— ${t("once you approve the work Jarvis pushes the branch and opens the PR, then reads its comments; the merge stays yours")}</span></label>`
+}
 <label class="check"><input type="checkbox" name="fresh" value="design"> ${t("Read the Figma frames again")} <span class="meta">— ${t("the design changed at the same link; past Jarvis's one-day cache, each frame is a Figma API call")}</span></label>
 </details>
 <p class="hint">${th("Runs in the background, as {cmd} (or the one chosen) would without a terminal; where it needs you, it waits here — decide on the page and it goes on.", { cmd: html`<code>jarvis spec "…"</code>` })}</p>
