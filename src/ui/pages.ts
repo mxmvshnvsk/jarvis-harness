@@ -2236,6 +2236,21 @@ export interface ArtifactExtras {
     readonly library: boolean;
     readonly after: readonly string[];
   }>;
+  /** The split: the Story's tasks it gave no subtask, while the map has services of their side. */
+  readonly leftOut?: ReadonlyArray<{
+    readonly key: string;
+    readonly type?: string;
+    readonly summary?: string;
+    readonly side?: string;
+    readonly services: readonly string[];
+  }>;
+}
+
+/** The Story's tasks the split left without a subtask: a person sees it at the gate, before anything starts. */
+function leftOutHtml(tasks: NonNullable<ArtifactExtras["leftOut"]>): Html {
+  return html`<div class="banner warn" role="status"><b>${t("The split leaves out tasks of the Story")}</b>
+<ul>${tasks.map((x) => html`<li><code>${x.key}</code>${x.type ? ` (${x.type})` : ""}${x.summary ? ` — ${x.summary}` : ""}: ${t("no subtask, while the map has {side} services: {services}", { side: x.side ?? "", services: x.services.join(", ") })}</li>`)}</ul>
+<span class="hint">${t("If it is part of this task, send the split back saying so; if it is not, accept.")}</span></div>`;
 }
 
 /** The split's start order when a library of the map changes: it first, who uses it after its change is accepted. */
@@ -2477,6 +2492,7 @@ ${
 <div class="mainc">
 ${questionsHtml(page, extras)}
 ${extras.tryOut ? tryHtml(extras.tryOut, page, extras) : ""}
+${extras.leftOut && extras.leftOut.length > 0 ? leftOutHtml(extras.leftOut) : ""}
 ${extras.startOrder?.some((x) => x.library) ? startOrderHtml(extras.startOrder) : ""}
 <section id="document" class="panel doc" aria-label="${t("Document")}">${a.type === "check-log" ? checkLogHtml(page.text) : ((checks) => (checks ? checksHtml(page.run, checks) : documentHtml(a.name, page.text, f?.doc)))(a.type === "checks" ? checksOf(parseJson(page.text)) : undefined)}</section>
 ${

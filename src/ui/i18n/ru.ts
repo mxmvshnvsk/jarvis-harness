@@ -1326,6 +1326,11 @@ export const RU: Readonly<Record<string, string>> = {
   "The change is in {service}, which has no subtask: accepting adds one, delivered before {asking}.":
     "Изменение — в {service}, у которого нет сабтаска: принятие добавит его, поставка — раньше {asking}.",
   "Waits for a library": "Ждёт библиотеку",
+  "The split leaves out tasks of the Story": "Разбиение не покрывает задачи Story",
+  "no subtask, while the map has {side} services: {services}":
+    "нет сабтаска, хотя в карте есть сервисы стороны {side}: {services}",
+  "If it is part of this task, send the split back saying so; if it is not, accept.":
+    "Если она часть этой задачи — верни разбиение с этим комментарием; если нет — принимай.",
   "The contract change is the library's: it changes first":
     "Смена контракта — это изменение библиотеки: она меняется первой",
   "The master accepted the change as a change of {service} (subtask {key}). This run goes on by itself once that change is accepted and published, and builds against the new version.":

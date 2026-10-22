@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Runtime } from "../../src/app/runtime.ts";
-import { issueOfSubtask, readStoryTasks, STORY_TASKS, storyTasksText } from "../../src/app/storyTasks.ts";
+import {
+  issueOfSubtask,
+  readStoryTasks,
+  STORY_TASKS,
+  storyTasksLeftOut,
+  storyTasksText,
+} from "../../src/app/storyTasks.ts";
 import type { Split } from "../../src/app/subtasks.ts";
 import { subtaskTask } from "../../src/cli/commands/subtask.ts";
 import { RelatedWorkConfigSchema } from "../../src/core/config/schema.ts";
@@ -130,6 +136,34 @@ describe("the Story's Jira tasks for a task across services", () => {
     );
     expect(task.split("\n")[0]).toBe("ABC-17 Remove the banner");
     expect(task.match(/\b[A-Z][A-Z0-9]+-\d+\b/)?.[0]).toBe("ABC-17");
+  });
+
+  it("the split's gate names a Story task left without a subtask while the map has its side (pilot)", async () => {
+    const doc = await readStoryTasks(runtime, master.task, async () => ({
+      ok: true,
+      text: JSON.stringify(STORY),
+    }));
+    artifacts.set(STORY_TASKS, JSON.stringify(doc));
+    (runtime.loaded.meta as { repos: Record<string, string> }).repos = {
+      "orders-api": "/r/o",
+      "common-ui": "/r/c",
+    };
+    const both = split(["ABC-19", "ABC-17"]);
+    expect(storyTasksLeftOut(runtime, master, both)).toEqual([]);
+    // the front only: the middle task is left out, and orders-api could take it
+    const frontOnly: Split = { ...both, subtasks: both.subtasks.filter((s) => s.service === "common-ui") };
+    expect(storyTasksLeftOut(runtime, master, frontOnly)).toEqual([
+      {
+        key: "ABC-19",
+        type: "Middle Task",
+        summary: "Remove the fields",
+        side: "back",
+        services: ["orders-api"],
+      },
+    ]);
+    // a subtask of the side without an issue covers it
+    const unnamed = split([undefined, undefined]);
+    expect(storyTasksLeftOut(runtime, master, unnamed)).toEqual([]);
   });
 
   it("no Story: nothing to tie", async () => {

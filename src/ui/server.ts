@@ -87,6 +87,7 @@ import { roundsOf } from "../app/rounds.ts";
 import type { Runtime } from "../app/runtime.ts";
 import { servicesOf } from "../app/servicesView.ts";
 import { requestPauseAfter, setChecksAsk } from "../app/steer.ts";
+import { storyTasksLeftOut } from "../app/storyTasks.ts";
 import {
   IN_KNOWLEDGE_REPO,
   isDone,
@@ -2838,6 +2839,7 @@ ${candidateReviewHtml(c, run, run.workspace.repoRoot, actions, { back: `/runs/${
                 (k) => split.subtasks.find((x) => x.key === k)?.service ?? k,
               ),
             })),
+            leftOut: storyTasksLeftOut(runtime, run, split),
           });
       }
       if (type === "implementation") {

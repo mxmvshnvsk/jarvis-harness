@@ -66,7 +66,7 @@ export async function readStoryTasks(
 export function storyTasksText(doc: StoryTasksDoc): string {
   return [
     `## Jira tasks of the Story ${doc.story}`,
-    "Their texts and the pages they link are in the sources input, already read: do not read them again. Each subtask is one of these tasks: set its `issue` to the key of the task of its service's side (a backend service — the back/middle task, a frontend — the front task). A service with no task of its side here: leave `issue` empty.",
+    "Their texts and the pages they link are in the sources input, already read: do not read them again. They are all parts of this task: a task of a side that has a service of the map is that service's subtask, whatever another service's knowledge says about whose it is. Each subtask is one of these tasks: set its `issue` to the key of the task of its service's side (a backend service — the back/middle task, a frontend — the front task). A service with no task of its side here: leave `issue` empty.",
     ...doc.tasks.map(
       (t) =>
         `- ${t.key}${t.type ? ` (${t.type})` : ""}${t.side ? ` — ${t.side}` : ""}${t.summary ? `: ${t.summary}` : ""}`,
@@ -119,4 +119,26 @@ export function issueOfSubtask(
   return free.length === sameSide.length
     ? free[sameSide.findIndex((s) => s.key === sub.key)]?.key
     : undefined;
+}
+
+/**
+ * The Story's tasks the split gave no subtask, while the map has services of their side — the split's
+ * gate says so (pilot: a middle task read as «another team's» from the front's knowledge, and left out).
+ * A task is covered by a subtask that names it, or by one of its side when the split named no issue.
+ */
+export function storyTasksLeftOut(
+  runtime: Runtime,
+  master: Run,
+  split: Split,
+): Array<StoryTask & { readonly services: readonly string[] }> {
+  const doc = storyTasksOf(runtime, master);
+  if (!doc) return [];
+  const services = Object.keys(runtime.loaded.meta?.repos ?? {});
+  const named = new Set(split.subtasks.map((s) => s.issue).filter((k): k is string => !!k));
+  const sides = new Set(split.subtasks.filter((s) => !s.issue).map((s) => sideOfService(runtime, s.service)));
+  return doc.tasks.flatMap((task) => {
+    if (!task.side || named.has(task.key) || sides.has(task.side)) return [];
+    const ofSide = services.filter((s) => sideOfService(runtime, s) === task.side);
+    return ofSide.length > 0 ? [{ ...task, services: ofSide }] : [];
+  });
 }
