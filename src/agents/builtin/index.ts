@@ -194,6 +194,8 @@ Produce the result document when the plan is implemented or when you are blocked
   // the design frames on request: the spec carries their texts, and 73 KB went with every call (pilot)
   contextInputs: ["spec", "plan", "related-work"],
   baseChars: 100_000,
+  // up to 100 calls, each re-sending the task message and the kept results where nothing is cached
+  uncached: { baseChars: 60_000, workingSet: 40_000 },
 };
 
 export const TEST_AGENT: AgentDefinition = {

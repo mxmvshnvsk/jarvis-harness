@@ -232,8 +232,12 @@ export class AgentRuntimeRunner implements AgentRunner {
     // how long the model thinks on this agent's calls (agents.<id>.reasoningEffort, else the model's)
     const effort = config.agents[def.id]?.reasoningEffort ?? def.reasoningEffort;
     // an agent of many calls has a task message of its own size: each call sends it again
-    const lean = config.agents[def.id]?.baseChars ?? def.baseChars;
+    const cached = route.model.prefixCache !== undefined;
+    const lean =
+      config.agents[def.id]?.baseChars ?? (cached ? undefined : def.uncached?.baseChars) ?? def.baseChars;
     const charBudget = Math.min(Math.floor(window * 0.45 * 3.5), lean ?? Number.POSITIVE_INFINITY);
+    // the budget the task message is built at now: smaller once the context manager tightened it
+    let baseBudget = charBudget;
     // long files the task message may show: their outline and the parts that matter (context.ts)
     const outlines = await outlinesFor(
       ctx,
@@ -351,7 +355,10 @@ export class AgentRuntimeRunner implements AgentRunner {
         effective,
         thresholds: resolveThresholds(config.context, route.modelId, ctx.step.phase),
         compactTarget: config.context.compactTarget,
-        workingSet: workingSetOf(config.context.workingSet, route.model.prefixCache !== undefined),
+        workingSet: workingSetOf(
+          config.context.workingSet ?? (cached ? undefined : def.uncached?.workingSet),
+          cached,
+        ),
         estimate,
         store: (text) => rt.blobs.put(text, "text/plain").contentRef,
         summarize: async (rendered, previous) => {
@@ -369,7 +376,8 @@ export class AgentRuntimeRunner implements AgentRunner {
         },
         // Aggressive pressure also tightens L3/L4: the same inputs under a smaller budget.
         tighten: () => {
-          const tighter = buildBase(Math.floor(charBudget * 0.6));
+          baseBudget = Math.floor(charBudget * 0.6);
+          const tighter = buildBase(baseBudget);
           reads.seed(baseShown);
           return tighter;
         },
@@ -635,6 +643,20 @@ export class AgentRuntimeRunner implements AgentRunner {
       // after the whole answer: a checkpoint mid-way would keep tool calls without their results
       if (Math.floor(toolCalls / limits.checkpointEvery) > Math.floor(callsBefore / limits.checkpointEvery))
         checkpoint();
+      // a plan step done: the task message moves on to the next open step and its files (it was built
+      // for the step open when the agent began, and the agent read the next step's files again by hand)
+      if (
+        def.output.type === "implementation" &&
+        planned.some(
+          (p, i) =>
+            p.call.name === "plan.step" &&
+            results[i]?.ok === true &&
+            (p.args as { status?: unknown }).status === "done",
+        )
+      ) {
+        base = buildBase(baseBudget);
+        reads.seed(baseShown);
+      }
       if (writer) {
         if (planned.some((p, i) => WRITE_TOOLS.has(p.call.name) && results[i]?.ok === true))
           lastEdit = modelCalls;

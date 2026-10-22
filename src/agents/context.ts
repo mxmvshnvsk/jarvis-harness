@@ -200,19 +200,17 @@ export function buildBaseMessages(input: BuildInput): Message[] {
     );
   if (named.length > 0)
     l3.push(`## Other inputs (available on request: knowledge.read with the ref)\n${named.join("\n")}`);
-  // bounded: every model call of the step re-sends it (no prefix cache on the pilot gateway)
-  const read = codeReadInRun(
-    ctx,
-    Math.min(Math.floor(inputBudget * 0.25), 40_000),
-    input.shown,
-    input.outlines,
-  );
-  if (read) l3.push(read);
-  // an implementation starts on the plan step that is open, with its files as they are now
+  // an implementation works on the plan step that is open, with its files as they are now
   const step =
     def.output.type === "implementation"
       ? planStepNow(ctx, Math.min(Math.floor(inputBudget * 0.2), 30_000), input.shown, input.outlines)
       : undefined;
+  // bounded: every model call of the step re-sends it (no prefix cache on the pilot gateway). With a
+  // plan step open its files are the code that matters: the research's reads would go with every call
+  const read = step
+    ? undefined
+    : codeReadInRun(ctx, Math.min(Math.floor(inputBudget * 0.25), 40_000), input.shown, input.outlines);
+  if (read) l3.push(read);
   if (step) l3.push(step);
   // the version the human sent back comes first: the agent revises it rather than starting over
   if (review) l3.unshift(review.previous(perInput > 0 ? perInput : inputBudget));

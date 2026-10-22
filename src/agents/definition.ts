@@ -44,6 +44,12 @@ export interface AgentDefinition<T = unknown> {
    * two thirds of the step's 20M input tokens.
    */
   readonly baseChars?: number;
+  /**
+   * Where the gateway caches no prefixes, every call sends the task message and the kept tool results
+   * again: a leaner `baseChars` and `workingSet` for such a model (with a cache, keeping is cheap and the
+   * defaults stay). Pilot: implementation's calls carried ~110k tokens each, most of it re-sent context.
+   */
+  readonly uncached?: { readonly baseChars?: number; readonly workingSet?: number };
   /** Where the agent may write (globs); without — wherever its capabilities and the path policy allow. */
   readonly writes?: readonly string[];
   /** `reasoning_effort` of the agent's calls (agents.<id>.reasoningEffort overrides it). */
