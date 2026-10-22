@@ -554,9 +554,9 @@ describe("review mode v1", () => {
       "verify",
       "checks",
       "standards",
+      "tests",
       "docs",
       "telemetry",
-      "tests",
       "review",
       "approve-impl",
     ]);

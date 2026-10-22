@@ -498,25 +498,28 @@ export const BUILTIN_TOOLS: Record<string, DeterministicTool> = {
       }).catch(() => undefined);
       return coveringOnce;
     };
-    for (const [name, command] of Object.entries(tools.local)) {
-      if (!/^(test|typecheck|lint)/.test(name)) continue;
+    // the checks side by side, each in its own lane: Gradle and Maven share one (their daemon and
+    // build directory lock each other out), the rest run at once; the document keeps the config's order
+    type CheckResult = (typeof results)[number];
+    const one = async (name: string, command: string, out: CheckResult[]): Promise<void> => {
+      if (!/^(test|typecheck|lint)/.test(name)) return;
       const dir = packageDirOf(command);
       const inScope = dir ? changed.filter((f) => f === dir || f.startsWith(`${dir}/`)) : changed;
       const code = inScope.filter((f) => CODE_FILE.test(f));
       // a package that reads what was rebuilt: its types may break with no file of its own changed
       if (code.length === 0 && name.startsWith("typecheck") && rebuilt.length > 0) {
         const r = await ctx.tools.invoke(`project.${name}`, {});
-        results.push({
+        out.push({
           check: name,
           command,
           ok: r.ok,
           ...(r.ok ? {} : { tail: tail(r), ...logOf(name, r) }),
         });
-        continue;
+        return;
       }
       if (code.length === 0) {
-        results.push({ check: name, command, ok: true, skipped: "no changed code in its scope" });
-        continue;
+        out.push({ check: name, command, ok: true, skipped: "no changed code in its scope" });
+        return;
       }
       const present = code.filter((f) => existsSync(join(workspace, f)));
       // a JavaScript runner writes a JSON report besides its usual output: why the tests failed
@@ -530,8 +533,8 @@ export const BUILTIN_TOOLS: Record<string, DeterministicTool> = {
           ? fileSelection((await covering())?.filter((t) => !dir || t.startsWith(`${dir}/`)))
           : undefined;
       if (byTests && "skip" in byTests) {
-        results.push({ check: name, command, ok: true, skipped: byTests.skip });
-        continue;
+        out.push({ check: name, command, ok: true, skipped: byTests.skip });
+        return;
       }
       // a class-taking runner: the test classes that cover the change, from the project graph
       const selection =
@@ -542,8 +545,8 @@ export const BUILTIN_TOOLS: Record<string, DeterministicTool> = {
             )
           : undefined;
       if (selection && "skip" in selection) {
-        results.push({ check: name, command, ok: true, skipped: selection.skip });
-        continue;
+        out.push({ check: name, command, ok: true, skipped: selection.skip });
+        return;
       }
       const related =
         selection && "args" in selection
@@ -561,13 +564,13 @@ export const BUILTIN_TOOLS: Record<string, DeterministicTool> = {
                   ? ` ${filesFor(command, present)}`
                   : "";
       if (name.startsWith("lint") && present.length === 0) {
-        results.push({
+        out.push({
           check: name,
           command,
           ok: true,
           skipped: "the changed code in its scope was deleted",
         });
-        continue;
+        return;
       }
       const started = Date.now() - 1000;
       const reportFile = js
@@ -614,7 +617,7 @@ export const BUILTIN_TOOLS: Record<string, DeterministicTool> = {
         !preexisting?.excused &&
         (((runner === "gradle" || runner === "maven") && report === undefined) ||
           (js !== undefined && reportFile !== undefined && !wroteReport));
-      results.push({
+      out.push({
         check: name,
         // as it ran: an npm script gets its runner's arguments after `--`
         command: ((a) => (a ? `${command} ${a}` : command))(argsWith("")),
@@ -635,7 +638,21 @@ export const BUILTIN_TOOLS: Record<string, DeterministicTool> = {
             }
           : {}),
       });
+    };
+    const checks = Object.entries(tools.local).filter(([name]) => /^(test|typecheck|lint)/.test(name));
+    const found = checks.map((): CheckResult[] => []);
+    const lanes = new Map<string, Array<() => Promise<void>>>();
+    for (const [i, [name, command]] of checks.entries()) {
+      const jvm = testRunnerOf(command);
+      const lane = jvm === "gradle" || jvm === "maven" ? "jvm" : name;
+      lanes.set(lane, [...(lanes.get(lane) ?? []), () => one(name, command, found[i] as CheckResult[])]);
     }
+    await Promise.all(
+      [...lanes.values()].map(async (lane) => {
+        for (const work of lane) await work();
+      }),
+    );
+    results.push(...found.flat());
     // tools.checks: a command of its own when the run changed what it checks
     for (const { run } of rulesFor(tools.checks, changed)) {
       if (results.some((r) => r.check === run)) continue;
