@@ -154,6 +154,8 @@ export interface BuildInput {
   readonly shown?: Map<string, string>;
   /** Classes and methods of the long files the task message may show (`outlinesFor`): shown sliced. */
   readonly outlines?: ReadonlyMap<string, readonly OutlineSymbol[]>;
+  /** Filled with the knowledge documents the message shows whole (a knowledge.read of one: a pointer). */
+  readonly knowledgeShown?: Set<string>;
   /** The change under review as git.diff gives it (review): in the message, not a first call for it. */
   readonly change?: string;
 }
@@ -192,7 +194,7 @@ export function buildBaseMessages(input: BuildInput): Message[] {
   const knowledgeBudget = Math.floor(input.budget.chars * 0.3);
   // the knowledge takes what it renders to, at most its 30%: the rest of it goes to the inputs (an
   // empty L4 still held 30% back, and the research the step builds on was cut for nothing)
-  const l4 = renderPackage(input.pkg, knowledgeBudget, input.knowledgeConfig);
+  const l4 = renderPackage(input.pkg, knowledgeBudget, input.knowledgeConfig, input.knowledgeShown);
   const inputBudget = input.budget.chars - Math.min(knowledgeBudget, l4.length);
   const fullTypes = new Set(def.contextInputs ?? []);
   const full = input.inputs.filter((i) => fullTypes.size === 0 || fullTypes.has(i.artifact.type));
@@ -452,6 +454,18 @@ export function codeReadInRun(
  * files, so it starts editing instead of reading the whole plan's code first (pilot: 64 model calls of
  * reading, five trims, no edit).
  */
+/** The files of the plan step open now (implementation), or undefined without a plan or an open step. */
+export function planStepFilesNow(ctx: StepContext): string[] | undefined {
+  const progress = planProgressOf(
+    ctx.runtime,
+    ctx.run,
+    ctx.runtime.events.list({ runId: ctx.run.id, kinds: ["step.start", "tool.call"], limit: 100_000 }),
+  );
+  const at = progress?.current;
+  const step = at === undefined ? undefined : progress?.steps[at];
+  return step && step.files.length > 0 ? [...step.files] : undefined;
+}
+
 export function planStepNow(
   ctx: StepContext,
   chars: number,

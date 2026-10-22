@@ -33,7 +33,8 @@ export interface KnowledgeDoc {
   readonly scope: Scope & { agents: string[] };
   readonly tags: string[];
   /** Written by `jarvis onboard` (not a person): facts of when it ran, possibly older than the code. */
-  readonly generated?: boolean;
+  readonly generated?: boolean /** Commits under its paths since it was last edited (the step's first documents): it may be out of date. */;
+  readonly staleCommits?: number;
 }
 
 /** Name prefix of a knowledge repository's shared documents (`landscape.md` → `common/landscape.md`). */

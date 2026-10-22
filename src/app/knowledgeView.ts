@@ -610,3 +610,33 @@ async function inBatches<T, R>(items: readonly T[], limit: number, work: (t: T) 
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, lane));
   return out;
 }
+
+/**
+ * How many commits touched a document's paths since the document was last edited — for an agent to be
+ * told its knowledge may be out of date. `file`: the document's repository path from the code root
+ * (a knowledge repository's for a service). Kept per HEAD and document version.
+ */
+export async function staleCommitsOf(
+  root: string,
+  file: string,
+  paths: readonly string[],
+  version: string,
+): Promise<number | undefined> {
+  if (paths.length === 0) return undefined;
+  const head = (await git(["rev-parse", "HEAD"], root)).stdout.trim();
+  const key = `${root}\0${file}\0${version}\0${head}\0${paths.join(",")}`;
+  let known = staleByDoc.get(key);
+  if (!known) {
+    known = (async () => {
+      const at = versionedAt(layoutOf(root), file);
+      const last = await lastCommit(at.cwd, at.path);
+      if (!last) return undefined;
+      return commitsSince(root, at.cwd === root ? { hash: last.hash } : { date: last.date }, paths);
+    })();
+    if (staleByDoc.size > 5000) staleByDoc.clear();
+    staleByDoc.set(key, known);
+  }
+  return known;
+}
+
+const staleByDoc = new Map<string, Promise<number | undefined>>();

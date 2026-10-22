@@ -121,7 +121,8 @@ function answering() {
           outcome: "ok",
         }),
       );
-    if (toolCount(req) === 0) return toolCallCompletion("knowledge.read", { ref: "knowledge:hooks.md" });
+    // a search (a read of hooks.md, shown whole in the task message, is answered with a pointer, no call)
+    if (toolCount(req) === 0) return toolCallCompletion("knowledge.search", { query: "hooks dependencies" });
     return completion("done");
   });
 }
@@ -166,16 +167,16 @@ describe("technical log", () => {
     );
 
     const responses = records.filter((x) => x.event === "model.response");
-    expect(JSON.stringify(responses[0]?.toolCalls)).toContain("knowledge.read");
+    expect(JSON.stringify(responses[0]?.toolCalls)).toContain("knowledge.search");
 
     const tool = records.find((x) => x.event === "tool.result");
-    expect(tool).toMatchObject({ capability: "knowledge.read", ok: true });
-    expect(String(tool?.text)).toContain("Pass dependencies into hooks as arguments.");
-    expect(JSON.stringify(tool?.args)).toContain("knowledge:hooks.md");
+    expect(tool).toMatchObject({ capability: "knowledge.search", ok: true });
+    expect(String(tool?.text)).toContain("knowledge:hooks.md");
+    expect(JSON.stringify(tool?.args)).toContain("hooks dependencies");
 
     // the event itself now names the call
     const call = records.find((x) => x.event === "tool.call");
-    expect(String((call?.payload as { args?: string } | undefined)?.args)).toContain("knowledge:hooks.md");
+    expect(String((call?.payload as { args?: string } | undefined)?.args)).toContain("hooks dependencies");
 
     // the secret in the model's reply never reaches the file
     const raw = logFiles(logsDir())
@@ -228,7 +229,7 @@ describe("jarvis logs", () => {
 
     const debug = await jarvis(["logs", runId, "--level", "debug", "--event", "tool.result"]);
     expect(debug.out).toContain("tool.result");
-    expect(debug.out).toContain("knowledge.read");
+    expect(debug.out).toContain("knowledge.search");
 
     const json = await jarvis(["--json", "logs", runId, "--level", "debug", "--event", "model.request"]);
     const doc = JSON.parse(json.out) as { records: Array<{ event: string }> };

@@ -42,6 +42,38 @@ function walk(dir: string, rel: string, out: string[]): void {
 
 const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x) => typeof x === "string") : []);
 
+/**
+ * A source file as read and parsed, kept while its size and mtime stay: the team's documentation was
+ * read and parsed again several times a step (the package, the index, the coverage) and per page.
+ */
+const parsedFiles = new Map<
+  string,
+  { at: string; data: Record<string, unknown>; text: string; sha: string }
+>();
+
+function readParsed(file: string): { data: Record<string, unknown>; text: string; sha: string } | undefined {
+  let at: string;
+  try {
+    const st = statSync(file);
+    at = `${st.size}:${st.mtimeMs}`;
+  } catch {
+    return undefined;
+  }
+  const kept = parsedFiles.get(file);
+  if (kept?.at === at) return kept;
+  const raw = readFileSync(file, "utf8");
+  const { data, body } = parseFrontMatter(raw);
+  const doc = {
+    at,
+    data,
+    text: body.trim(),
+    sha: createHash("sha256").update(raw).digest("hex").slice(0, 12),
+  };
+  if (parsedFiles.size > 10_000) parsedFiles.clear();
+  parsedFiles.set(file, doc);
+  return doc;
+}
+
 /** Every document of every source, in configuration order; denied and missing paths are skipped. */
 export function loadSourceDocuments(roots: KnowledgeRoots): SourceDocument[] {
   const root = roots.projectRoot;
@@ -69,9 +101,9 @@ export function loadSourceDocuments(roots: KnowledgeRoots): SourceDocument[] {
     for (const { repo, local } of files) {
       if (seen.has(repo) || roots.isDenied?.(repo)) continue;
       seen.add(repo);
-      const raw = readFileSync(join(root, repo), "utf8");
-      const { data, body } = parseFrontMatter(raw);
-      const text = body.trim();
+      const parsed = readParsed(join(root, repo));
+      if (!parsed) continue;
+      const { data, text, sha } = parsed;
       if (!text) continue;
       const scoped = Object.entries(source.scopes)
         .filter(([glob]) => globMatches(local, [glob]))
@@ -84,7 +116,7 @@ export function loadSourceDocuments(roots: KnowledgeRoots): SourceDocument[] {
       out.push({
         path: repo,
         text,
-        sha: createHash("sha256").update(raw).digest("hex").slice(0, 12),
+        sha,
         ...(heading ? { title: heading } : {}),
         paths: [...new Set([...strings(data.paths), ...scoped, ...memo])],
         stacks: strings(data.stacks),

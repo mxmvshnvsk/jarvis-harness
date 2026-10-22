@@ -1,7 +1,15 @@
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import { staleCommitsOf } from "../app/knowledgeView.ts";
 import { type KindChoice, kindOfTask } from "../app/taskKind.ts";
 import { detectStackScopes, effectiveStacks, stacksForPaths } from "../capabilities/detector.ts";
 import type { TaskKind } from "../core/domain/run.ts";
-import { type EngineeringContextPackage, resolvePackage } from "../knowledge/resolver.ts";
+import { layoutOf, rootRelative } from "../core/paths.ts";
+import {
+  type EngineeringContextPackage,
+  resolvePackage,
+  SHARED_KNOWLEDGE_PREFIX,
+} from "../knowledge/resolver.ts";
 import { loadGlossary, matchTerms } from "../knowledge/retrieval/glossary.ts";
 import { rankKnowledge, refreshIndex } from "../knowledge/retrieval/service.ts";
 import { skillRef } from "../knowledge/skills.ts";
@@ -73,10 +81,15 @@ export function queryOf(ctx: StepContext): string {
   return parts.filter(Boolean).join("\n").slice(0, 4000);
 }
 
-export async function packageForStep(ctx: StepContext, agentId: string): Promise<EngineeringContextPackage> {
+async function packageRanked(
+  ctx: StepContext,
+  agentId: string,
+  paths?: readonly string[],
+): Promise<EngineeringContextPackage> {
   const workspace = ctx.workspace.ref.path;
   const roots = knowledgeRootsOf(ctx.runtime.loaded, workspace);
-  const affectedPaths = affectedPathsOf(ctx);
+  // the plan step's files when the agent works one (its documents, not the whole change's)
+  const affectedPaths = paths ? [...paths] : affectedPathsOf(ctx);
   const config = ctx.runtime.loaded.config;
   // ADR-0021 §9: in a polyglot repository the affected scope decides which stack packs apply.
   const stacks = stacksForPaths(
@@ -138,4 +151,34 @@ export async function packageForStep(ctx: StepContext, agentId: string): Promise
       ...ranked.docs.map((k) => `knowledge:${k.name}#${k.sha}`),
     ],
   };
+}
+
+/** Path-scoped documents looked at for staleness per step: the first ones, which the agent sees. */
+const STALE_CHECKED = 12;
+
+export async function packageForStep(
+  ctx: StepContext,
+  agentId: string,
+  options: { paths?: readonly string[] } = {},
+): Promise<EngineeringContextPackage> {
+  const pkg = await packageRanked(ctx, agentId, options.paths);
+  // a document whose code moved on since its last edit is said to be so (it was only on the UI's page)
+  const root = ctx.workspace.ref.path;
+  const layout = layoutOf(root);
+  const fileOf = (name: string) =>
+    name.startsWith(SHARED_KNOWLEDGE_PREFIX) && layout.meta
+      ? join(layout.meta.knowledgeRoot, name.slice(SHARED_KNOWLEDGE_PREFIX.length))
+      : existsSync(join(layout.knowledgeDir, name))
+        ? join(layout.knowledgeDir, name)
+        : join(root, name);
+  const knowledge = await Promise.all(
+    pkg.knowledge.map(async (d, i) => {
+      if (i >= STALE_CHECKED || d.scope.paths.length === 0) return d;
+      const n = await staleCommitsOf(root, rootRelative(root, fileOf(d.name)), d.scope.paths, d.sha).catch(
+        () => undefined,
+      );
+      return n && n > 0 ? { ...d, staleCommits: n } : d;
+    }),
+  );
+  return { ...pkg, knowledge };
 }

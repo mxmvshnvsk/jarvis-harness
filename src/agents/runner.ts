@@ -29,7 +29,7 @@ import { type StepContext, type StepOutcome, SuspendRun } from "../orchestration
 import { wrapUntrusted } from "../security/policy/untrusted.ts";
 import { callRefsOf } from "../telemetry/callRefs.ts";
 import type { ToolResult } from "../tools/types.ts";
-import { buildBaseMessages, outlinesFor } from "./context.ts";
+import { buildBaseMessages, outlinesFor, planStepFilesNow } from "./context.ts";
 import type { AgentRegistry } from "./definition.ts";
 import { packageForStep } from "./knowledge.ts";
 import { ReadLedger, readKey } from "./rereads.ts";
@@ -222,7 +222,9 @@ export class AgentRuntimeRunner implements AgentRunner {
       })
       .filter((a): a is ArtifactVersion => a !== undefined)
       .map((artifact) => ({ artifact, text: rt.artifacts.text(artifact) }));
-    const pkg = await packageForStep(ctx, def.id);
+    // implementation on a plan step: the knowledge of that step's files; it follows the plan below
+    const stepFiles = def.output.type === "implementation" ? planStepFilesNow(ctx) : undefined;
+    let pkg = await packageForStep(ctx, def.id, stepFiles ? { paths: stepFiles } : {});
     // L3/L4 are sized from the window actually used: `context.maxContext` caps it (pilot: a model with a
     // 1M window and maxContext 200k got a knowledge share sized for 1M)
     const window = Math.min(
@@ -254,8 +256,11 @@ export class AgentRuntimeRunner implements AgentRunner {
         : undefined;
     // the files the task message shows whole: a read of one of them gets a pointer (rereads.ts)
     let baseShown = new Map<string, string>();
+    // the knowledge documents it shows whole: the same for knowledge.read
+    let knowledgeShown = new Set<string>();
     const buildBase = (chars: number) => {
       baseShown = new Map();
+      knowledgeShown = new Set();
       return buildBaseMessages({
         def,
         ctx,
@@ -265,6 +270,7 @@ export class AgentRuntimeRunner implements AgentRunner {
         knowledgeConfig: config.knowledge,
         budget: { chars },
         shown: baseShown,
+        knowledgeShown,
         outlines,
         ...(change ? { change } : {}),
       });
@@ -422,6 +428,8 @@ export class AgentRuntimeRunner implements AgentRunner {
     };
 
     let budgetExhaustedNotice = false;
+    /** Review was told once of the required standards it had not named. */
+    let standardsReminded = false;
     /** Which limit ended the loop, if one did: the result may be incomplete (pilot: silent partial maps). */
     let budgetExhausted: "tools" | "model" | "budget" | undefined;
     /** The run parks with the conversation kept: the step goes on from here on resume. */
@@ -550,6 +558,32 @@ export class AgentRuntimeRunner implements AgentRunner {
       }
       if (response.toolCalls.length > 0) cutShort = 0;
       if (response.toolCalls.length === 0) {
+        // review: the required standards it must judge itself (semantic, hybrid) — said once more when
+        // its answer names none of them; standardsChecked was never compared with them (pilot)
+        const unjudged =
+          def.output.type === "review" && !standardsReminded
+            ? pkg.standards
+                .filter((x) => x.severity === "required" && x.verification.kind !== "deterministic")
+                .map((x) => x.id)
+                .filter(
+                  (id) =>
+                    !transcript.some((m) => m.role === "assistant" && m.content.includes(id)) &&
+                    !response.text.includes(id),
+                )
+            : [];
+        if (unjudged.length > 0) {
+          standardsReminded = true;
+          emit("agent.standardsReminder", { standards: unjudged });
+          transcript = [
+            ...transcript,
+            ...(response.text.trim() ? [{ role: "assistant" as const, content: response.text }] : []),
+            {
+              role: "user",
+              content: `Before the document: these required standards are yours to judge against the change, and your review has not named them — ${unjudged.join(", ")}. Check each (knowledge.read standard:<id> if it is not in your context), list it in standardsChecked, and report a violation as a major or blocker finding. Then say DONE.`,
+            },
+          ];
+          continue;
+        }
         finalAnswer = response.text;
         break;
       }
@@ -562,6 +596,10 @@ export class AgentRuntimeRunner implements AgentRunner {
       // 1. what runs: in order, past the limit "skipped" (pilot: 41/40 — several calls in one answer may
       //    overrun it, and each needs an answer); arguments that are not a JSON object are answered as such
       const planned = response.toolCalls.map((call) => {
+        // a knowledge document the task message holds whole: a pointer, not its text again (not a call)
+        const asked = call.name === "knowledge.read" ? knowledgeRefOf(call.arguments) : undefined;
+        if (asked && knowledgeShown.has(asked))
+          return { call, args: {} as Record<string, unknown>, shown: asked };
         if (toolCalls >= limits.maxToolCalls) {
           budgetExhausted = "tools";
           return { call, args: {} as Record<string, unknown>, skipped: true as const };
@@ -584,7 +622,7 @@ export class AgentRuntimeRunner implements AgentRunner {
       //    alone and in order; their answers go into the transcript in the order asked, as before
       const runnable = planned
         .map((p, i) => ({ p, i }))
-        .filter(({ p }) => !("skipped" in p) && !("parseError" in p && p.parseError));
+        .filter(({ p }) => !("skipped" in p) && !("shown" in p) && !("parseError" in p && p.parseError));
       const results: Array<ToolResult | undefined> = planned.map(() => undefined);
       const batch = modelCalls;
       if (runnable.length > 1)
@@ -621,6 +659,17 @@ export class AgentRuntimeRunner implements AgentRunner {
       // 3. the answers, in the order the model asked
       for (const [i, p] of planned.entries()) {
         const { call, args } = p;
+        if ("shown" in p) {
+          transcript = [
+            ...transcript,
+            {
+              role: "tool",
+              toolCallId: call.id,
+              content: `[knowledge.read] ok\n(the whole of knowledge:${p.shown} is in your task message, under Project knowledge: use it there)`,
+            },
+          ];
+          continue;
+        }
         if ("skipped" in p) {
           transcript = [
             ...transcript,
@@ -664,6 +713,9 @@ export class AgentRuntimeRunner implements AgentRunner {
             (p.args as { status?: unknown }).status === "done",
         )
       ) {
+        // and its knowledge: the documents of the next step's files (it was the first step's all along)
+        const next = planStepFilesNow(ctx);
+        if (next) pkg = await packageForStep(ctx, def.id, { paths: next }).catch(() => pkg);
         base = buildBase(baseBudget);
         reads.seed(baseShown);
       }
@@ -880,4 +932,15 @@ function formatToolResult(
 function contradictionsIn(value: unknown): number {
   const list = (value as { contradictions?: unknown } | undefined)?.contradictions;
   return Array.isArray(list) ? list.length : 0;
+}
+
+/** The document name a knowledge.read asks for (`knowledge:name`), from its raw arguments. */
+function knowledgeRefOf(raw: string): string | undefined {
+  try {
+    const args = JSON.parse(raw) as { ref?: unknown };
+    const ref = typeof args.ref === "string" ? args.ref.trim() : "";
+    return ref.startsWith("knowledge:") ? ref.slice("knowledge:".length).replace(/#.*$/, "") : undefined;
+  } catch {
+    return undefined;
+  }
 }
