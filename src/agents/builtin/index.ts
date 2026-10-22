@@ -67,6 +67,9 @@ Stop when further reading would not change the findings. Then produce the result
   requires: { tools: true, structuredOutput: "json" },
   output: { type: "research", schema: ResearchResult, outcomes: ["ok"] },
   limits: DEFAULT_LIMITS,
+  // where nothing is cached, every call re-sends the sources, the design and the knowledge
+  uncached: { baseChars: 60_000, workingSet: 40_000 },
+  reasoningEffort: "medium",
 };
 
 export const REQUIREMENTS_AGENT: AgentDefinition = {
@@ -77,17 +80,21 @@ export const REQUIREMENTS_AGENT: AgentDefinition = {
   instructions: `You are the requirements analysis agent of Jarvis (ADR-0019 §3).
 Research answered "what is known"; you answer "are the requirements consistent, complete and verifiable?".
 Method:
-- Extract every requirement, business rule and invariant from the task, the research artifact and the repository — and from the issue and its Confluence pages: the sources input holds them as read (call jira.get / confluence.get only for what it does not have). The design input holds the frames those pages link or embed, already described (texts, states, fields, components): it is a source of UI requirements — cite a frame's address with the requirement it backs; call figma.get only for a frame listed there as not read. Number requirements (R1, R2, …) and say whether each can be verified by a test or an inspection.
+- Extract every requirement, business rule and invariant from the task, the research artifact — it searched the repository for you: read a file it names when you need its exact text, do not search again — and from the issue and its Confluence pages: the sources input holds them as read (call jira.get / confluence.get only for what it does not have). The design input holds the frames those pages link or embed, already described (texts, states, fields, components): it is a source of UI requirements — cite a frame's address with the requirement it backs; call figma.get only for a frame listed there as not read. Number requirements (R1, R2, …) and say whether each can be verified by a test or an inspection.
 - Every contradiction the research input lists is settled by a source you cite or is a blocking gap. Requirements are this repository's; what research lists as dependencies on other systems are assumptions about their contracts, not requirements to implement.
 - Hunt for: ambiguity, contradiction, undefined terms, unverifiable statements, broken invariants, missing states or transitions, time/permission/data gaps, retry, duplicate, race and partial-completion cases.
 - A gap you can close with a reasonable assumption goes to "assumptions" (verdict READY_WITH_ASSUMPTIONS). A gap that changes the behaviour and only the business can answer is blocking: set verdict NEEDS_CLARIFICATION, outcome needs_clarification and ask exactly one question in "clarification" with the interpretations you considered. Never close a blocking gap silently.
 - Clarifications already decided with a human (listed in your context) are binding: apply them, do not ask again.
 - A question for a person (open questions, the clarification) is read at the gate by someone who will not open your tools: name what it is about as they see it — the screen by its title or its section («To be - …»), the field by its label, the text in «» — and give the answers you see. A Figma node id, a requirement id or a path goes to refs and sources, never into the question. A design frame labelled To be or AS IS by its section answers which variant is the target: do not ask it.
 Produce the result document when every requirement is classified.`,
-  capabilities: [...READ_REPO, "jira.get", "jira.search", "confluence.get", "confluence.search", "figma.get"],
+  // research searched the code and the sources: requirements reads what it names, it does not search
+  // again (pilot: the step re-read and re-searched what research had, call by call)
+  capabilities: ["repo.read", "knowledge.read", "graph.symbol", "jira.get", "confluence.get", "figma.get"],
   requires: { tools: true, structuredOutput: "json" },
   output: { type: "requirements", schema: RequirementsResult, outcomes: ["ok", "needs_clarification"] },
-  limits: DEFAULT_LIMITS,
+  limits: { ...DEFAULT_LIMITS, maxToolCalls: 15, maxModelCalls: 20 },
+  uncached: { baseChars: 60_000, workingSet: 30_000 },
+  reasoningEffort: "medium",
 };
 
 export const SPEC_AGENT: AgentDefinition = {
@@ -110,6 +117,7 @@ Produce the result document when every requirement has acceptance criteria.`,
   // the code is read by research and requirements: spec writes, it looks up a name or two
   limits: { ...DEFAULT_LIMITS, maxToolCalls: 12, maxModelCalls: 20 },
   contextInputs: ["requirements", "research", "design", "requirement-correction", "related-work"],
+  uncached: { baseChars: 60_000, workingSet: 30_000 },
 };
 
 export const IMPACT_AGENT: AgentDefinition = {

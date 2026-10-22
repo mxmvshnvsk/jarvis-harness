@@ -933,7 +933,11 @@ context: { maxContext: 8000 }
 
     const first = JSON.stringify(server.requests[0]?.body.messages);
     expect(first).not.toContain("Human review");
-    const second = JSON.stringify(server.requests.at(-1)?.body.messages);
+    // the gate's answers to the open questions are prepared in the background: not the agent's call
+    const own = server.requests.filter(
+      (q) => !JSON.stringify(q.body.messages).includes("answers to a document's open questions"),
+    );
+    const second = JSON.stringify(own.at(-1)?.body.messages);
     expect(second).toContain("# Human review of your previous version spec/spec.json@1 (binding)");
     expect(second).toContain("→ never");
     expect(second).toContain("## Your previous version spec/spec.json@1 (sent back)");

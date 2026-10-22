@@ -225,7 +225,13 @@ export async function prepareSuggestions(
         },
         { role: "user", content: "Answer with the JSON document now." },
       ],
-      request: { role: "research", agentId: "answers", temperature: 0, runId: run.id },
+      request: {
+        role: "research",
+        agentId: "answers",
+        temperature: 0,
+        runId: run.id,
+        reasoningEffort: "low",
+      },
     });
     const items = checkSuggestions(
       questions,

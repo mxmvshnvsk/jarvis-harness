@@ -354,8 +354,9 @@ export class ApprovalExecutor implements StepExecutor {
         meta: { artifactType: type },
       });
     if (type === "implementation") afterGateReached(ctx.runtime, ctx.run);
-    // the document's open questions with answers from what the run collected, ready on the page
-    await prepareSuggestions(ctx.runtime, ctx.run, latest, ctx.step.id);
+    // the document's open questions with answers from what the run collected — in the background: the
+    // gate does not wait for one more big model call (a page opened before it ends prepares them once)
+    void prepareSuggestions(ctx.runtime, ctx.run, latest, ctx.step.id).catch(() => undefined);
     throw new SuspendRun("WAITING_HUMAN", `approve ${type} (${latest.name}@${latest.version})`, {
       checkpointState: { awaitingApproval: { artifactId: latest.artifactId, version: latest.version, type } },
       waitingFor: { kind: "approval", interactionId: thread.id, detail: type },
