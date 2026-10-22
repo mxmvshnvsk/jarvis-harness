@@ -881,7 +881,13 @@ function stepRow(s: StepRow, now: number, plan?: PlanProgress): Html {
       `${t("sent the work back to {to}", { to: loop.to })} ${loop.iteration}${loop.max ? `/${loop.max}` : ""} — ${loop.outcome}`,
     );
   if (s.status === "waiting")
-    notes.push(s.paused ? t("paused · waits for the quota window") : t("waits for you"));
+    notes.push(
+      s.paused
+        ? t("paused · waits for the quota window")
+        : s.forChildren
+          ? t("waits for its subtasks")
+          : t("waits for you"),
+    );
   if (s.status === "running")
     notes.push(plan ? `${t("running now")} · ${t("plan {at}", { at: planAt(plan) })}` : t("running now"));
   if (s.status === "stopped") notes.push(t("stopped before it finished"));
@@ -1241,6 +1247,21 @@ function waitHtml(page: RunPage, wait: BudgetWait, now: number, actions?: Action
 
 function nowHtml(page: RunPage, now: number, actions?: Actions): Html {
   const a = page.activity;
+  // a task across services parked for its subtasks: they work, it goes on by itself once they are done
+  if (page.run.state === "SUSPENDED" && page.run.waitingFor?.kind === "children") {
+    const views = page.subtasks ?? [];
+    const done = views.filter((v) => v.state === "COMPLETED" || v.state === "dropped").length;
+    const starting = views.filter((v) => v.state === "starting").length;
+    const working = views.filter((v) => v.state === "RUNNING" || v.state === "CREATED").length;
+    const asking = views.filter((v) => v.state === "WAITING_HUMAN").length;
+    const facts = [
+      starting > 0 ? t("{n} starting", { n: starting }) : "",
+      working > 0 ? t("{n} working", { n: working }) : "",
+      asking > 0 ? t("{n} waiting for you", { n: asking }) : "",
+    ].filter(Boolean);
+    return html`<section class="panel now" aria-label="${t("Now")}" data-live="card"><div class="row">${starting + working > 0 ? html`<span class="spin" aria-hidden="true"></span>` : html`<span class="warn" aria-hidden="true">⏸</span>`}<b>${t("Waits for its subtasks: {done} of {all} done", { done, all: views.length })}</b>${facts.length > 0 ? html`<span class="meta">${facts.join(" · ")}</span>` : ""}</div>
+<p class="hint" style="margin:0">${t("It goes on by itself once every subtask is done (or dropped): the contract check, then delivery.")} <a href="#subtasks">${t("The subtasks")}</a></p></section>`;
+  }
   if (!a?.step || !page.leaseLive) {
     const stopped =
       page.run.state === "SUSPENDED"
@@ -1442,10 +1463,11 @@ ${
 }
 
 const TIME_ROWS: ReadonlyArray<{ part: TimePart; cls: string; name: string; what?: string }> = [
-  // t("Working") t("steps ran, the model answered, tools worked") t("Waiting for you") t("Waiting on budget and the model") t("Paused or stopped")
+  // t("Working") t("steps ran, the model answered, tools worked") t("Waiting for you") t("Waiting on budget and the model") t("Waiting for its subtasks") t("they work in their own runs") t("Paused or stopped")
   { part: "working", cls: "w", name: "Working", what: "steps ran, the model answered, tools worked" },
   { part: "human", cls: "h", name: "Waiting for you" },
   { part: "waiting", cls: "b", name: "Waiting on budget and the model" },
+  { part: "subtasks", cls: "s", name: "Waiting for its subtasks", what: "they work in their own runs" },
   { part: "stopped", cls: "p", name: "Paused or stopped" },
 ];
 
@@ -1460,8 +1482,10 @@ export function timeHtml(time: TimeSplit): Html {
   const pc = (ms: number): string => (ms === 0 ? "" : share(ms) < 1 ? "<1%" : `${Math.round(share(ms))}%`);
   const one = (part: TimePart, i: TimeItem): string =>
     `${i.label} ${duration(i.ms)}${i.times > 1 || (part === "waiting" && i.times > 0) ? ` (×${i.times})` : ""}`;
-  const rows = TIME_ROWS.map(({ part, cls, name, what }) => {
-    const items = time.parts[part].items;
+  // the subtasks' row only for a task across services that waited for them
+  const shownRows = TIME_ROWS.filter(({ part }) => part !== "subtasks" || time.parts.subtasks.ms > 0);
+  const rows = shownRows.map(({ part, cls, name, what }) => {
+    const items = part === "subtasks" ? [] : time.parts[part].items;
     const shown = part === "working" ? items.slice(0, 3) : items;
     const list = `${shown.map((i) => one(part, i)).join(part === "working" ? ", " : " · ")}${items.length > shown.length ? "…" : ""}`;
     const sub = [what ? t(what) : "", list].filter((x) => x).join(" · ");
@@ -1488,8 +1512,10 @@ export function runContent(
   const r = page.run;
   const tk = page.tokens;
   const extra =
-    r.state === "WAITING_HUMAN"
-      ? (r.waitingFor?.kind ?? undefined)
+    r.state === "WAITING_HUMAN" || (r.state === "SUSPENDED" && r.waitingFor?.kind === "children")
+      ? r.waitingFor?.kind === "children"
+        ? t("its subtasks")
+        : r.waitingFor?.kind
       : r.state === "RUNNING" && page.activity?.step
         ? `${page.activity.step.id}${page.activity.step.iteration > 1 ? `#${page.activity.step.iteration}` : ""}`
         : undefined;

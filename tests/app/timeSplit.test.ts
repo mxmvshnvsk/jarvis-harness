@@ -60,6 +60,22 @@ describe("timeSplitOf", () => {
     expect(t?.parts.stopped.items).toEqual([{ label: "Pause", ms: 2 * M, times: 1 }]);
   });
 
+  it("a task across services parked for its subtasks waits for them; it is not stopped (pilot: «Ctrl-C»)", () => {
+    const events = [
+      state(0, "RUNNING"),
+      start(0, "split"),
+      state(5, "SUSPENDED", {
+        reason: "waits for its subtasks: 0 of 2 done",
+        waitingFor: { kind: "children", detail: "1 orders-api: starting" },
+      }),
+      state(35, "RUNNING", {}, "wait"),
+      state(36, "COMPLETED"),
+    ];
+    const t = timeSplitOf(events, new Date(T0 + 100 * M));
+    expect(t?.parts.subtasks.ms).toBe(30 * M);
+    expect(t?.parts.stopped.ms).toBe(0);
+  });
+
   it("a model re-checked every few minutes is one outage; a new one after an answer is another", () => {
     const events = [
       state(0, "RUNNING"),

@@ -318,6 +318,11 @@ describe("a library in a task across services", () => {
         Date.now(),
       ).value;
       expect(body).toContain("waits for common-lib</span>");
+      // parked for its subtasks, not stopped: they start and work, it goes on by itself
+      expect(body).toContain("Waits for its subtasks: 0 of 3 done");
+      expect(body).not.toContain("stopped with Ctrl-C");
+      expect(body).toContain("SUSPENDED · its subtasks");
+      expect(body).toContain("waits for its subtasks</span>");
       expect(body).toContain("Starts when common-lib is accepted and published, against the new version.");
     } finally {
       rt.close();

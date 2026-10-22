@@ -657,7 +657,7 @@ form.clarify>.actions{margin:4px 0}
 .tpop .ttl{font-size:14px;font-weight:600}
 .tpop .bar{display:flex;height:10px;border-radius:5px;overflow:hidden;background:var(--chip)}
 .tpop .bar i{display:block;height:100%}
-.tpop .w{background:var(--accent)}.tpop .h{background:var(--warn-dot)}.tpop .b{background:var(--held)}.tpop .p{background:var(--faint)}
+.tpop .w{background:var(--accent)}.tpop .h{background:var(--warn-dot)}.tpop .b{background:var(--held)}.tpop .s{background:color-mix(in srgb,var(--accent) 40%,var(--chip))}.tpop .p{background:var(--faint)}
 .tpop table{border-collapse:collapse;width:100%}
 .tpop td{padding:5px 0;vertical-align:top}
 .tpop td.k{display:flex;gap:8px;align-items:center}

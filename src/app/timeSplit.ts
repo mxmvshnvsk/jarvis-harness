@@ -3,11 +3,12 @@ import type { StoredEvent } from "../telemetry/events.ts";
 /**
  * Where a run's time went, from its journal: the `run.state` transitions cut it into intervals —
  * working (the run in its step loop), waiting for a person (a gate, a question, a budget grant),
- * waiting on budget and the model (a quota window, a model taken off the gateway), and paused or
+ * waiting on budget and the model (a quota window, a model taken off the gateway), a task across
+ * services waiting for its subtasks (they work meanwhile, in their own runs), and paused or
  * stopped (Pause, Ctrl-C, a failure until Try again, no process holding the run).
  * Pilot: the page showed one time, and two hours of it were an approval waiting overnight.
  */
-export type TimePart = "working" | "human" | "waiting" | "stopped";
+export type TimePart = "working" | "human" | "waiting" | "subtasks" | "stopped";
 
 export interface TimeItem {
   readonly label: string;
@@ -30,7 +31,7 @@ export interface TimeSplit {
   readonly parts: Readonly<Record<TimePart, TimeShare>>;
 }
 
-export const TIME_PARTS: readonly TimePart[] = ["working", "human", "waiting", "stopped"];
+export const TIME_PARTS: readonly TimePart[] = ["working", "human", "waiting", "subtasks", "stopped"];
 
 const TERMINAL = new Set(["COMPLETED", "CANCELLED"]);
 
@@ -81,6 +82,8 @@ function stopOf(e: StoredEvent): Stop | undefined {
             : "quota window",
       };
     case "SUSPENDED":
+      // a master parked for its subtasks is not stopped: they work (pilot: «Ctrl-C» while they started)
+      if (waitingFor.kind === "children") return { part: "subtasks", label: "subtasks" };
       return { part: "stopped", label: reason.startsWith("paused") ? "Pause" : "Ctrl-C" };
     case "FAILED":
       return { part: "stopped", label: "failed, until Try again" };
@@ -100,6 +103,7 @@ export function timeSplitOf(events: readonly StoredEvent[], now: Date, live = tr
     working: new Map(),
     human: new Map(),
     waiting: new Map(),
+    subtasks: new Map(),
     stopped: new Map(),
   };
   const add = (part: TimePart, label: string, ms: number, newStop: boolean): void => {
@@ -180,6 +184,7 @@ export function timeSplitOf(events: readonly StoredEvent[], now: Date, live = tr
     working: shareOf("working"),
     human: shareOf("human"),
     waiting: shareOf("waiting"),
+    subtasks: shareOf("subtasks"),
     stopped: shareOf("stopped"),
   };
   const totalMs = TIME_PARTS.reduce((s, part) => s + parts[part].ms, 0);

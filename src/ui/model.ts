@@ -703,6 +703,8 @@ export interface StepRow {
   readonly status: "done" | "returned" | "failed" | "skipped" | "running" | "waiting" | "stopped" | "pending";
   /** Waiting for a quota window or a model, not for a person. */
   readonly paused?: boolean;
+  /** A task across services parked for its subtasks: they work, not a person's turn. */
+  readonly forChildren?: boolean;
   /** The last finished round of the step. */
   readonly last?: StepReport;
   readonly rounds: number;
@@ -1488,8 +1490,11 @@ export async function runPage(
       const l = loops.get(id)?.at(-1);
       return !!last?.outcome && l?.outcome === last.outcome;
     })();
+    const forChildren =
+      run.currentStep === id && run.state === "SUSPENDED" && run.waitingFor?.kind === "children";
     const status: StepRow["status"] =
-      run.currentStep === id && (run.state === "WAITING_HUMAN" || run.state === "WAITING_BUDGET")
+      run.currentStep === id &&
+      (run.state === "WAITING_HUMAN" || run.state === "WAITING_BUDGET" || forChildren)
         ? "waiting"
         : inFlight && run.state === "RUNNING"
           ? "running"
@@ -1511,6 +1516,7 @@ export async function runPage(
       status,
       ...(last ? { last } : {}),
       ...(run.currentStep === id && run.state === "WAITING_BUDGET" ? { paused: true } : {}),
+      ...(forChildren ? { forChildren: true } : {}),
       rounds: all.filter((r) => r.status !== "skipped").length,
       loops: loops.get(id) ?? [],
       ...(at ? { startedAt: at } : {}),
