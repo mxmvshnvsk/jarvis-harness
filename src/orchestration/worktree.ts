@@ -347,7 +347,15 @@ export class WorktreeWorkspace implements Workspace {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
-    await must(git(["commit", "-q", "--no-verify", "-m", message], repo, { env: this.env }), "git commit");
+    // a person's commit: the repository's pre-commit and commit-msg hooks run on it; refused, the
+    // checkout is left as it was and the hooks' words are said
+    const committed = await git(["commit", "-q", "-m", message], repo, { env: this.env, timeoutMs: 600_000 });
+    if (committed.code !== 0) {
+      await git(["reset", "-q", "--hard"], repo);
+      throw new WorktreeError(
+        `the repository's hooks refused the commit: ${`${committed.stdout}\n${committed.stderr}`.trim().split("\n").slice(-12).join("\n")}`,
+      );
+    }
     const commit = await must(git(["rev-parse", "HEAD"], repo), "rev-parse");
     return { commit, files };
   }

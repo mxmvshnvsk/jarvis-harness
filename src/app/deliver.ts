@@ -14,7 +14,8 @@ import { git } from "../tools/local/exec.ts";
 import { capabilityMatches } from "../tools/registry.ts";
 import type { Capability, ToolContext, ToolOutput } from "../tools/types.ts";
 import { removeReviewMarkers } from "./applyRun.ts";
-import { branchOf, commitMessageOf, FormatError, headerOf } from "./deliveryFormat.ts";
+import { branchOf, commitMessageOf, FormatError, headerOf, trailersOf } from "./deliveryFormat.ts";
+import { commitWithHooks } from "./repoHooks.ts";
 import type { Runtime } from "./runtime.ts";
 
 /**
@@ -49,6 +50,7 @@ export type DeliveryErrorCode =
   | "no-capability"
   | "no-branch"
   | "format"
+  | "hook"
   | "empty"
   | "held"
   | "push"
@@ -79,6 +81,10 @@ export interface PrRequest {
   readonly repo?: string;
   /** The commit pushed: the run's changes as one commit on its base. */
   readonly commit: string;
+  /** Its message, as the team's format made it or the person wrote it on the card. */
+  readonly message?: string;
+  /** The repository's hooks refused the commit: their output; nothing can be pushed until it is fixed. */
+  readonly refused?: string;
   readonly files: readonly string[];
 }
 
@@ -223,7 +229,7 @@ export function prCapability(runtime: Runtime): Capability {
 export async function preparePr(
   runtime: Runtime,
   run: Run,
-  options: { title?: string; target?: string; source?: string; description?: string } = {},
+  options: { title?: string; target?: string; source?: string; description?: string; message?: string } = {},
 ): Promise<{ artifact: ArtifactVersion; request: PrRequest }> {
   const ws = run.workspace;
   const branch = ws.branch;
@@ -267,7 +273,13 @@ export async function preparePr(
   let source: string;
   try {
     title = (options.title?.trim() || headerOf(config, format, config.prTitle)).slice(0, 200);
-    message = commitMessageOf(config, format);
+    // a message the person wrote on the card keeps Jarvis's trailers
+    const own = options.message?.trim();
+    message = own
+      ? own.includes("Jarvis-Run:")
+        ? own
+        : `${own}\n\n${trailersOf(config, run.id)}`
+      : commitMessageOf(config, format);
     source = options.source?.trim() || branchOf(config, format) || branch;
   } catch (error) {
     if (error instanceof FormatError) throw new DeliveryError("format", error.message);
@@ -279,7 +291,16 @@ export async function preparePr(
   const target = options.target?.trim();
   if (target && (await git(["check-ref-format", "--branch", target], ws.repoRoot)).code !== 0)
     throw new DeliveryError("format", `"${target}" is not a branch name git takes`);
-  const commit = await squashed(runtime, run, base, branch, message);
+  // refused by the repository's hooks: the PR as it would go, with why, on the card — the person fixes
+  // the message there (commit-msg) or the code (pre-commit), and tries again
+  let commit = "";
+  let refused: string | undefined;
+  try {
+    commit = await squashed(runtime, run, base, branch, message);
+  } catch (error) {
+    if (!(error instanceof HookRefusal)) throw error;
+    refused = error.output;
+  }
   const coordinates = await repositoryOf(ws.repoRoot, remote);
   const request: PrRequest = {
     title,
@@ -297,7 +318,9 @@ export async function preparePr(
       : {}),
     ...((config.repo ?? coordinates.repo) ? { repo: config.repo ?? coordinates.repo } : {}),
     commit,
+    message,
     files,
+    ...(refused ? { refused } : {}),
   };
   const content = JSON.stringify(request, null, 2);
   const latest = runtime.artifacts.listLatest(run.id, PR_REQUEST)[0];
@@ -325,6 +348,7 @@ export interface DeliverOptions {
   /** The branch pushed, as the person set it on the card before the PR. */
   readonly source?: string;
   readonly description?: string;
+  readonly message?: string;
   /** The run's lease when the engine delivers; otherwise one is taken for the two effects. */
   readonly lease?: HeldLease;
 }
@@ -362,7 +386,14 @@ export async function deliverPr(runtime: Runtime, run: Run, options: DeliverOpti
     ...(options.target ? { target: options.target } : {}),
     ...(options.source ? { source: options.source } : {}),
     ...(options.description ? { description: options.description } : {}),
+    ...(options.message ? { message: options.message } : {}),
   });
+  if (request.refused)
+    throw new DeliveryError(
+      "hook",
+      `the repository's hooks refused the PR's commit — fix the message on the card, or the code:\n${request.refused}`,
+      artifact,
+    );
   const decision = runtime.artifacts.approvalsFor(artifact.artifactId, artifact.version)[0];
   if (decision && decision.decision !== "approve")
     throw new DeliveryError(
@@ -472,6 +503,15 @@ function identityOf(actor: Actor): { name: string; email: string } {
  * The run's tree as one commit on its base. Its dates are those of the branch's last commit, so the
  * same run makes the same commit every time it is asked (the journal's key does not change).
  */
+/** The repository's hooks refused the PR's commit: their output, for the card. */
+class HookRefusal extends Error {
+  readonly output: string;
+  constructor(output: string) {
+    super("the repository's hooks refused the commit");
+    this.output = output;
+  }
+}
+
 async function squashed(
   runtime: Runtime,
   run: Run,
@@ -480,13 +520,19 @@ async function squashed(
   message: string,
 ): Promise<string> {
   const repo = run.workspace.repoRoot;
-  const tree = await must(git(["rev-parse", `${branch}^{tree}`], repo), "read the run's tree");
   const date = await must(git(["log", "-1", "--format=%cI", branch], repo), "read the branch's date");
   const env = {
     ...gitIdentityEnv(runtime.env, identityOf(run.owner)),
     GIT_AUTHOR_DATE: date,
     GIT_COMMITTER_DATE: date,
   };
+  // a real commit in the run's checkout: the repository's pre-commit and commit-msg hooks run on it
+  if (runtime.loaded.config.delivery.hooks && existsSync(run.workspace.path)) {
+    const made = await commitWithHooks(run.workspace.path, branch, base, message, env);
+    if (!made.ok) throw new HookRefusal(made.output);
+    return made.commit;
+  }
+  const tree = await must(git(["rev-parse", `${branch}^{tree}`], repo), "read the run's tree");
   return must(git(["commit-tree", tree, "-p", base, "-m", message], repo, { env }), "make the PR's commit");
 }
 
@@ -647,7 +693,7 @@ async function repositoryOf(
 }
 
 /** The remote's default branch as git knows it (`origin/HEAD`), else `main`. */
-async function defaultBranchOf(repoRoot: string, remote: string): Promise<string> {
+export async function defaultBranchOf(repoRoot: string, remote: string): Promise<string> {
   const r = await git(["symbolic-ref", "--short", `refs/remotes/${remote}/HEAD`], repoRoot);
   const name = r.code === 0 ? r.stdout.trim().replace(new RegExp(`^${remote}/`), "") : "";
   return name || "main";

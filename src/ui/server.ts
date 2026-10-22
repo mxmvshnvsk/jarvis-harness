@@ -2383,7 +2383,13 @@ ${candidateReviewHtml(c, run, run.workspace.repoRoot, actions, { back: `/runs/${
         const v = form.get(name);
         return typeof v === "string" && v.trim() ? { [name]: v.trim() } : {};
       };
-      const edits = { ...field("source"), ...field("target"), ...field("title"), ...field("description") };
+      const edits = {
+        ...field("source"),
+        ...field("target"),
+        ...field("title"),
+        ...field("description"),
+        ...field("message"),
+      };
       try {
         if (form.get("confirm") !== "1") {
           await preparePr(runtime, run, edits);
@@ -3060,9 +3066,11 @@ function createPrHtml(run: Run, token: string, draft: PrRequest | undefined, app
   if (draft)
     return html`<form method="post" action="${action}" class="pr-card" data-pr-request><input type="hidden" name="t" value="${token}"><input type="hidden" name="confirm" value="1">
 <h3>${t("The pull request as it will go out")}</h3>
+${draft.refused ? html`<div class="banner bad">${t("The repository's hooks refused the commit: fix the message below, or the code, and try again")}<pre class="mono" style="white-space:pre-wrap;margin:8px 0 0">${draft.refused}</pre></div>` : ""}
 <div class="pr-branches"><label>${t("Branch")}<input type="text" name="source" value="${draft.source}" required spellcheck="false" class="mono"></label><span aria-hidden="true">→</span><label>${t("Into")}<input type="text" name="target" value="${draft.target}" required spellcheck="false" class="mono"></label></div>
 <label>${t("Title")}<input type="text" name="title" value="${draft.title}" required maxlength="200"></label>
 <label>${t("Description")}<textarea name="description" rows="8">${draft.description}</textarea></label>
+${draft.message ? html`<label>${t("Commit message")}<textarea name="message" rows="3" class="mono">${draft.message}</textarea></label>` : ""}
 <p class="hint">${draft.workspace && draft.repo ? html`<code>${draft.workspace}/${draft.repo}</code> · ` : ""}${t("{n} files", { n: draft.files.length })} · ${t("one commit")} <code>${draft.commit.slice(0, 10)}</code></p>
 <div class="row"><button type="submit" class="btn primary">${approve ? t("Approve and create PR") : t("Create PR")}</button><span class="hint">${approve ? t("the approval is recorded as yours") : th("pushes the branch and opens the pull request through the MCP server, as {cmd}", { cmd: html`<code>jarvis apply --pr</code>` })}</span></div></form>`;
   return html`<form method="post" action="${action}"><input type="hidden" name="t" value="${token}"><div class="row"><button type="submit" class="btn">${t("Prepare PR")}</button><span class="hint">${t("shows the branch, target, title and description first; nothing is pushed yet")}</span></div></form>`;

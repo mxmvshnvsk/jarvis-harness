@@ -158,7 +158,17 @@ export async function runSubtaskRun(ctx: CliContext, masterRef: string, which: s
     const engine = createEngine(runtime);
     const runId = newRunId();
     const task = subtaskTask(master, sub, split, usedLibraries(runtime, master, sub, split));
-    const workspace = await prepareWorkspace(ctx, runtime, runId, task, undefined);
+    const workspace = await prepareWorkspace(
+      ctx,
+      runtime,
+      runId,
+      task,
+      undefined,
+      undefined,
+      true,
+      master.options?.related,
+      master.options?.prFlow,
+    );
     const run = runtime.runs.create({
       id: runId,
       task,

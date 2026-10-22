@@ -1502,6 +1502,9 @@ export const RU: Readonly<Record<string, string>> = {
   "Pull request:": "Pull request:",
   Description: "Описание",
   "Prepare PR": "Подготовить PR",
+  "Commit message": "Сообщение коммита",
+  "The repository's hooks refused the commit: fix the message below, or the code, and try again":
+    "Хуки репозитория не приняли коммит: поправьте сообщение ниже или код и попробуйте снова",
   "shows the branch, target, title and description first; nothing is pushed yet":
     "сначала покажет ветку, цель, заголовок и описание — ничего не пушится",
   "The pull request as it will go out": "Pull request в том виде, в каком уйдёт",

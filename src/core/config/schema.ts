@@ -620,6 +620,12 @@ export const DeliveryConfigSchema = z.strictObject({
    */
   assistedBy: z.union([z.literal(false), z.string().min(1)]).default("Jarvis {version}"),
   /**
+   * The repository's git hooks (husky, lint-staged, commitlint) run on Jarvis's work as on a person's:
+   * pre-commit and pre-push with the project's checks (a failure goes back to the implementation),
+   * commit-msg as a warning there; the PR's commit and Apply are real commits through the hooks.
+   */
+  hooks: z.boolean().default(true),
+  /**
    * The PR flow: a run that changed code puts up its PR itself once its work is approved, then follows
    * the PR's comments until it is ready for merge (the merge is always a person's). `enabled` is the
    * default for runs; a run may say otherwise (`--pr-flow` / `--no-pr-flow`, New task).

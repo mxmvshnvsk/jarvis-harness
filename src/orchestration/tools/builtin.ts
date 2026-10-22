@@ -13,6 +13,7 @@ import type { DeterministicTool } from "../executors.ts";
 import { failingOnBase, junitFailures } from "./baseline.ts";
 import { CROSS_TOOLS } from "./cross.ts";
 import { excerptText } from "./excerpt.ts";
+import { hookChecks } from "./hookChecks.ts";
 import { PR_FIX_TOOLS } from "./prFix.ts";
 import { rebuildsFor } from "./rebuild.ts";
 import { RELATED_TOOLS } from "./related.ts";
@@ -404,6 +405,8 @@ export const BUILTIN_TOOLS: Record<string, DeterministicTool> = {
       notStarted?: boolean;
       /** What broke, from the whole output, when the runner wrote no report: the agent's reason. */
       excerpt?: string;
+      /** Said, not a defect: the commit-msg hook on the message the PR's commit will have. */
+      advisory?: boolean;
     }> = [];
     const tools = ctx.runtime.loaded.config.tools;
     const tail = (r: { text?: string; denied?: string }): string =>
@@ -671,6 +674,8 @@ export const BUILTIN_TOOLS: Record<string, DeterministicTool> = {
         ...(r.ok ? {} : { tail: tail(r), excerpt: excerptText(r.text ?? r.denied ?? ""), ...logOf(run, r) }),
       });
     }
+    // the repository's own hooks, as a person's commit and push would meet them (src/app/repoHooks.ts)
+    if (ctx.runtime.loaded.config.delivery.hooks) results.push(...(await hookChecks(ctx, changed)));
     // failed tests placed in the project: their frames in its files, the lines the run changed
     if (results.some((r) => r.failures && r.failures.length > 0)) {
       const tracked = await git(["ls-files", "--cached", "--others", "--exclude-standard"], workspace);
@@ -680,7 +685,8 @@ export const BUILTIN_TOOLS: Record<string, DeterministicTool> = {
       for (const r of results)
         if (r.failures) r.failures = r.failures.map((f) => placeFailure(f, files, lines) as never);
     }
-    const failed = results.filter((r) => !r.ok);
+    // commit-msg only warns here: the message is the team's format, not the code
+    const failed = results.filter((r) => !r.ok && !r.advisory);
     const reasons = failed.flatMap((r) => {
       const placed = (r.failures ?? []) as unknown as PlacedFailure[];
       const own = placed.length > 0 ? failureReasons(r.check, placed) : [];

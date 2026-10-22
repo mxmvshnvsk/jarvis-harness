@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { writeFileSync } from "node:fs";
+import { chmodSync, writeFileSync } from "node:fs";
 import { request } from "node:http";
 import { join } from "node:path";
 import { Writable } from "node:stream";
@@ -12,6 +12,7 @@ import {
   linkOf,
   PR_REQUEST,
   pendingPrRequest,
+  preparePr,
   prOf,
   repositoryFromUrl,
 } from "../../src/app/deliver.ts";
@@ -304,6 +305,34 @@ describe("jarvis apply --pr", () => {
       code: "format",
     });
     expect(prs).toHaveLength(0);
+  });
+
+  it("the repository's commit-msg hook refuses the PR's commit: the card says why, the message is fixed there", async () => {
+    await setup();
+    const run = await completed();
+    const hook = join(sb.project, ".git", "hooks", "commit-msg");
+    writeFileSync(
+      hook,
+      '#!/bin/sh\ngrep -qE "^feat" "$1" || { echo "subject must start with a type"; exit 1; }\n',
+    );
+    chmodSync(hook, 0o755);
+    const refused = await preparePr(rt, run);
+    expect(refused.request.refused).toContain("subject must start with a type");
+    await expect(deliverPr(rt, run, { actor: ACTOR, channel: "cli" })).rejects.toMatchObject({
+      code: "hook",
+    });
+    expect(prs).toHaveLength(0);
+    const done = await deliverPr(rt, run, {
+      actor: ACTOR,
+      channel: "cli",
+      message: "feat: ABC-42 order totals",
+    });
+    const message = execFileSync("git", ["log", "-1", "--format=%B", done.commit], {
+      cwd: remote,
+      encoding: "utf8",
+      env,
+    });
+    expect(message).toMatch(/^feat: ABC-42 order totals\n\nJarvis-Run: /);
   });
 
   it("a branch name git does not take is refused before anything is pushed", async () => {

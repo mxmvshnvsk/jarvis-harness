@@ -4,7 +4,16 @@ import { clock } from "../../app/activity.ts";
 import { applyRun } from "../../app/applyRun.ts";
 import { changedSince, filesReadIn, nextWorkflowOf } from "../../app/continuation.ts";
 import { awaitedArtifact, DecisionTakenError, recordDecision } from "../../app/decide.ts";
-import { DeliveryError, deliverPr, PR_REQUEST, preparePr, prOf, prPolicy } from "../../app/deliver.ts";
+import {
+  DeliveryError,
+  defaultBranchOf,
+  deliverPr,
+  PR_REQUEST,
+  preparePr,
+  prFlowUnavailable,
+  prOf,
+  prPolicy,
+} from "../../app/deliver.ts";
 import { createEngine } from "../../app/engine.ts";
 import { FinalizeError, finalizeRun } from "../../app/finalize.ts";
 import { canForget, forgetRuns } from "../../app/forget.ts";
@@ -401,6 +410,8 @@ export async function prepareWorkspace(
   setup = true,
   /** The run reads related work (`--related`); none — `relatedWork.enabled`. */
   related?: boolean,
+  /** The run is in the PR flow (`--pr-flow`); none — `delivery.flow.enabled`. */
+  prFlow?: boolean,
 ): Promise<WorkspaceRef> {
   const loaded = runtime.loaded;
   const root = loaded.project?.root ?? ctx.cwd;
@@ -422,7 +433,28 @@ export async function prepareWorkspace(
   const storyRef = story
     ? { story: { key: story.key, branch: story.branch, based: story.based && useWorktree } }
     : {};
-  const from = base ?? (story?.based && useWorktree ? story.ref : undefined);
+  let from = base ?? (story?.based && useWorktree ? story.ref : undefined);
+  // the PR flow: the run starts from its PR's target as the remote has it now — not from whatever the
+  // checkout happens to be on (an old dev, another task's branch)
+  if (
+    from === undefined &&
+    useWorktree &&
+    (prFlow ?? loaded.config.delivery.flow.enabled) &&
+    !prFlowUnavailable(runtime)
+  ) {
+    const remote = loaded.config.delivery.remote;
+    const target = loaded.config.delivery.target ?? (await defaultBranchOf(root, remote));
+    const fetched = await git(["fetch", "--quiet", remote, target], root, { timeoutMs: 120_000 });
+    if (fetched.code === 0) {
+      from = `${remote}/${target}`;
+      ctx.out.note(
+        `${st.ok("→")} the run starts from ${from} as the remote has it now: the PR goes into ${target}`,
+      );
+    } else
+      ctx.out.note(
+        `${st.warn("note:")} ${remote}/${target} could not be fetched (${fetched.stderr.trim().split("\n")[0] ?? "?"}): the run starts from your checkout's HEAD`,
+      );
+  }
   const cwd: WorkspaceRef = { mode: "cwd", repoRoot: root, path: root, baseRef: base ?? "HEAD", ...storyRef };
   if (!useWorktree) return cwd;
   if (await WorktreeWorkspace.isDirty(root)) {
@@ -540,6 +572,7 @@ async function startContinuation(
         prompt,
         workflowRunsProjectCommands(runtime, target),
         from.options?.related,
+        from.options?.prFlow,
       );
   const run = runtime.runs.create({
     id: runId,
@@ -675,6 +708,7 @@ export async function runRestart(
           prompt,
           workflowRunsProjectCommands(runtime, workflow),
           from.options?.related,
+          from.options?.prFlow,
         );
     const run = runtime.runs.create({
       id: runId,
@@ -868,6 +902,7 @@ export async function runWork(
           undefined,
           workflowRunsProjectCommands(runtime, workflow),
           options.related,
+          options.prFlow,
         );
     const run = runtime.runs.create({
       id: runId,

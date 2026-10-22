@@ -563,12 +563,23 @@ delivery:
     scope: auto                # auto — контекст изменения одним словом (tests, metrics, render): его называет агент реализации, иначе по файлам; none — без scope; иначе этот текст
   prTitle: "{type}({scope}): {key} {subject}"
   assistedBy: "Jarvis {version}"   # trailer Assisted-By; false — только Jarvis-Run
+  hooks: true                  # git-хуки репо (husky, lint-staged, commitlint) — как у человека, см. ниже
   flow:                        # PR-флоу: прогон сам выставляет PR после аппрува и ведёт комментарии
     enabled: true              # по умолчанию для прогонов; на прогон — --pr-flow / --no-pr-flow, галочка в New task
     pollMinutes: 5             # как часто читать комментарии PR, пока сессия активна
     fixWhenAgreed: true        # агент согласен с комментарием — правит и пушит сам; false — сначала спрашивает
     ready: { approvals: 1 }    # «готово к merge»: столько аппрувов (фронт 2, бэк 1 — в project.yaml репо или services.<name>)
 ```
+
+Хуки репозитория (`hooks: true`): `pre-commit` и `pre-push` запускаются вместе с проверками проекта, до вашего
+ревью, — их ошибки уходят агенту реализации, как упавшие тесты; `commit-msg` там только предупреждает (сообщение —
+формат команды, а не код). Коммит PR, Apply и коммит исправлений по комментариям — настоящие `git commit` с
+хуками. Не прошёл `commit-msg` — на карточке PR вывод хука и поле «Сообщение коммита», поправьте и создайте снова.
+`--no-verify` Jarvis не использует (кроме своих служебных checkpoint-коммитов в worktree прогона).
+
+База прогона в PR-флоу — цель PR на remote, только что полученная (`git fetch`): `origin/<delivery.target>`,
+иначе ветка по умолчанию remote'а; для задачи из Story — ветка Story. На какой ветке стоит ваш checkout,
+неважно. `--base` важнее всего.
 
 PR-флоу работает только там, где PR можно открыть: `delivery.pr` не `deny` и есть MCP-сервер с разрешённым
 `bitbucket.pr.create`; иначе галочка в New task неактивна с причиной. Прогон, который не менял код или работал в

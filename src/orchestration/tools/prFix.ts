@@ -2,6 +2,7 @@ import { PR_REQUEST, prOf, requestOf, scopeNamed } from "../../app/deliver.ts";
 import { FormatError, headerOf, trailersOf } from "../../app/deliveryFormat.ts";
 import { prReviewOf } from "../../app/prReview.ts";
 import { commentText, markThreads, threadsToFix, triageOf } from "../../app/prTriage.ts";
+import { commitWithHooks } from "../../app/repoHooks.ts";
 import type { Run } from "../../core/domain/run.ts";
 import { git } from "../../tools/local/exec.ts";
 import { runEffect } from "../effects.ts";
@@ -122,9 +123,29 @@ const pushFix: DeterministicTool = async (ctx) => {
     name: parent.owner.display ?? parent.owner.id,
     email: parent.owner.id,
   });
-  const made = await git(["commit-tree", tree, "-p", base, "-m", message], ws.path, { env });
-  if (made.code !== 0) return { status: "failure", reason: `the commit was not made: ${made.stderr.trim()}` };
-  const commit = made.stdout.trim();
+  // a real commit through the repository's hooks, as a person's (`delivery.hooks`)
+  let commit: string;
+  if (cfg.hooks && ws.branch) {
+    const made = await commitWithHooks(ws.path, ws.branch, base, message, env);
+    if (!made.ok) {
+      markThreads(
+        ctx.runtime,
+        parent,
+        fixing.map((i) => i.thread),
+        "to-fix",
+      );
+      return {
+        status: "failure",
+        reason: `the repository's hooks refused the fix's commit:\n${made.output}`,
+      };
+    }
+    commit = made.commit;
+  } else {
+    const made = await git(["commit-tree", tree, "-p", base, "-m", message], ws.path, { env });
+    if (made.code !== 0)
+      return { status: "failure", reason: `the commit was not made: ${made.stderr.trim()}` };
+    commit = made.stdout.trim();
+  }
   const remote = cfg.remote;
   // onto the PR's branch, never forced: a branch that moved on refuses it, and the person decides
   const pushed = await runEffect(ctx.runtime.effects, ctx.lease, ctx.runtime.events, {
