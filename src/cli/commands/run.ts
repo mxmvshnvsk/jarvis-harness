@@ -6,6 +6,7 @@ import { changedSince, filesReadIn, nextWorkflowOf } from "../../app/continuatio
 import { awaitedArtifact, DecisionTakenError, recordDecision } from "../../app/decide.ts";
 import { DeliveryError, deliverPr, PR_REQUEST, preparePr, prOf, prPolicy } from "../../app/deliver.ts";
 import { createEngine } from "../../app/engine.ts";
+import { FinalizeError, finalizeRun } from "../../app/finalize.ts";
 import { canForget, forgetRuns } from "../../app/forget.ts";
 import { continuationStep, continuedBy, handOff } from "../../app/handoff.ts";
 import { duration } from "../../app/journey.ts";
@@ -1849,6 +1850,46 @@ export async function runPrFix(ctx: CliContext, ref: string): Promise<void> {
       payload: { run: run.id, threads: fixes.length },
     });
     await executeAndReport(ctx, runtime, engine, run, false);
+  } finally {
+    await runtime.close();
+  }
+}
+
+/** `jarvis finalize <run>`: the end of the PR flow, as «Finalize the task» on the run's page. */
+export async function runFinalize(
+  ctx: CliContext,
+  ref: string,
+  options: { eval?: boolean; lessons?: boolean; anyway?: boolean; suite?: string },
+): Promise<void> {
+  const loaded = await loadForCli(ctx);
+  const runtime = createRuntime(loaded, { env: ctx.env });
+  try {
+    const run = requireRun(ctx, runtime, ref);
+    try {
+      const done = await finalizeRun(runtime, run, await actorFor(ctx, runtime), {
+        evalCase: options.eval !== false,
+        lessons: options.lessons !== false,
+        anyway: options.anyway === true,
+        ...(options.suite ? { suite: options.suite } : {}),
+      });
+      ctx.out.result({ run: run.id, ...done }, () => {
+        ctx.out.line(
+          `finalized ${shortRunId(run.id)}${done.merged ? " (PR merged)" : done.ready ? " (PR ready for merge)" : " (PR not ready for merge)"}`,
+        );
+        if (done.evalCase) ctx.out.line(`  eval case: ${done.evalCase}`);
+        if (done.lessons > 0)
+          ctx.out.line(
+            `  ${done.lessons} PR comment(s) kept as review findings, ${done.candidates} standard candidate(s)`,
+          );
+        if (done.checkoutRemoved) ctx.out.line("  the checkout is removed; the branch stays");
+      });
+    } catch (error) {
+      if (error instanceof FinalizeError) {
+        ctx.out.error(error.code === "not-ready" ? `${error.message} (--anyway)` : error.message);
+        throw new CliExit(EXIT.error);
+      }
+      throw error;
+    }
   } finally {
     await runtime.close();
   }

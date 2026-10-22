@@ -635,6 +635,13 @@ describe("the run page: «Create PR» next to Apply", () => {
     expect(await page(`/runs/${short}/pr`)).toContain("Code review");
     const check = await post(`/runs/${short}/pr-check`, { t: ui.token });
     expect(check.location).toContain("notice=pr-check-failed");
+    // the end: the task finalized here, the PR not ready, said so
+    expect(after).toContain("Finalize the task");
+    const notReady = await post(`/runs/${short}/finalize`, { t: ui.token });
+    expect(notReady.location).toContain("notice=finalize-failed");
+    const finalized = await post(`/runs/${short}/finalize`, { t: ui.token, anyway: "1" });
+    expect(finalized.location).toContain("notice=finalized");
+    expect(await page(`/runs/${short}`)).toContain("FINALIZED");
     expect(prs).toHaveLength(1);
   });
 

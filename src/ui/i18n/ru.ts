@@ -1723,6 +1723,21 @@ export const RU: Readonly<Record<string, string>> = {
   "fixing the PR's comments: {threads}, run {run}": "исправляются комментарии PR: {threads}, прогон {run}",
   "the fix is pushed to {branch}: {commit}, {threads} answered":
     "исправление запушено в {branch}: {commit}, ответы в {threads}",
+  "The task is finalized": "Задача финализирована",
+  "Finalize the task": "Финализировать задачу",
+  "Make an eval case of the run": "Сделать eval-кейс из прогона",
+  "the task, the spec and the accepted change, to check models and prompts on":
+    "задача, спека и принятый diff — для проверки моделей и промптов",
+  "Keep the PR's comments in the knowledge": "Учесть комментарии ревью в знаниях",
+  "a comment reviewers keep making becomes a standard to approve":
+    "повторяющееся замечание ревьюеров станет кандидатом в стандарты на ваш аппрув",
+  "The PR is not ready for merge — finalize anyway": "PR не готов к merge — всё равно финализировать",
+  Finalize: "Финализировать",
+  "the checkout is removed; the branch stays, the PR has it; the merge stays yours":
+    "checkout удаляется, ветка остаётся — она в PR; merge остаётся за вами",
+  "Not finalized:": "Не финализировано:",
+  "the task is finalized": "задача финализирована",
+  "the task is finalized, its PR not ready for merge": "задача финализирована, PR не был готов к merge",
   "Put up the PR after the review and follow its comments": "Выставить PR после ревью и вести комментарии",
   "once you approve the work Jarvis pushes the branch and opens the PR, then reads its comments; the merge stays yours":
     "после вашего аппрува Jarvis пушит ветку и открывает PR, затем читает комментарии; merge остаётся за вами",

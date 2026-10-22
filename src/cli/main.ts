@@ -59,6 +59,7 @@ import {
   runDaemon,
   runDiff,
   runEdit,
+  runFinalize,
   runFollow,
   runForget,
   runGc,
@@ -553,6 +554,18 @@ export function buildProgram(options: RunOptions = {}): Command {
     .action(async (run: string | undefined) => {
       await runContinue(ctxFor(), run);
     });
+  program
+    .command("finalize <run>")
+    .description("the end of the PR flow: the task finalized, an eval case made, the PR's comments kept")
+    .option("--no-eval", "no eval case of the run")
+    .option("--no-lessons", "do not keep the PR's comments as review findings")
+    .option("--anyway", "the PR is not ready for merge: finalize anyway")
+    .option("--suite <name>", "the eval suite (default: default)")
+    .action(
+      async (run: string, opts: { eval?: boolean; lessons?: boolean; anyway?: boolean; suite?: string }) => {
+        await runFinalize(ctxFor(), run, opts);
+      },
+    );
   program
     .command("pr-fix <run>")
     .description("the comments of the run's PR agreed to change: fixed on the PR's branch, pushed, answered")

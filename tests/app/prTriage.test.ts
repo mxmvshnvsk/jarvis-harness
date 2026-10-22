@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { PR_ARTIFACT, PR_REQUEST } from "../../src/app/deliver.ts";
-import { checkPr } from "../../src/app/prReview.ts";
+import { finalizedOf, finalizeRun } from "../../src/app/finalize.ts";
+import { checkPr, followsPr, prReviewOf } from "../../src/app/prReview.ts";
 import {
   decideThread,
   footerOf,
@@ -217,5 +218,66 @@ describe("the agent weighs the PR's comments", () => {
     expect((await decideThread(rt, run, 103, "fix", ACTOR)).state).toBe("to-fix");
     expect((await decideThread(rt, run, 101, "self", ACTOR)).state).toBe("handled");
     expect(posted).toHaveLength(0);
+  });
+});
+
+describe("finalizing the task (the end of the PR flow)", () => {
+  it("a PR not ready for merge asks to say «anyway»; finalized, the run stops following it", async () => {
+    const run = delivered();
+    await checkPr(rt, run, "ui", async (cap) => (cap === "bitbucket.pr.get" ? PR : undefined));
+    await expect(finalizeRun(rt, run, ACTOR, { lessons: false })).rejects.toMatchObject({
+      code: "not-ready",
+    });
+    const done = await finalizeRun(rt, run, ACTOR, { lessons: false, anyway: true });
+    expect(done).toMatchObject({ ready: false, merged: false, lessons: 0 });
+    expect(finalizedOf(rt, run)).toBeDefined();
+    expect(followsPr(rt, run)).toBe(false);
+    await expect(finalizeRun(rt, run, ACTOR, { anyway: true })).rejects.toMatchObject({ code: "done" });
+    const pr = {
+      id: "312",
+      source: "s",
+      target: "dev",
+      title: "t",
+      commit: "c",
+      capability: "x",
+      actor: "user:me",
+      at: "",
+    };
+    const panel = prPanelHtml(run, pr, prReviewOf(rt, run), {
+      token: "tok",
+      approvals: 1,
+      pollMinutes: 5,
+      following: false,
+      ...(finalizedOf(rt, run) ? { finalized: finalizedOf(rt, run) as { at: string } } : {}),
+    }).toString();
+    expect(panel).toContain("FINALIZED");
+    expect(panel).not.toContain("Finalize the task");
+  });
+
+  it("the PR's agreed comments kept as review findings: one reviewers keep making becomes a standard candidate", async () => {
+    const first = delivered();
+    const second = delivered();
+    for (const run of [first, second]) {
+      await checkPr(rt, run, "ui", async (cap) =>
+        cap === "bitbucket.pr.get"
+          ? JSON.stringify({
+              ...JSON.parse(PR),
+              reviewers: ["a (APPROVED)"],
+              active_comments: [
+                {
+                  ...JSON.parse(PR).active_comments[0],
+                  text: "check promoCode for null before computing the discount",
+                },
+              ],
+            })
+          : undefined,
+      );
+      server.respond(() => completion(JSON.stringify({ items: [VERDICTS.items[0]] })));
+      await triagePr(rt, run, prReviewOf(rt, run) as never);
+    }
+    const one = await finalizeRun(rt, first, ACTOR, { lessons: true, anyway: true });
+    expect(one).toMatchObject({ lessons: 1, candidates: 0 });
+    const two = await finalizeRun(rt, second, ACTOR, { lessons: true, anyway: true });
+    expect(two).toMatchObject({ lessons: 1, candidates: 1 });
   });
 });

@@ -43,12 +43,18 @@ export function prPanelHtml(
     back?: "review";
     /** Threads the agent weighed that wait for the person. */
     waiting?: number;
+    /** The task was finalized: by whom, when. */
+    finalized?: { by?: string; at: string };
   },
 ): Html {
   const short = encodeURIComponent(shortRunId(run.id));
-  const phase = prPhaseOf(doc);
+  const phase = options.finalized ? "FINALIZED" : prPhaseOf(doc);
   const tone =
-    phase === "READY_TO_MERGE" || phase === "MERGED" ? "ok" : phase === "DECLINED" ? "bad" : "info";
+    phase === "READY_TO_MERGE" || phase === "MERGED" || phase === "FINALIZED"
+      ? "ok"
+      : phase === "DECLINED"
+        ? "bad"
+        : "info";
   const open = doc ? doc.threads.filter((t) => !t.mine).length : undefined;
   const link = pr.url
     ? html`<a href="${pr.url}" rel="noreferrer noopener" target="_blank">PR #${pr.id ?? ""}</a>`
@@ -77,6 +83,7 @@ ${
 }`
     : html`<p class="hint">${t("Not read yet: the comments are read once the PR is up.")}</p>`
 }
+${finalizeHtml(run, doc, options)}
 <div class="row">${
     options.token && options.following
       ? html`<form method="post" action="/runs/${short}/pr-check"><input type="hidden" name="t" value="${options.token}">${options.back ? html`<input type="hidden" name="back" value="${options.back}">` : ""}<button type="submit" class="btn">${t("Check comments")}</button></form>`
@@ -92,6 +99,27 @@ ${
         : ""
   }</span></div>
 </section>`;
+}
+
+/**
+ * «Finalize the task»: with an eval case of the run and the PR's comments kept as review findings, both
+ * ticked; a PR not ready for merge asks the person to say they finalize anyway.
+ */
+function finalizeHtml(
+  run: Run,
+  doc: PrReviewDoc | undefined,
+  options: { token?: string; finalized?: { by?: string; at: string }; back?: "review" },
+): Html | string {
+  if (options.finalized)
+    return html`<p class="hint">${t("The task is finalized")}${options.finalized.by ? ` · ${options.finalized.by.replace(/^\w+:/, "")}` : ""} · ${hhmm(options.finalized.at)}</p>`;
+  if (!options.token) return "";
+  const ready = doc?.state === "MERGED" || doc?.ready === true;
+  return html`<details class="pr-finalize"${ready ? " open" : ""}><summary>${t("Finalize the task")}</summary>
+<form method="post" action="/runs/${encodeURIComponent(shortRunId(run.id))}/finalize"><input type="hidden" name="t" value="${options.token}">${options.back ? html`<input type="hidden" name="back" value="${options.back}">` : ""}
+<label class="check"><input type="checkbox" name="eval" value="1" checked> ${t("Make an eval case of the run")} <span class="meta">— ${t("the task, the spec and the accepted change, to check models and prompts on")}</span></label>
+<label class="check"><input type="checkbox" name="lessons" value="1" checked> ${t("Keep the PR's comments in the knowledge")} <span class="meta">— ${t("a comment reviewers keep making becomes a standard to approve")}</span></label>
+${ready ? "" : html`<label class="check"><input type="checkbox" name="anyway" value="1" required> ${t("The PR is not ready for merge — finalize anyway")}</label>`}
+<div class="row"><button type="submit" class="btn primary">${t("Finalize")}</button><span class="hint">${t("the checkout is removed; the branch stays, the PR has it; the merge stays yours")}</span></div></form></details>`;
 }
 
 function commentHtml(c: PrComment, depth: number): Html {

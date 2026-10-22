@@ -54,6 +54,7 @@ import {
   prPolicy,
 } from "../app/deliver.ts";
 import { resolveEffect, unresolvedEffectOf } from "../app/effects.ts";
+import { finalizedOf, finalizeRun } from "../app/finalize.ts";
 import { continuedBy } from "../app/handoff.ts";
 import {
   addGlossaryTerm,
@@ -612,6 +613,8 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
       "pr-checked": html`<div class="banner info">${t("The PR is read: what changed is below")}</div>`,
       "pr-ready": html`<div class="banner ok">${t("The PR is ready for merge: merge it in Bitbucket")}</div>`,
       "pr-check-failed": html`<div class="banner bad">${t("The PR could not be read:")} ${r.url.searchParams.get("why") ?? t("see jarvis logs")}</div>`,
+      finalized: html`<div class="banner ok">${t("The task is finalized")}</div>`,
+      "finalize-failed": html`<div class="banner bad">${t("Not finalized:")} ${r.url.searchParams.get("why") ?? t("see jarvis logs")}</div>`,
       "pr-replied": html`<div class="banner ok">${t("The reply is posted in the PR")}</div>`,
       "pr-decided": html`<div class="banner info">${t("Noted")}</div>`,
       "pr-reply-failed": html`<div class="banner bad">${t("No reply:")} ${r.url.searchParams.get("why") ?? t("see jarvis logs")}</div>`,
@@ -902,6 +905,7 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
       following: followsPr(runtime, run),
       ...(from ? { back: from } : {}),
       waiting: triageOf(runtime, run).items.filter((i) => i.state === "proposed").length,
+      ...((f) => (f ? { finalized: f } : {}))(finalizedOf(runtime, run)),
     });
     return panel;
   };
@@ -1997,7 +2001,7 @@ ${candidateReviewHtml(c, run, run.workspace.repoRoot, actions, { back: `/runs/${
       });
     }
     const m =
-      /^\/runs\/([^/]+)\/(decide|rerun|open|budget|resume|cancel|continue|restart|redo|clarify|eval|note|pause|cleanup|apply|pr|pr-check|pr-reply|restore-branch|subtask|contract|scope|tests|steer|effect|conflict)$/.exec(
+      /^\/runs\/([^/]+)\/(decide|rerun|open|budget|resume|cancel|continue|restart|redo|clarify|eval|note|pause|cleanup|apply|pr|pr-check|pr-reply|finalize|restore-branch|subtask|contract|scope|tests|steer|effect|conflict)$/.exec(
         r.url.pathname,
       );
     const run = m ? resolveRun(m[1] as string) : undefined;
@@ -2297,6 +2301,26 @@ ${candidateReviewHtml(c, run, run.workspace.repoRoot, actions, { back: `/runs/${
         return redirect(
           r,
           `/runs/${short}?notice=apply-failed&why=${encodeURIComponent(error.message.slice(0, 600))}`,
+        );
+      }
+    }
+    if (m[2] === "finalize") {
+      // the end of the PR flow: the task finalized by the person, with what they ticked
+      const who = await actor();
+      if (!who) return redirect(r, `/runs/${short}?notice=actor`);
+      const back = form.get("back") === "review" ? `/runs/${short}/pr` : `/runs/${short}`;
+      try {
+        await finalizeRun(runtime, run, who, {
+          evalCase: form.get("eval") === "1",
+          lessons: form.get("lessons") === "1",
+          anyway: form.get("anyway") === "1",
+        });
+        return redirect(r, `${back}?notice=finalized`);
+      } catch (error) {
+        if (!(error instanceof Error)) throw error;
+        return redirect(
+          r,
+          `${back}?notice=finalize-failed&why=${encodeURIComponent(error.message.slice(0, 600))}`,
         );
       }
     }

@@ -1258,6 +1258,11 @@ export function feedItem(e: StoredEvent): FeedItem | undefined {
             ? t("thread {thread}: to be fixed{by}", { thread: String(p.thread), by })
             : t("thread {thread}: left to the person{by}", { thread: String(p.thread), by }),
       );
+    case "run.finalized":
+      return at(
+        `${p.ready === true ? t("the task is finalized") : t("the task is finalized, its PR not ready for merge")}${by}`,
+        p.ready === true ? "ok" : "warn",
+      );
     case "pr.fixStarted":
       return at(
         t("fixing the PR's comments: {threads}, run {run}", {
