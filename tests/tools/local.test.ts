@@ -389,7 +389,7 @@ describe("builds the checks read (tools.rebuild)", () => {
     const fixed = await tools.invoke("repo.write", { path: "src/b.ts", content: "import {a} from './a';\n" });
     expect(fixed.ok).toBe(true);
     expect(fixed.text).toContain(
-      "[fix-src: reformatted the file — read it again before the next edit; no problems left]",
+      "[fix-src: reformatted lines 1–1, which now read as below (the rest is as you wrote it); no problems left]\n    1  import { a } from './a';",
     );
     expect(readFileSync(join(sb.project, "src/b.ts"), "utf8")).toBe("import { a } from './a';\n");
     const edited = await tools.invoke("repo.edit", {

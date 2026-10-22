@@ -928,7 +928,15 @@ export class LocalToolProvider implements ToolProvider {
     }
     const after = existsSync(absolute) ? readFileSync(absolute, "utf8") : before;
     const changed = after !== before;
-    const head = `\n[${plans.map((p) => p.run).join(", ")}: ${changed ? "reformatted the file — read it again before the next edit" : "nothing to reformat"}${clean ? "; no problems left" : ""}]`;
+    const region = changed ? reformatted(before, after) : undefined;
+    const what = !changed
+      ? "nothing to reformat"
+      : region
+        ? region.to < region.from
+          ? "reformatted: lines removed, as below (the rest is as you wrote it)"
+          : `reformatted lines ${region.from}–${region.to}, which now read as below (the rest is as you wrote it)`
+        : "reformatted the file — read it again before the next edit";
+    const head = `\n[${plans.map((p) => p.run).join(", ")}: ${what}${clean ? "; no problems left" : ""}]${region ? `\n${region.text}` : ""}`;
     return {
       text: `${head}${notes.length > 0 ? `\n${notes.join("\n")}` : ""}`,
       data: { run: plans.map((p) => p.run), changed, clean },
@@ -1004,4 +1012,45 @@ export function workspaceFileExists(ctx: ToolContext, path: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** Lines the fixer may change and still be shown with the write's answer, instead of a read again. */
+export const REFORMAT_SHOWN = 60;
+
+/**
+ * What a fixer changed, as the region's new text with its line numbers: the agent's next edit
+ * matches it without reading the file again (pilot: every reformat cost a read and a model call).
+ * The span from the first changed line to the last; past `REFORMAT_SHOWN` lines — undefined.
+ */
+export function reformatted(
+  before: string,
+  after: string,
+): { from: number; to: number; text: string } | undefined {
+  const a = before.split("\n");
+  const b = after.split("\n");
+  let head = 0;
+  while (head < a.length && head < b.length && a[head] === b[head]) head += 1;
+  let tail = 0;
+  while (
+    tail < a.length - head &&
+    tail < b.length - head &&
+    a[a.length - 1 - tail] === b[b.length - 1 - tail]
+  )
+    tail += 1;
+  const lines = b.slice(head, b.length - tail);
+  if (lines.length > REFORMAT_SHOWN) return undefined;
+  if (lines.length === 0) {
+    const gone = a.length - head - tail;
+    return {
+      from: head + 1,
+      to: head,
+      text: `(${gone} line${gone > 1 ? "s" : ""} removed after line ${head})`,
+    };
+  }
+  const from = head + 1;
+  return {
+    from,
+    to: head + lines.length,
+    text: lines.map((l, i) => `${String(from + i).padStart(5)}  ${l}`).join("\n"),
+  };
 }
