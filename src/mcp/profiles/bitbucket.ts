@@ -127,7 +127,13 @@ const prComment: ProfileCapability = {
   access: "write",
   effect: true,
   parameters: params(
-    { workspace: "workspace slug", repo: "repository slug", id: "pull request id", content: "comment text" },
+    {
+      workspace: "workspace slug",
+      repo: "repository slug",
+      id: "pull request id",
+      content: "comment text",
+      parent: "the comment replied to: a reply in its thread",
+    },
     ["workspace", "repo", "id", "content"],
   ),
   markerArg: "content",
@@ -138,6 +144,7 @@ const prComment: ProfileCapability = {
     pull_request_id: prNumber(a.id),
     prId: a.id,
     id: a.id,
+    ...(a.parent !== undefined ? { parent_comment_id: prNumber(a.parent), parent_id: a.parent } : {}),
     content: a.content ?? a.body,
     text: a.content ?? a.body,
     comment_text: a.content ?? a.body,

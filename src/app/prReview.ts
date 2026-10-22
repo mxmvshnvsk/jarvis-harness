@@ -54,7 +54,8 @@ export interface PrReviewDoc {
   readonly checkedAt: string;
 }
 
-const MARKER = /<!--\s*jarvis[:\s]/i;
+/** Jarvis's own comment: its effect marker (`[jarvis:run=… effect=…]`) or an HTML comment mark. */
+const MARKER = /<!--\s*jarvis[:\s]|\[jarvis:run=/i;
 
 const str = (v: unknown): string | undefined => (typeof v === "string" && v.trim() ? v : undefined);
 const num = (v: unknown): number | undefined =>

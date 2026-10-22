@@ -69,7 +69,8 @@ import {
 import { type McpProbe, mcpHealthOf } from "../app/mcpHealth.ts";
 import { modelsHealthOf } from "../app/modelHealth.ts";
 import { pauseRequested, requestPause } from "../app/pause.ts";
-import { checkPr, followsPr, prCheckDue, prReviewOf } from "../app/prReview.ts";
+import { checkPr, followsPr, type PrReviewDoc, prCheckDue, prReviewOf } from "../app/prReview.ts";
+import { decideThread, ReplyError, threadsToWeigh, triageOf, triagePr } from "../app/prTriage.ts";
 import { requestRedo } from "../app/redo.ts";
 import { restartPlanOf } from "../app/restart.ts";
 import { resumableOf } from "../app/resumable.ts";
@@ -433,6 +434,19 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
 
   // the PR flow: the comments of the runs' open PRs, read every `delivery.flow.pollMinutes` while the
   // page is open (the session); one at a time, a failure said in the feed and tried at the next tick
+  /** New comments of the PR weighed by the agent; a failure said in the feed, weighed at the next read. */
+  const weigh = async (run: Run, doc: PrReviewDoc): Promise<void> => {
+    if (threadsToWeigh(doc, triageOf(runtime, run)).length === 0) return;
+    try {
+      await triagePr(runtime, run, doc);
+    } catch (error) {
+      runtime.events.emit({
+        kind: "pr.triageFailed",
+        runId: run.id,
+        payload: { reason: (error instanceof Error ? error.message : String(error)).slice(0, 300) },
+      });
+    }
+  };
   let prBusy = false;
   const prPoll = async () => {
     if (prBusy) return;
@@ -442,7 +456,7 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
       for (const run of runtime.runs.list({ state: "COMPLETED", includeTerminal: true, limit: 200 })) {
         if (run.updatedAt < since || !prCheckDue(runtime, run)) continue;
         try {
-          await checkPr(runtime, run, "poll");
+          await weigh(run, await checkPr(runtime, run, "poll"));
         } catch (error) {
           runtime.events.emit({
             kind: "pr.checkFailed",
@@ -576,6 +590,9 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
       "pr-checked": html`<div class="banner info">${t("The PR is read: what changed is below")}</div>`,
       "pr-ready": html`<div class="banner ok">${t("The PR is ready for merge: merge it in Bitbucket")}</div>`,
       "pr-check-failed": html`<div class="banner bad">${t("The PR could not be read:")} ${r.url.searchParams.get("why") ?? t("see jarvis logs")}</div>`,
+      "pr-replied": html`<div class="banner ok">${t("The reply is posted in the PR")}</div>`,
+      "pr-decided": html`<div class="banner info">${t("Noted")}</div>`,
+      "pr-reply-failed": html`<div class="banner bad">${t("No reply:")} ${r.url.searchParams.get("why") ?? t("see jarvis logs")}</div>`,
       "no-pr": html`<div class="banner info">${t("The run has no PR")}</div>`,
       "pr-check": html`<div class="banner info">${t("The PR is prepared: check it below, change what is needed and create it")}</div>`,
       "pr-approve": html`<div class="banner info">${t("The project wants the PR approved first: check it below and approve it")}</div>`,
@@ -862,6 +879,7 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
       ...(last ? { lastCheck: last.ts } : {}),
       following: followsPr(runtime, run),
       ...(from ? { back: from } : {}),
+      waiting: triageOf(runtime, run).items.filter((i) => i.state === "proposed").length,
     });
     return panel;
   };
@@ -1957,7 +1975,7 @@ ${candidateReviewHtml(c, run, run.workspace.repoRoot, actions, { back: `/runs/${
       });
     }
     const m =
-      /^\/runs\/([^/]+)\/(decide|rerun|open|budget|resume|cancel|continue|restart|redo|clarify|eval|note|pause|cleanup|apply|pr|pr-check|restore-branch|subtask|contract|scope|tests|steer|effect|conflict)$/.exec(
+      /^\/runs\/([^/]+)\/(decide|rerun|open|budget|resume|cancel|continue|restart|redo|clarify|eval|note|pause|cleanup|apply|pr|pr-check|pr-reply|restore-branch|subtask|contract|scope|tests|steer|effect|conflict)$/.exec(
         r.url.pathname,
       );
     const run = m ? resolveRun(m[1] as string) : undefined;
@@ -2260,11 +2278,42 @@ ${candidateReviewHtml(c, run, run.workspace.repoRoot, actions, { back: `/runs/${
         );
       }
     }
+    if (m[2] === "pr-reply") {
+      // a thread on the code review page: the reply sent, the code to change after all, the person answers
+      const who = await actor();
+      if (!who) return redirect(r, `/runs/${short}/pr?notice=actor`);
+      const thread = Number(form.get("thread"));
+      const action = form.get("action");
+      if (!Number.isInteger(thread) || !["send", "fix", "self", "skip"].includes(action ?? ""))
+        return redirect(r, `/runs/${short}/pr`);
+      try {
+        const text = form.get("text");
+        await decideThread(
+          runtime,
+          run,
+          thread,
+          action as "send" | "fix" | "self" | "skip",
+          who,
+          text ?? undefined,
+        );
+        return redirect(
+          r,
+          `/runs/${short}/pr?notice=${action === "send" ? "pr-replied" : "pr-decided"}#t${thread}`,
+        );
+      } catch (error) {
+        if (!(error instanceof ReplyError || error instanceof Error)) throw error;
+        return redirect(
+          r,
+          `/runs/${short}/pr?notice=pr-reply-failed&why=${encodeURIComponent(error.message.slice(0, 600))}#t${thread}`,
+        );
+      }
+    }
     if (m[2] === "pr-check") {
       // «Check comments»: the PR read now, not at the next poll
       if (!prOf(runtime, run)) return redirect(r, `/runs/${short}?notice=no-pr`);
       try {
         const doc = await checkPr(runtime, run, "ui");
+        await weigh(run, doc);
         const back = form.get("back") === "review" ? `/runs/${short}/pr` : `/runs/${short}`;
         return redirect(r, `${back}?notice=${doc.ready ? "pr-ready" : "pr-checked"}`);
       } catch (error) {
@@ -2682,7 +2731,7 @@ ${candidateReviewHtml(c, run, run.workspace.repoRoot, actions, { back: `/runs/${
           runId: run.id,
           back: { href: `/runs/${encodeURIComponent(shortRunId(run.id))}`, label: "Run" },
         },
-        html`${noticeOf(r) ?? ""}${prReviewPageHtml(run, pr, prReviewOf(runtime, run), panel)}`,
+        html`${noticeOf(r) ?? ""}${prReviewPageHtml(run, pr, prReviewOf(runtime, run), panel, triageOf(runtime, run), actions?.token)}`,
       );
     }
     const artMatch = /^\/runs\/([^/]+)\/artifacts\/([^/]+)\/([^/]+)$/.exec(path);

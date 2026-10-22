@@ -1,9 +1,10 @@
 import type { Delivered } from "../app/deliver.ts";
 import type { PrComment, PrReviewDoc, PrThread } from "../app/prReview.ts";
+import { commentText, type TriageDoc, type TriageItem } from "../app/prTriage.ts";
 import type { Run } from "../core/domain/run.ts";
 import { shortRunId } from "../storage/runStore.ts";
 import { type Html, html } from "./html.ts";
-import { t, th } from "./i18n.ts";
+import { plural, t, th } from "./i18n.ts";
 
 /**
  * The PR flow on the run's page (above its card): where the PR stands — its phase, approvals, the
@@ -40,6 +41,8 @@ export function prPanelHtml(
     following: boolean;
     /** Where «Check comments» comes back to: the code review page. */
     back?: "review";
+    /** Threads the agent weighed that wait for the person. */
+    waiting?: number;
   },
 ): Html {
   const short = encodeURIComponent(shortRunId(run.id));
@@ -52,6 +55,11 @@ export function prPanelHtml(
     : html`PR`;
   return html`<section class="panel pr-panel" aria-labelledby="pr-h" data-pr-panel>
 <div class="pr-head"><h2 id="pr-h">${link} <span class="pill ${tone} mono">${phase}</span></h2><span class="hint mono">${pr.source} → <b>${pr.target}</b></span></div>
+${
+  options.waiting && options.waiting > 0
+    ? html`<p class="banner wait" role="status">${plural(options.waiting, "comment waits", "comments wait")} ${t("for you: the agent disagrees or drafted an answer")} — <a href="/runs/${short}/pr">${t("Code review")}</a></p>`
+    : ""
+}
 ${
   doc
     ? html`<dl class="pr-facts">
@@ -89,23 +97,75 @@ ${
 function commentHtml(c: PrComment, depth: number): Html {
   return html`<div class="pr-comment${c.mine ? " mine" : ""}" style="margin-left:${depth * 16}px">
 <div class="hint"><b>${c.mine ? "Jarvis" : c.author}</b>${c.at ? html` · ${hhmm(c.at)}` : ""}</div>
-<p class="pr-text">${c.text.replace(/<!--[\s\S]*?-->/g, "").trim()}</p>
+<p class="pr-text">${commentText(c.text)}</p>
 ${c.replies.map((r) => commentHtml(r, depth + 1))}
 </div>`;
 }
 
-function threadHtml(th0: PrThread): Html {
+const VERDICT: Record<TriageItem["verdict"], { label: string; tone: string }> = {
+  agree: { label: "the agent agrees", tone: "ok" },
+  disagree: { label: "the agent disagrees — your call", tone: "wait" },
+  question: { label: "a question — the agent drafted an answer", tone: "info" },
+  nothing: { label: "nothing to do", tone: "" },
+};
+// t("the agent agrees") t("the agent disagrees — your call") t("a question — the agent drafted an answer") t("nothing to do")
+
+/** The agent's verdict on a thread and what the person can do with it. */
+function verdictHtml(run: Run, item: TriageItem, token: string | undefined): Html {
+  const v = VERDICT[item.verdict];
+  const action = `/runs/${encodeURIComponent(shortRunId(run.id))}/pr-reply`;
+  const state =
+    item.state === "replied"
+      ? html`<p class="hint">${t("Replied")}${item.done?.edited ? ` · ${t("edited by {who}", { who: item.done.by.replace(/^\w+:/, "") })}` : ""}</p>`
+      : item.state === "to-fix"
+        ? html`<p class="hint">${t("To be fixed: Jarvis changes the code, pushes a commit and answers in the thread")}</p>`
+        : item.state === "handled"
+          ? html`<p class="hint">${t("Left to you")}</p>`
+          : "";
+  const form =
+    token && item.state === "proposed"
+      ? html`<form method="post" action="${action}" class="pr-reply"><input type="hidden" name="t" value="${token}"><input type="hidden" name="thread" value="${item.thread}">
+<label>${t("Reply in the PR (you can change it)")}<textarea name="text" rows="3">${item.reply}</textarea></label>
+<div class="row"><button type="submit" class="btn primary" name="action" value="send">${t("Send reply")}</button>${
+          item.verdict === "agree"
+            ? html`<button type="submit" class="btn" name="action" value="fix">${t("Fix it")}</button>`
+            : item.verdict !== "nothing"
+              ? html`<button type="submit" class="btn" name="action" value="fix">${t("Fix anyway")}</button>`
+              : ""
+        }<button type="submit" class="btn" name="action" value="self">${t("I will answer myself")}</button></div></form>`
+      : "";
+  return html`<div class="pr-verdict"><span class="pill ${v.tone}">${t(v.label)}</span>
+<p>${item.reason}</p>${item.change ? html`<p class="hint">${t("Change:")} ${item.change}</p>` : ""}${item.sources.length > 0 ? html`<p class="hint">${t("Sources:")} ${item.sources.join(" · ")}</p>` : ""}
+${state}${form}</div>`;
+}
+
+function threadHtml(run: Run, th0: PrThread, item: TriageItem | undefined, token: string | undefined): Html {
   const where = th0.file ? `${th0.file}${th0.line ? `:${th0.line}` : ""}` : t("the PR as a whole");
-  return html`<article class="panel pr-thread" data-thread="${th0.id}">
+  return html`<article class="panel pr-thread" id="t${th0.id}" data-thread="${th0.id}">
 <div class="pr-thread-head"><span class="pill ${th0.task ? "wait" : ""}">${th0.task ? t("task") : t("comment")}</span><span class="mono hint">${where}</span></div>
 ${commentHtml(th0, 0)}
+${item ? verdictHtml(run, item, token) : ""}
 </article>`;
 }
 
 /** The code review page: the PR's open threads as the server has them, the newest read. */
-export function prReviewPageHtml(run: Run, pr: Delivered, doc: PrReviewDoc | undefined, panel: Html): Html {
-  const theirs = doc?.threads.filter((x) => !x.mine) ?? [];
+export function prReviewPageHtml(
+  run: Run,
+  pr: Delivered,
+  doc: PrReviewDoc | undefined,
+  panel: Html,
+  triage: TriageDoc = { items: [] },
+  token?: string,
+): Html {
+  const itemOf = (id: number) => triage.items.find((i) => i.thread === id);
+  // the threads waiting for the person first: the agent disagrees or drafted an answer
+  const waits = (x: PrThread) => (itemOf(x.id)?.state === "proposed" ? 0 : 1);
+  const theirs = (doc?.threads.filter((x) => !x.mine) ?? [])
+    .map((x, i) => ({ x, i }))
+    .sort((a, b) => waits(a.x) - waits(b.x) || a.i - b.i)
+    .map((p) => p.x);
   const mine = doc?.threads.filter((x) => x.mine) ?? [];
+  const thread = (x: PrThread) => threadHtml(run, x, itemOf(x.id), token);
   return html`<div class="pr-review" style="display:flex;flex-direction:column;gap:16px">
 <h1>${t("Code review")} <span class="hint mono">${run.task.split("\n")[0]}</span></h1>
 ${panel}
@@ -114,9 +174,9 @@ ${
     ? html`<p class="hint">${t("The PR has not been read yet: «Check comments» reads it now.")}</p>`
     : theirs.length === 0
       ? html`<p class="hint">${t("No open threads.")}</p>`
-      : html`<h2>${t("Open threads")} <span class="hint">${theirs.length}</span></h2>${theirs.map(threadHtml)}`
+      : html`<h2>${t("Open threads")} <span class="hint">${theirs.length}</span></h2>${theirs.map(thread)}`
 }
-${mine.length > 0 ? html`<details><summary>${t("Jarvis's own comments")} (${mine.length})</summary>${mine.map(threadHtml)}</details>` : ""}
+${mine.length > 0 ? html`<details><summary>${t("Jarvis's own comments")} (${mine.length})</summary>${mine.map(thread)}</details>` : ""}
 <p class="hint">${pr.url ? html`<a href="${pr.url}" rel="noreferrer noopener" target="_blank">${t("Open in Bitbucket")}</a>` : ""}</p>
 </div>`;
 }

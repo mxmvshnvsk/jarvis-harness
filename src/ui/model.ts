@@ -1232,6 +1232,32 @@ export function feedItem(e: StoredEvent): FeedItem | undefined {
       if (p.readyChanged === true) return at(t("the PR is not ready for merge any more"), "warn");
       return undefined;
     }
+    // t("PR comments weighed: agrees {agree}, disagrees {disagree}, questions {question}, nothing to do {nothing}")
+    case "pr.triaged": {
+      const n = (k: string) => Number(p[k]) || 0;
+      return at(
+        t(
+          "PR comments weighed: agrees {agree}, disagrees {disagree}, questions {question}, nothing to do {nothing}",
+          {
+            agree: n("agree"),
+            disagree: n("disagree"),
+            question: n("question"),
+            nothing: n("nothing"),
+          },
+        ),
+        n("disagree") + n("question") > 0 ? "warn" : undefined,
+      );
+    }
+    case "pr.triageFailed":
+      return at(t("the PR comments could not be weighed: {why}", { why: str(p.reason) ?? "?" }), "warn");
+    case "pr.threadDecided":
+      return at(
+        p.action === "send"
+          ? t("reply posted in thread {thread}{by}", { thread: String(p.thread), by })
+          : p.action === "fix"
+            ? t("thread {thread}: to be fixed{by}", { thread: String(p.thread), by })
+            : t("thread {thread}: left to the person{by}", { thread: String(p.thread), by }),
+      );
     case "pr.checkFailed":
       return at(t("the PR could not be read: {why}", { why: str(p.reason) ?? "?" }), "warn");
     case "delivery.skipped":
