@@ -115,8 +115,8 @@ describe("the mcp indicator", () => {
       '<div id="mcp-pop" class="pop" role="dialog" aria-label="MCP servers" hidden>',
     );
     const js = (await call("/assets/app.js")).body;
-    expect(js).toContain("indicator('mcp', '/mcp.json')");
-    expect(js).toContain("fetch('/mcp/check'");
+    expect(js).toContain('indicator("mcp", "/mcp.json")');
+    expect(js).toContain('fetch("/mcp/check"');
   });
 
   it("checks each server at start: one answers, one does not — the worst is the dot", async () => {

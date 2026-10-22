@@ -180,8 +180,8 @@ describe("jarvis ui: pages", () => {
     const js = (await get("/assets/app.js")).body;
     // the whole script parses: one broken block takes every other one with it
     expect(() => new Function(js)).not.toThrow();
-    expect(js).toContain("indicator('models', '/models.json')");
-    expect(js).toContain("button.addEventListener('click', () => setOpen(pop.hidden))");
+    expect(js).toContain('indicator("models", "/models.json")');
+    expect(js).toContain('button.addEventListener("click", () => setOpen(pop.hidden))');
     expect(data.title).toMatch(/^Models: /);
     expect(data.html).toContain("jarvis models stats");
   });
@@ -209,7 +209,7 @@ describe("jarvis ui: pages", () => {
     });
     expect(data.waiting[0]?.parked).toBeGreaterThan(0);
     const js = (await get("/assets/app.js")).body;
-    expect(js).toContain("new Notification('Jarvis: ' + w.what");
+    expect(js).toContain("new Notification(`Jarvis: $" + "{w.what}`");
     expect(js).toContain("Notification.requestPermission()");
   });
 
@@ -297,11 +297,10 @@ describe("jarvis ui: pages", () => {
     expect(after.body.match(/<span data-ms="\d+">\d+:\d\d<\/span>/g)?.length).toBeGreaterThanOrEqual(3);
     expect(after.body).toMatch(/model call 1, waiting <span data-ms=/);
     const js = (await get("/assets/app.js")).body;
-    expect(js).toContain("setInterval(countOn, 1000)");
+    expect(js).toContain("setInterval(countOn, 1e3)");
     // a region with something changed and not sent (ticked boxes of a module's review) is not re-rendered
-    expect(js).toContain("return f.checked !== f.defaultChecked;");
-    expect(js).toContain("if (edited(el)) continue;");
-    expect(js).toContain("inPhase(fresh)");
+    // the live refresh morphs the regions; its rules run on a DOM in tests/ui/client.test.ts
+    expect(js).toContain("morphRegions(document");
   });
 
   it("untrusted content from the internet: a line on the run page and in its activity, until a person approves (ADR-0016 §4)", async () => {
@@ -362,7 +361,7 @@ describe("jarvis ui: pages", () => {
     expect(feed).toContain('<details class="earlier" data-keep="feed-earlier"><summary>2 earlier</summary>');
     expect(feed.indexOf("discover done")).toBeLessThan(feed.indexOf("</details>"));
     expect(feed.indexOf("requirements done")).toBeGreaterThan(feed.indexOf("</details>"));
-    expect((await get("/assets/app.js")).body).toContain("details[data-keep]");
+    // a fold a person opened stays open across refreshes: tests/ui/client.test.ts
   });
 
   it("recent: every finished run, a page at a time, and a search over all their fields", async () => {
@@ -416,7 +415,7 @@ describe("jarvis ui: pages", () => {
     expect(none.body).toContain("No runs match «nothing-like-this».");
     // the search field keeps what was asked; the page searches as one types
     expect(found.body).toContain('value="delivery research failed"');
-    expect((await get("/assets/app.js")).body).toContain("document.querySelector('[data-search]')");
+    expect((await get("/assets/app.js")).body).toContain('document.querySelector("[data-search]")');
   });
 
   it("runs: what waits for you first, with what it waits for and a link", async () => {

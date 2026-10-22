@@ -140,7 +140,8 @@ import { egressNotices, modelEgressNotices } from "../security/policy/egress.ts"
 import { shortRunId } from "../storage/runStore.ts";
 import { git } from "../tools/local/exec.ts";
 import { type AskView, askContent, askOfRun, recentAsks } from "./ask.ts";
-import { SCRIPT, STYLE } from "./assets.ts";
+import { STYLE } from "./assets.ts";
+import { SCRIPT } from "./client.gen.ts";
 import { type DiffFile, type Html, html, parseDiff } from "./html.ts";
 import { inLang, LANG_COOKIE, LANGS, type Lang, lang, langOf, plural, t, th } from "./i18n.ts";
 import { KIND_NAME, kindWhy } from "./kinds.ts";
