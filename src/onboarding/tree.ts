@@ -46,6 +46,20 @@ export interface TreeNode {
   /** Wider documents that apply here too (shown, not counted as coverage). */
   readonly also: readonly string[];
   readonly children: readonly TreeNode[];
+  /** How the row names it, when not by its path (a module under a service: its path in that repository). */
+  readonly label?: string;
+  /** A service of the knowledge repository's map (the top of its branch, ADR-0025): where its code is. */
+  readonly service?: ServiceRepo;
+}
+
+export interface ServiceRepo {
+  readonly name: string;
+  /** The path of its clone, as the map gives it. */
+  readonly repo: string;
+  /** Cloned on this machine: its modules are scanned; else only its name is known. */
+  readonly cloned: boolean;
+  /** Where its knowledge goes, relative to the knowledge repository (`knowledge/services/<name>`). */
+  readonly knowledgeDir: string;
 }
 
 /** Folders that hold no code of their own to describe: tests, mocks, snapshots, scripts, stories. */
@@ -264,4 +278,71 @@ export function findNode(tree: ModuleTree, path: string): TreeNode | undefined {
 /** The parts a big node is offered in: its child folders, files loose in it don't make a part. */
 export function partsOf(node: TreeNode): readonly TreeNode[] {
   return node.children;
+}
+
+/**
+ * The knowledge repository's Modules (ADR-0025): its services, each over the module tree of its own
+ * clone with the paths under the service's name (`orders-api/src/order`); a service not cloned here
+ * is a leaf. Pilot: the page scanned the knowledge repository itself — the services' documents as code.
+ */
+export async function servicesTree(
+  services: readonly { readonly service: ServiceRepo; readonly roots: KnowledgeRoots }[],
+): Promise<ModuleTree> {
+  const under = (prefix: string, n: TreeNode): TreeNode => ({
+    ...n,
+    path: `${prefix}/${n.path}`,
+    ...(n.module ? { label: n.path } : {}),
+    children: n.children.map((c) => under(prefix, c)),
+  });
+  const tops: TreeNode[] = [];
+  const dirs: string[] = [];
+  const heads: string[] = [];
+  for (const { service, roots } of services) {
+    if (!service.cloned) {
+      tops.push({ ...leaf(service.name), service });
+      continue;
+    }
+    let tree: ModuleTree;
+    try {
+      tree = await moduleTree(roots);
+    } catch {
+      tops.push({ ...leaf(service.name), service: { ...service, cloned: false } });
+      continue;
+    }
+    heads.push(tree.head);
+    const kids = tree.modules.map((m) => under(service.name, m));
+    const sum = (k: (n: TreeNode) => number) => kids.reduce((a, n) => a + k(n), 0);
+    const files = sum((n) => n.files);
+    const lines = sum((n) => n.lines);
+    // the service's own document: the one about its root folder, if any (a module tree has none for it)
+    tops.push({
+      ...leaf(service.name),
+      files,
+      lines,
+      languages: [...new Set(kids.flatMap((n) => n.languages))].sort(),
+      tooBig: files > TOO_BIG.files || lines > TOO_BIG.lines,
+      children: kids,
+      service,
+    });
+    dirs.push(service.name, ...tree.dirs.map((d) => `${service.name}/${d}`));
+  }
+  // cloned first, by name; the ones not on this machine after them
+  tops.sort(
+    (a, b) => Number(!a.service?.cloned) - Number(!b.service?.cloned) || a.path.localeCompare(b.path),
+  );
+  return { modules: tops, dirs: dirs.sort(), head: heads.join(",") };
+}
+
+function leaf(name: string): TreeNode {
+  return {
+    path: name,
+    name,
+    files: 0,
+    lines: 0,
+    languages: [],
+    module: true,
+    tooBig: false,
+    also: [],
+    children: [],
+  };
 }

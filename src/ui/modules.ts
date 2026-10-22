@@ -1,10 +1,18 @@
+import { homedir } from "node:os";
 import { type BudgetWait, budgetWaitOf, whenText } from "../app/budgetWait.ts";
 import { type Candidate, candidatesOf, existingAt, targetOf } from "../app/candidates.ts";
 import type { Runtime } from "../app/runtime.ts";
 import type { Run } from "../core/domain/run.ts";
-import { rootRelative } from "../core/paths.ts";
+import { layoutOf, rootRelative } from "../core/paths.ts";
 import { moduleCheckOf, moduleOfRun } from "../onboarding/moduleRun.ts";
-import { findNode, isAuxFolder, type ModuleTree, TOO_BIG, type TreeNode } from "../onboarding/tree.ts";
+import {
+  findNode,
+  isAuxFolder,
+  type ModuleTree,
+  type ServiceRepo,
+  TOO_BIG,
+  type TreeNode,
+} from "../onboarding/tree.ts";
 import { shortRunId } from "../storage/runStore.ts";
 import { type DiffFile, type Html, html, markdownToHtml } from "./html.ts";
 import { plural, t, th, when } from "./i18n.ts";
@@ -48,7 +56,24 @@ export interface ModulesPage {
   readonly conflict?: { readonly file: string; readonly diff: readonly DiffFile[] };
   readonly root: string;
   readonly counts?: KnowledgeCounts;
+  /** The knowledge repository's page: its services' modules; where a clone's path is set in the map. */
+  readonly meta?: { readonly config: string };
 }
+
+/** The service a path of the knowledge repository's Modules is under. */
+export function serviceOf(tree: ModuleTree, path: string): ServiceRepo | undefined {
+  return tree.modules.find((m) => m.service && (path === m.path || path.startsWith(`${m.path}/`)))?.service;
+}
+
+/** A path of the page as the service's module: `orders-api/src/order` → `src/order` in its clone. */
+export function moduleInService(service: ServiceRepo, path: string): string {
+  return path === service.name ? "" : path.slice(service.name.length + 1);
+}
+
+const tilde = (path: string) => {
+  const home = homedir();
+  return path === home || path.startsWith(`${home}/`) ? `~${path.slice(home.length)}` : path;
+};
 
 /** The latest research of every module: queued launches, then the newest run about it. */
 export function researchOf(
@@ -132,7 +157,7 @@ function badge(node: TreeNode, r: Research | undefined): Html {
   }
   const c = node.coverage;
   if (!c)
-    return node.tooBig && node.children.length > 0
+    return (node.tooBig || node.service) && node.children.length > 0
       ? html`<span class="pill plain">${t("by parts")}</span>`
       : html`<span class="pill wait">${t("no document")}</span>`;
   if (c.staleCommits) return html`<span class="pill wait">${t("may be stale")}</span>`;
@@ -149,6 +174,8 @@ export function researchFirst(modules: readonly TreeNode[], limit = 6): TreeNode
   const out: TreeNode[] = [];
   const walk = (n: TreeNode) => {
     if (isAuxFolder(n.name)) return;
+    // a service is researched by its modules
+    if (n.service) return n.children.forEach(walk);
     if (!n.tooBig) {
       if (needsResearch(n)) out.push(n);
       else n.children.forEach(walk);
@@ -170,10 +197,23 @@ export function needsResearch(node: TreeNode): boolean {
 function treeHtml(page: ModulesPage): Html {
   const sel = page.path ?? "";
   const keep = (n: TreeNode): boolean =>
-    !page.need || needsResearch(n) || page.research.has(n.path) || n.children.some(keep);
+    !page.need ||
+    (n.service ? n.service.cloned && n.children.some(keep) : needsResearch(n)) ||
+    page.research.has(n.path) ||
+    n.children.some(keep);
   const row = (n: TreeNode) => {
     const current = n.path === sel;
-    return html`<a class="mrow${current ? " current" : ""}" href="${here(n.path, page.need ? "&need=1" : "")}"${current ? html` aria-current="true"` : ""}><span class="mname">${n.module ? n.path : `${n.name}/`}</span>${badge(n, page.research.get(n.path))}<span class="mfiles${n.tooBig ? " big" : ""}" title="${n.files} files, about ${n.lines} lines">${n.files}</span></a>`;
+    const svc = n.service;
+    const name = svc
+      ? html`<b>${svc.name}</b><span class="hint mrepo">${svc.cloned ? tilde(svc.repo) : t("not on this machine")}</span>`
+      : n.module
+        ? (n.label ?? n.path)
+        : `${n.name}/`;
+    const files =
+      svc && !svc.cloned
+        ? html`<span class="pill plain">${t("no clone")}</span><span class="mfiles">—</span>`
+        : html`${badge(n, page.research.get(n.path))}<span class="mfiles${n.tooBig ? " big" : ""}" title="${n.files} files, about ${n.lines} lines">${n.files}</span>`;
+    return html`<a class="mrow${current ? " current" : ""}${svc && !svc.cloned ? " off" : ""}" href="${here(n.path, page.need ? "&need=1" : "")}"${current ? html` aria-current="true"` : ""}><span class="mname">${name}</span>${files}</a>`;
   };
   const node = (n: TreeNode): Html => {
     const kids = n.children.filter(keep);
@@ -184,7 +224,7 @@ function treeHtml(page: ModulesPage): Html {
   const tops = page.tree.modules.filter(keep);
   return html`<nav class="panel mtree" aria-label="${t("Modules and folders")}">
 <div class="mhead"><span>${t("Module / folder")}</span><span>${t("Knowledge")}</span><span>${t("Files")}</span></div>
-${tops.length > 0 ? html`<ul>${tops.map(node)}</ul>` : html`<p class="empty">${page.need ? t("Every module has a document.") : t("No source modules in this repository.")}</p>`}
+${tops.length > 0 ? html`<ul>${tops.map(node)}</ul>` : html`<p class="empty">${page.need ? t("Every module has a document.") : page.meta ? t("No services in the map.") : t("No source modules in this repository.")}</p>`}
 </nav>`;
 }
 
@@ -197,12 +237,13 @@ ${page.need ? html`<input type="hidden" name="need" value="1">` : ""}
 </form>`;
 }
 
-function factsHtml(n: TreeNode): Html {
+function factsHtml(n: TreeNode, svc?: ServiceRepo): Html {
   const c = n.coverage;
   const knowledge = c
     ? html`<code>${c.doc}</code>${c.source ? html` <span class="hint">${t("(the team's documentation, read-only)")}</span>` : ""}${c.kind === "via" ? html` <span class="hint">${t("— about a wider folder")}</span>` : ""}${c.kind === "generated" ? html` <span class="hint">${t("— generated, nobody took it over")}</span>` : ""}${c.staleCommits ? html` <span class="pill wait">${t("{n} here since its last edit", { n: plural(c.staleCommits, "commit") })}</span>` : ""}`
     : html`<span class="hint">${t("none")}</span>`;
   return html`<dl class="mfacts">
+${svc ? html`<dt>${t("service")}</dt><dd><b>${svc.name}</b> · <code>${tilde(svc.repo)}</code></dd>` : ""}
 <dt>${t("from the scan")}</dt><dd>${t("{files}, about {lines}", { files: plural(n.files, "file"), lines: plural(n.lines, "line") })}${n.languages.length > 0 ? ` (${n.languages.join(", ")})` : ""}</dd>
 <dt>${t("knowledge now")}</dt><dd>${knowledge}</dd>
 ${n.also.length > 0 ? html`<dt>${t("also applies")}</dt><dd>${n.also.map((d, i) => html`${i > 0 ? ", " : ""}<a href="/knowledge/docs?doc=${encodeURIComponent(d)}"><code>${d}</code></a>`)} <span class="hint">${t("— wider documents, not about this folder")}</span></dd>` : ""}
@@ -216,14 +257,23 @@ const cost = (n: TreeNode) =>
       ? t("usually 30–45 tool calls, 0.5–0.9M input tokens")
       : t("usually 20–35 tool calls, 0.3–0.6M input tokens");
 
-function startHtml(n: TreeNode, actions: Actions, again?: string): Html {
+function startHtml(n: TreeNode, actions: Actions, again?: string, svc?: ServiceRepo): Html {
+  const module = svc ? moduleInService(svc, n.path) : n.path;
   return form(
     actions,
     "/knowledge/modules/research",
     html`<input type="hidden" name="path" value="${n.path}">
 <label class="field">${t("What matters")} <span class="hint">${t("optional — goes into the agent's task")}</span><textarea name="note" rows="3" maxlength="2000" placeholder="${t("e.g. how events are named and where the catalogue lives; skip the legacy adapter")}">${again ?? ""}</textarea></label>
 <p class="hint">${th("Agent {agent}, read-only, stays inside {path}: {cost}. One research at a time; the next one waits in the queue.", { agent: html`<code>onboard-mapper</code>`, path: html`<code>${n.path}/</code>`, cost: cost(n) })}</p>
-<div class="row"><button type="submit" class="btn primary">${again === undefined ? t("Start research") : t("Research again")}</button><span class="hint">${th("Same as {cmd}", { cmd: html`<code>jarvis onboard --module ${n.path}</code>` })}</span></div>`,
+<div class="row"><button type="submit" class="btn primary">${again === undefined ? t("Start research") : t("Research again")}</button><span class="hint">${
+      svc
+        ? th("Runs in {repo} as {cmd}; the candidate goes to {dir}", {
+            repo: html`<code>${tilde(svc.repo)}</code>`,
+            cmd: html`<code>jarvis onboard --module ${module}</code>`,
+            dir: html`<code>${svc.knowledgeDir}/</code>`,
+          })
+        : th("Same as {cmd}", { cmd: html`<code>jarvis onboard --module ${n.path}</code>` })
+    }</span></div>`,
     ' class="mstart"',
   );
 }
@@ -255,7 +305,8 @@ function candidateHtml(
   return candidateReviewHtml(
     r.candidate,
     r.run,
-    page.root,
+    // where the research ran: a service's clone on the knowledge repository's page
+    r.run.workspace.repoRoot,
     actions,
     page.conflict ? { conflict: page.conflict } : {},
   );
@@ -279,7 +330,8 @@ export function candidateReviewHtml(
   const dropped = c.doc.dropped ?? [];
   const target = targetOf(page.root, c, undefined);
   const existing = existingAt(target);
-  const rel = target.slice(page.root.length + 1);
+  // as the person finds it: in the knowledge repository for a service (ADR-0025)
+  const rel = rootRelative(layoutOf(page.root).meta?.root ?? page.root, target);
   const taken = existing && !existing.generated;
   const accept = form(
     actions,
@@ -329,14 +381,17 @@ function researchHtml(page: ModulesPage, actions?: Actions): Html {
   const n = page.selected;
   if (!n)
     return html`<section class="panel mresearch" data-live="research"><p class="empty">${page.path ? th("{path} is not a folder of a module here.", { path: html`<code>${page.path}</code>` }) : t("Pick a module or a folder on the left, or type its path.")}</p></section>`;
+  const svc = page.meta ? serviceOf(page.tree, n.path) : undefined;
+  if (n.service && !n.service.cloned) return noCloneHtml(n.service, page);
   const r = page.research.get(n.path);
   const can = actions && page.canStart ? actions : undefined;
   let body: Html;
   if (!r || r.kind === "rejected") {
     if (!can)
       body = html`<p class="hint">${th("Starting research is off here (read-only, or {ui} without a launcher). In a terminal: {cmd}", { ui: html`<code>jarvis ui</code>`, cmd: html`<code>jarvis onboard --module ${n.path}</code>` })}</p>`;
-    else if (n.tooBig && n.children.length > 0) body = partsHtml(n, page, can);
-    else body = startHtml(n, can);
+    // a whole service is researched by its modules: one pass maps a module, not a repository
+    else if ((n.tooBig || n.service) && n.children.length > 0) body = partsHtml(n, page, can);
+    else body = startHtml(n, can, undefined, svc);
   } else if (r.kind === "queued")
     body = html`<p>${r.position === 1 ? t("Queued — next. Starts when the research in front of it ends.") : t("Queued — {n} in line. Starts when the research in front of it ends.", { n: r.position })}</p>${can ? form(can, "/knowledge/modules/unqueue", html`<input type="hidden" name="launch" value="${r.launch}"><input type="hidden" name="path" value="${n.path}"><button type="submit" class="btn">${t("Remove from the queue")}</button>`) : ""}`;
   else if (r.kind === "starting")
@@ -349,19 +404,30 @@ function researchHtml(page: ModulesPage, actions?: Actions): Html {
   else if (r.kind === "waiting")
     body = html`<div class="banner info">${t("The research waits for you (a budget, or the agent asks).")}</div><p><a class="btn primary" href="${runHref(r.run)}">${t("Open the run")}</a></p>`;
   else if (r.kind === "failed")
-    body = html`<div class="banner bad">${t("The last research found nothing to keep: {reason}.", { reason: r.reason })} <a href="${runHref(r.run)}">run ${shortRunId(r.run.id)}</a></div>${can ? startHtml(n, can, "") : ""}`;
+    body = html`<div class="banner bad">${t("The last research found nothing to keep: {reason}.", { reason: r.reason })} <a href="${runHref(r.run)}">run ${shortRunId(r.run.id)}</a></div>${can ? startHtml(n, can, "", svc) : ""}`;
   else if (r.kind === "accepted")
     body = html`<div class="banner ok">${th("Accepted: {file} is in the working copy — the next run already finds it. Commit it with the drafts below.", { file: html`<code>${r.file}</code>` })}</div>
 ${actions ? form(actions, "/knowledge/open", html`<input type="hidden" name="file" value="${r.file}"><input type="hidden" name="path" value="${n.path}"><button type="submit" class="btn">${t("Open in editor")}</button>`) : ""}
-${can ? html`<details class="magain"><summary>${t("Research again")}</summary>${startHtml(n, can, "")}</details>` : ""}`;
+${can ? html`<details class="magain"><summary>${t("Research again")}</summary>${startHtml(n, can, "", svc)}</details>` : ""}`;
   else
     body = actions
       ? candidateHtml(r, page, actions)
       : html`<p class="hint">${th("A candidate waits: {cmd}", { cmd: html`<code>jarvis candidates show ${r.candidate.name}</code>` })}</p>`;
   return html`<section class="panel mresearch" aria-labelledby="research-title" data-live="research">
 <div class="row"><h2 id="research-title">${th("Research {path}", { path: html`<code>${n.path}</code>` })}</h2>${badge(n, r)}</div>
-${factsHtml(n)}
+${factsHtml(n, svc)}
 ${body}
+</section>`;
+}
+
+/** A service of the map not cloned on this machine: what is known of it, and how its modules appear. */
+function noCloneHtml(svc: ServiceRepo, page: ModulesPage): Html {
+  return html`<section class="panel mresearch" aria-labelledby="research-title" data-live="research">
+<div class="row"><h2 id="research-title"><code>${svc.name}</code></h2><span class="pill plain">${t("no clone")}</span></div>
+<dl class="mfacts"><dt>${t("in the map")}</dt><dd><code>${tilde(svc.repo)}</code></dd>
+<dt>${t("knowledge now")}</dt><dd><code>${svc.knowledgeDir}/</code></dd></dl>
+<div class="banner info">${t("Its code is not on this machine: the modules come from its repository. Clone it there, and the page shows its tree.")}</div>
+<p class="hint">${th("A clone elsewhere: its path in {key} of {file}.", { key: html`<code>repos.${svc.name}</code>`, file: html`<code>${page.meta?.config ?? ""}</code>` })}</p>
 </section>`;
 }
 
@@ -375,10 +441,22 @@ ${actions ? form(actions, "/knowledge/commit", html`<input type="hidden" name="b
 </section>`;
 }
 
+// t("Services of the map and the modules of their code. An agent maps a module in the service's repository; every claim is checked against the code; what survives waits here. Nothing reaches {dir} until you accept it.")
+// t("An agent maps a module or a folder; every claim is checked against the code; what survives waits here. Nothing reaches {dir} until you accept it.")
 export function modulesContent(page: ModulesPage, actions?: Actions, notice?: Html): Html {
   return html`${knowledgeTabs("modules", page.counts)}
 ${notice ?? ""}
-<p class="hint">${th("An agent maps a module or a folder; every claim is checked against the code; what survives waits here. Nothing reaches {dir} until you accept it.", { dir: html`<code>.jarvis/knowledge/</code>` })}</p>
+<p class="hint">${
+    page.meta
+      ? th(
+          "Services of the map and the modules of their code. An agent maps a module in the service's repository; every claim is checked against the code; what survives waits here. Nothing reaches {dir} until you accept it.",
+          { dir: html`<code>knowledge/services/</code>` },
+        )
+      : th(
+          "An agent maps a module or a folder; every claim is checked against the code; what survives waits here. Nothing reaches {dir} until you accept it.",
+          { dir: html`<code>.jarvis/knowledge/</code>` },
+        )
+  }</p>
 <div class="cols mcols">
 <div class="mleft">
 ${pathField(page)}

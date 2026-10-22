@@ -790,6 +790,8 @@ p.sv-pair{margin:0;font-size:14px}
 .mrow{min-height:44px;box-sizing:border-box;border-top:1px solid var(--line-soft);color:var(--ink);text-decoration:none}
 .mrow:hover{background:var(--sunken)}
 .mrow.current{background:var(--accent-soft);box-shadow:inset 3px 0 0 var(--accent)}
+.mrepo{font-size:11.5px;margin-left:8px;font-weight:400}
+.mrow.off{opacity:.8}
 .mname{font-family:var(--mono);font-size:13px;overflow-wrap:anywhere}
 .mtree li>.mrow .mname{padding-left:16px}
 .mfiles{font-family:var(--mono);font-size:12px;color:var(--muted);text-align:right}

@@ -117,7 +117,7 @@ import { loadSkills } from "../knowledge/skills.ts";
 import { knowledgeRootsOf } from "../knowledge/sources.ts";
 import { loadStandards } from "../knowledge/standards.ts";
 import { NOTE_MAX } from "../onboarding/deep.ts";
-import { findNode, type ModuleTree, moduleTree } from "../onboarding/tree.ts";
+import { findNode, type ModuleTree, moduleTree, type ServiceRepo, servicesTree } from "../onboarding/tree.ts";
 import { UnresolvedEffectError } from "../orchestration/effects.ts";
 import type { LocalWorkflowEngine } from "../orchestration/runtime.ts";
 import { deleteBranchKeepingTip, WorktreeError, WorktreeWorkspace } from "../orchestration/worktree.ts";
@@ -148,9 +148,11 @@ import {
   type Draft,
   draftsHtml,
   type ModulesPage,
+  moduleInService,
   modulesContent,
   researchFirst,
   researchOf,
+  serviceOf,
 } from "./modules.ts";
 import { crossNoteHtml, placesOf, workflowOfChoice } from "./newTask.ts";
 import {
@@ -686,6 +688,42 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
   const root = options.projectRoot;
   const roots = () => knowledgeRootsOf(runtime.loaded, root);
   let treeCache: { key: string; tree: Promise<ModuleTree> } | undefined;
+  /**
+   * `jarvis ui` in the knowledge repository (ADR-0025): Modules are its services' modules, each
+   * researched in the service's clone — not the knowledge repository's own folders.
+   */
+  const metaRoot = (): string | undefined => {
+    const meta = runtime.loaded.meta;
+    return meta && root && resolvePath(meta.root) === resolvePath(root) ? meta.root : undefined;
+  };
+  const servicesOfMap = (): ServiceRepo[] => {
+    const meta = runtime.loaded.meta;
+    const at = metaRoot();
+    if (!meta || !at) return [];
+    return Object.entries(meta.repos).map(([name, path]) => ({
+      name,
+      repo: path,
+      cloned: existsSync(joinPath(path, ".git")),
+      knowledgeDir: rootRelative(at, layoutOf(path).knowledgeDir),
+    }));
+  };
+  /** Where a path of the page is researched: the service's clone and its module there, or this repository. */
+  const placeOf = (tree: ModuleTree, path: string): { repoRoot: string; module: string } | undefined => {
+    if (!metaRoot()) return root ? { repoRoot: root, module: path } : undefined;
+    const svc = serviceOf(tree, path);
+    if (!svc?.cloned) return undefined;
+    const module = moduleInService(svc, path);
+    return module ? { repoRoot: svc.repo, module } : undefined;
+  };
+  /** A module research's path on the page: under its service's name on the knowledge repository's. */
+  const pagePathOf = (repoRoot: string, module: string): string => {
+    if (!metaRoot()) return module;
+    const svc = servicesOfMap().find((x) => resolvePath(x.repo) === resolvePath(repoRoot));
+    return svc ? `${svc.name}/${module}` : module;
+  };
+  /** The repository a candidate's research ran in. */
+  const rootOfCandidate = (c: Candidate): string =>
+    runtime.runs.get(c.artifact.runId)?.workspace.repoRoot ?? (root as string);
   /** The tree for HEAD and the knowledge as it is now (an accepted draft changes the coverage). */
   /**
    * Where the knowledge drafts are versioned: the repository's `.jarvis/`, or for a service its
@@ -710,13 +748,20 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
     };
   };
   const treeOf = async (): Promise<ModuleTree> => {
-    const dir = root as string;
-    const head = (await git(["rev-parse", "HEAD"], dir)).stdout.trim();
+    const services = servicesOfMap();
+    const dirs = metaRoot() ? services.filter((x) => x.cloned).map((x) => x.repo) : [root as string];
+    const heads = await Promise.all(
+      dirs.map(async (d) => (await git(["rev-parse", "HEAD"], d)).stdout.trim()),
+    );
     const at = draftsAt();
     const knowledge = await git(["status", "--porcelain", "--", ...at.paths.slice(0, 2)], at.cwd);
-    const key = `${head}|${knowledge.stdout}`;
+    const key = `${services.map((x) => `${x.name}:${x.cloned}`).join(",")}|${heads.join(",")}|${knowledge.stdout}`;
     if (treeCache?.key !== key) {
-      const tree = moduleTree(roots());
+      const tree = metaRoot()
+        ? servicesTree(
+            services.map((service) => ({ service, roots: knowledgeRootsOf(runtime.loaded, service.repo) })),
+          )
+        : moduleTree(roots());
       treeCache = { key, tree };
       tree.catch(() => {
         if (treeCache?.tree === tree) treeCache = undefined;
@@ -741,7 +786,7 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
   const conflictFor = async (candidate: Candidate) => {
     if (!root) return undefined;
     const r = { candidate };
-    const file = targetOf(root, r.candidate, undefined);
+    const file = targetOf(rootOfCandidate(candidate), r.candidate, undefined);
     const before = existingAt(file);
     if (!before || before.generated) return undefined;
     const dir = mkdtempSync(joinPath(tmpdir(), "jarvis-candidate-"));
@@ -822,14 +867,14 @@ ${branchExists ? html`<label class="row"><input type="checkbox" name="branch" va
     const c = candidatesOf(runtime, (x) => x.id === run.id).at(-1);
     if (!c) return undefined;
     const module = c.doc.module ?? "";
-    const modulePage = `/knowledge/modules?path=${encodeURIComponent(module)}`;
+    const modulePage = `/knowledge/modules?path=${encodeURIComponent(pagePathOf(run.workspace.repoRoot, module))}`;
     if (c.decision)
       return html`<div class="banner ${c.decision === "approve" ? "ok" : "info"}">${c.decision === "approve" ? "Accepted" : "Discarded"} — <a href="${modulePage}">the module <code>${module}</code></a></div>`;
     if (!actions)
       return html`<div class="banner info">The candidate waits for a review: <a href="${modulePage}">the module <code>${module}</code></a></div>`;
     const conflict = await conflictFor(c);
     return html`<section class="panel mresearch" aria-labelledby="candidate"><h2 id="candidate">Review what the research found: <code>${module}</code></h2>
-${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)}`, ...(conflict ? { conflict } : {}) })}
+${candidateReviewHtml(c, run, run.workspace.repoRoot, actions, { back: `/runs/${shortRunId(run.id)}`, ...(conflict ? { conflict } : {}) })}
 </section>`;
   };
   const knowledgeNotice = (r: Request): Html | undefined => {
@@ -867,13 +912,24 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
     };
     return n ? notices[n] : undefined;
   };
+  /** Module research by the page's paths: each service's research under its name on the knowledge repository's. */
+  const researchHere = () => {
+    const launches = options.launcher?.list() ?? [];
+    if (!metaRoot()) return researchOf(runtime, launches, root as string);
+    const out = new Map<string, ReturnType<typeof researchOf> extends Map<string, infer V> ? V : never>();
+    for (const svc of servicesOfMap().filter((x) => x.cloned)) {
+      const mine = launches.filter((l) => resolvePath(l.repoRoot) === resolvePath(svc.repo));
+      for (const [module, r] of researchOf(runtime, mine, svc.repo)) out.set(`${svc.name}/${module}`, r);
+    }
+    return out;
+  };
   const modulesPageOf = async (r: Request): Promise<void> => {
     if (!root || !existsSync(root))
       return notFound(r, "Knowledge needs a repository: start jarvis ui in one.");
     const tree = await treeOf();
     const path = (r.url.searchParams.get("path") ?? "").trim().replace(/\/+$/, "") || undefined;
     const selected = path ? findNode(tree, path) : undefined;
-    const research = researchOf(runtime, options.launcher?.list() ?? [], root);
+    const research = researchHere();
     const base = {
       tree,
       ...(path ? { path } : {}),
@@ -884,6 +940,9 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
       canStart: !!options.launcher && !!actions,
       root,
       counts: countsOf(),
+      ...(metaRoot() && runtime.loaded.meta
+        ? { meta: { config: rootRelative(root, metaConfigFile(runtime.loaded.meta.root)) } }
+        : {}),
     };
     const conflict = await conflictOf(base);
     const running = [...research.values()].some((x) =>
@@ -950,10 +1009,15 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
         Boolean,
       );
       if (paths.length === 0) return redirect(r, back(pathOf(), "no-parts"));
-      if (paths.some((p) => !findNode(tree, p))) return redirect(r, back(paths[0] as string, "no-path"));
+      const places = paths.map((p) => (findNode(tree, p) ? placeOf(tree, p) : undefined));
+      if (places.some((p) => !p)) return redirect(r, back(paths[0] as string, "no-path"));
       const note = (form.get("note") ?? "").trim().slice(0, NOTE_MAX);
-      const launches = paths.map((module) =>
-        options.launcher?.startModule({ module, repoRoot: root, ...(note ? { note } : {}) }),
+      const launches = places.map((p) =>
+        options.launcher?.startModule({
+          module: (p as { module: string }).module,
+          repoRoot: (p as { repoRoot: string }).repoRoot,
+          ...(note ? { note } : {}),
+        }),
       );
       const waiting = launches.filter((l) => l?.queued).length;
       return redirect(
@@ -1010,10 +1074,12 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
     const c = all.find((x) => x.artifact.artifactId === id);
     if (!c) return notFound(r, "No such candidate.");
     const module = c.doc.module ?? "";
+    const where = rootOfCandidate(c);
+    const pagePath = pagePathOf(where, module);
     // decided on the research's run page: back there
     const onRun = /^\/runs\/[A-Za-z0-9_-]+$/.exec(form.get("back") ?? "")?.[0];
-    const after = (path: string, notice: string, extra = "") =>
-      onRun ? `${onRun}?notice=${notice}${extra}` : back(path, notice, extra);
+    const after = (_path: string, notice: string, extra = "") =>
+      onRun ? `${onRun}?notice=${notice}${extra}` : back(pagePath, notice, extra);
     if (c.decision) return redirect(r, after(module, "decided"));
     const who = options.actor ? await options.actor() : undefined;
     if (!who) return redirect(r, after(module, "actor"));
@@ -1023,7 +1089,7 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
       const fileId = (form.get("id") ?? "").trim();
       try {
         const done = promoteCandidate(runtime, {
-          root,
+          root: where,
           candidate: c,
           actor: who,
           ...(/^[a-z0-9][a-z0-9._-]{0,59}$/.test(fileId) ? { id: fileId } : {}),
@@ -1050,7 +1116,7 @@ ${candidateReviewHtml(c, run, root, actions, { back: `/runs/${shortRunId(run.id)
         .filter(Boolean)
         .join("\n\n")
         .slice(0, NOTE_MAX);
-      options.launcher.startModule({ module, repoRoot: root, ...(note ? { note } : {}) });
+      options.launcher.startModule({ module, repoRoot: where, ...(note ? { note } : {}) });
       return redirect(r, after(module, "again"));
     }
     return redirect(r, after(module, "rejected"));

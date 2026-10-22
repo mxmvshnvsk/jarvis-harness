@@ -665,6 +665,19 @@ export const RU: Readonly<Record<string, string>> = {
   "Research again": "Исследовать заново",
   "Research {path}": "Исследование {path}",
   "Same as {cmd}": "То же, что {cmd}",
+  // ---- Modules of a knowledge repository (ADR-0025)
+  "no clone": "нет клона",
+  "No services in the map.": "В карте нет сервисов.",
+  service: "сервис",
+  "Runs in {repo} as {cmd}; the candidate goes to {dir}":
+    "Запускается в {repo} как {cmd}; кандидат ляжет в {dir}",
+  "in the map": "в карте",
+  "Its code is not on this machine: the modules come from its repository. Clone it there, and the page shows its tree.":
+    "Кода сервиса нет на этой машине, а модули берутся из его репозитория. Склонируйте его туда, и здесь появится дерево.",
+  "A clone elsewhere: its path in {key} of {file}.":
+    "Если клон лежит в другом месте, укажите путь в {key} файла {file}.",
+  "Services of the map and the modules of their code. An agent maps a module in the service's repository; every claim is checked against the code; what survives waits here. Nothing reaches {dir} until you accept it.":
+    "Сервисы карты и модули их кода. Агент описывает модуль в репозитории сервиса, каждое утверждение проверяется по коду, прошедшее проверку ждёт здесь. В {dir} ничего не попадёт, пока вы не примете.",
   "optional — the same note for every part": "необязательно — одна заметка для всех частей",
   "Research the picked parts": "Исследовать выбранные части",
   "Check these first": "Сначала проверьте это",
