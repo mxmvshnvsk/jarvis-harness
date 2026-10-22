@@ -13,6 +13,10 @@ import { reportProblem } from "./problems.ts";
 export const ScopeSchema = z.strictObject({
   stacks: z.array(z.string().min(1)).default([]),
   paths: z.array(z.string().min(1)).default([]),
+  /** Kinds of task it applies to (documented in run.ts and ADR-0020; a standard with them failed to load). */
+  kinds: z.array(z.string().min(1)).optional(),
+  /** The agents it is for; none — every agent the paths and stacks match. */
+  agents: z.array(z.string().min(1)).optional(),
 });
 export type Scope = z.infer<typeof ScopeSchema>;
 

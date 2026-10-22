@@ -111,18 +111,32 @@ export async function checkStandards(input: {
   const checked: string[] = [];
   const skipped: CheckReport["skipped"] = [];
   const violations: Violation[] = [];
+  // a tool several standards name runs once (pilot: project.lint ran once per standard)
+  const tools = new Map<string, Promise<{ ok: boolean; text: string; denied?: string }>>();
   for (const s of input.standards) {
     if (s.verification.kind === "semantic" || !s.verification.check) continue;
     const ref = `standard:${s.id}@${s.version}`;
     const check = s.verification.check;
+    // the standard's own paths narrow the files it is checked on
+    const inScope =
+      s.scope.paths.length > 0 ? input.files.filter((f) => globMatches(f, s.scope.paths)) : input.files;
     if (check.pattern) {
-      const matching = input.files.filter((f) => globMatches(f, [check.pattern?.glob as string]));
+      const matching = inScope.filter((f) => globMatches(f, [check.pattern?.glob as string]));
       checked.push(ref);
       for (const file of matching) {
         const full = join(input.workspace, file);
         if (!existsSync(full)) continue;
         const text = readFileSync(full, "utf8");
-        if (check.pattern.must && !regex(check.pattern.must).test(text)) {
+        const must = check.pattern.must ? safeRegex(check.pattern.must) : undefined;
+        const mustNot = check.pattern.mustNot ? safeRegex(check.pattern.mustNot) : undefined;
+        if (must instanceof Error || mustNot instanceof Error) {
+          skipped.push({
+            standard: ref,
+            reason: `its pattern is not a valid regular expression: ${(must instanceof Error ? must : (mustNot as Error)).message}`,
+          });
+          break;
+        }
+        if (must && !must.test(text)) {
           violations.push({
             standardId: s.id,
             version: s.version,
@@ -131,8 +145,8 @@ export async function checkStandards(input: {
             detail: `missing required pattern /${check.pattern.must}/`,
           });
         }
-        if (check.pattern.mustNot) {
-          const re = regex(check.pattern.mustNot);
+        if (mustNot) {
+          const re = mustNot;
           const only =
             check.pattern.lines === "added" && added ? (added.get(file) ?? new Set<number>()) : "all";
           text.split("\n").forEach((lineText, i) => {
@@ -155,7 +169,14 @@ export async function checkStandards(input: {
         skipped.push({ standard: ref, reason: "tool checks need a run context" });
         continue;
       }
-      const result = await input.runTool(check.tool, check.args);
+      if (s.scope.paths.length > 0 && inScope.length === 0) continue;
+      const key = `${check.tool}\0${JSON.stringify(check.args ?? {})}`;
+      let running = tools.get(key);
+      if (!running) {
+        running = input.runTool(check.tool, check.args);
+        tools.set(key, running);
+      }
+      const result = await running;
       if (result.denied) {
         skipped.push({ standard: ref, reason: `${check.tool} denied: ${result.denied}` });
         continue;
@@ -172,4 +193,13 @@ export async function checkStandards(input: {
     }
   }
   return { checked, skipped, violations, files: [...input.files] };
+}
+
+/** A standard's pattern as a RegExp, or why it is not one (one bad pattern failed the whole check). */
+function safeRegex(source: string): RegExp | Error {
+  try {
+    return regex(source);
+  } catch (error) {
+    return error instanceof Error ? error : new Error(String(error));
+  }
 }

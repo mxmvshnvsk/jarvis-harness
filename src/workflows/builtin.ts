@@ -139,7 +139,7 @@ steps:
     agent: review
     phase: review
     # its own previous version (a later round) and the checks: what to check first, what already ran
-    inputs: [spec, plan, implementation, tests, checks, docs, telemetry, review]
+    inputs: [spec, plan, implementation, tests, checks, standards-check, docs, telemetry, review]
     outputs: [review]
     transitions:
       onSuccess: approve-impl

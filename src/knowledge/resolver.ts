@@ -32,6 +32,8 @@ export interface KnowledgeDoc {
   readonly sha: string;
   readonly scope: Scope & { agents: string[] };
   readonly tags: string[];
+  /** Written by `jarvis onboard` (not a person): facts of when it ran, possibly older than the code. */
+  readonly generated?: boolean;
 }
 
 /** Name prefix of a knowledge repository's shared documents (`landscape.md` → `common/landscape.md`). */
@@ -90,9 +92,12 @@ export function loadKnowledgeDocs(roots: KnowledgeRoots): KnowledgeDoc[] {
           `front matter: ${fm.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`,
         );
       const meta = fm.success ? fm.data : { tags: [], paths: [], stacks: [], agents: [] };
+      // written by jarvis onboard (its marker line): said to the agent; the marker itself is not text
+      const generated = /<!-- jarvis:onboard/.test(raw);
       out.push({
         name: `${prefix}${f}`,
-        text: body.trim(),
+        text: body.replace(/^<!-- jarvis:[^\n]*-->\n?/gm, "").trim(),
+        ...(generated ? { generated: true } : {}),
         sha: createHash("sha256").update(raw).digest("hex").slice(0, 12),
         scope: { stacks: meta.stacks, paths: meta.paths, agents: meta.agents },
         tags: meta.tags,
@@ -153,6 +158,8 @@ export interface EngineeringContextPackage {
   readonly skillsBy: { readonly how: "step" | "picked"; readonly missing?: readonly string[] };
   /** `standard:ID@v`, `skill:id@v`, `knowledge:name#sha` — goes into artifact provenance. */
   readonly provenance: string[];
+  /** The glossary's entries the task names (src/agents/knowledge.ts): shown to the agent with their code. */
+  readonly terms?: readonly import("./retrieval/glossary.ts").GlossaryEntry[];
 }
 
 interface Match {
@@ -166,7 +173,10 @@ interface Match {
   readonly unsure?: boolean;
 }
 
-function matchScope(scope: Scope & { agents?: string[]; kinds?: string[] }, task: TaskScope): Match {
+function matchScope(
+  scope: Scope & { agents?: string[] | undefined; kinds?: string[] | undefined },
+  task: TaskScope,
+): Match {
   let specificity = 0;
   if (scope.stacks.length > 0) {
     if (task.stacks.length > 0 && !scope.stacks.some((s) => task.stacks.includes(s)))

@@ -409,3 +409,40 @@ describe("stack detection", () => {
     expect(detectStacks(sb.project)).toEqual(["csharp", "dotnet", "node", "react", "typescript"]);
   });
 });
+
+describe("the knowledge an agent sees", () => {
+  const empty = {
+    task: { kind: "change" as const, affectedPaths: [], stacks: [], agentId: "implementation" },
+    skills: [],
+    standards: [],
+    deferredSkills: [],
+    catalogSkills: [],
+    skillsBy: { how: "picked" as const },
+    provenance: [],
+  };
+  const doc = (name: string, n: number) => ({
+    name,
+    text: `${name} `.repeat(n),
+    sha: "x",
+    scope: { stacks: [], paths: [], agents: [] },
+    tags: [],
+  });
+  it("in the index's order: the first documents whole, then a long one cut with what is left", () => {
+    const pkg = { ...empty, knowledge: [doc("first", 200), doc("second", 150), doc("third", 2000)] };
+    const text = renderPackage(pkg, 10_000, CONFIG);
+    expect(text).toContain(`## Knowledge first\n${"first ".repeat(200).trim()}`);
+    expect(text).toContain("## Knowledge second");
+    expect(text).toContain("## Knowledge third");
+    expect(text).toContain("truncated");
+  });
+  it("the glossary's terms of the task, with their code", () => {
+    const pkg = {
+      ...empty,
+      knowledge: [],
+      terms: [
+        { term: "повторная регистрация", synonyms: [], symbols: ["canRestartOnboarding"], sources: [] },
+      ],
+    };
+    expect(renderPackage(pkg, 4000, CONFIG)).toContain("- повторная регистрация → `canRestartOnboarding`");
+  });
+});

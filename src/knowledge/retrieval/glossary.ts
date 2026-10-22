@@ -64,7 +64,8 @@ export function expandQuery(
   // Inflected forms (заявка / заявки / заявку) match on a stem: the term minus its last two letters.
   const matches = (t: string) => {
     const term = t.toLowerCase();
-    if (lower.includes(term)) return true;
+    // the term as a word or a phrase, not inside another word («ТС» in «статус»)
+    if (wholeIn(lower, term)) return true;
     const words = term.split(/\s+/);
     return words.every((w) => {
       const stem = w.length >= 5 ? w.slice(0, w.length - 2) : w;
@@ -110,4 +111,17 @@ export function tokenize(text: string): string[] {
       (text.toLowerCase().match(/[\p{L}\p{N}_][\p{L}\p{N}_.-]*/gu) ?? []).filter((t) => t.length > 2),
     ),
   ];
+}
+
+function wholeIn(hay: string, needle: string): boolean {
+  if (!needle) return false;
+  const word = /[\p{L}\p{N}_]/u;
+  for (let from = 0; ; ) {
+    const at = hay.indexOf(needle, from);
+    if (at < 0) return false;
+    const before = hay[at - 1];
+    const after = hay[at + needle.length];
+    if (!(before && word.test(before)) && !(after && word.test(after))) return true;
+    from = at + 1;
+  }
 }

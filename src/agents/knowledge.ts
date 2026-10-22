@@ -2,6 +2,7 @@ import { type KindChoice, kindOfTask } from "../app/taskKind.ts";
 import { detectStackScopes, effectiveStacks, stacksForPaths } from "../capabilities/detector.ts";
 import type { TaskKind } from "../core/domain/run.ts";
 import { type EngineeringContextPackage, resolvePackage } from "../knowledge/resolver.ts";
+import { loadGlossary, matchTerms } from "../knowledge/retrieval/glossary.ts";
 import { rankKnowledge, refreshIndex } from "../knowledge/retrieval/service.ts";
 import { skillRef } from "../knowledge/skills.ts";
 import { knowledgeRootsOf } from "../knowledge/sources.ts";
@@ -107,7 +108,10 @@ export async function packageForStep(ctx: StepContext, agentId: string): Promise
       onRequest: pkg.deferredSkills.map(skillRef),
     },
   });
-  if (pkg.knowledge.length <= ctx.runtime.loaded.config.knowledge.retrieval.rankAbove) return pkg;
+  // the glossary's words the task uses, with the code they live in (whole words, not inside others)
+  const terms = matchTerms(queryOf(ctx), loadGlossary(workspace)).slice(0, 20);
+  const withTerms = terms.length > 0 ? { ...pkg, terms } : pkg;
+  if (pkg.knowledge.length <= ctx.runtime.loaded.config.knowledge.retrieval.rankAbove) return withTerms;
   // ADR-0015: the index keeps pace with the project and the run before it ranks.
   await refreshIndex(ctx.runtime, roots, ctx.run.id);
   const ranked = await rankKnowledge(ctx.runtime, roots, pkg.knowledge, queryOf(ctx));
@@ -127,7 +131,7 @@ export async function packageForStep(ctx: StepContext, agentId: string): Promise
     });
   }
   return {
-    ...pkg,
+    ...withTerms,
     knowledge: ranked.docs,
     provenance: [
       ...pkg.provenance.filter((p) => !p.startsWith("knowledge:")),

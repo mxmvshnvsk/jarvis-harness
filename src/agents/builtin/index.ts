@@ -262,7 +262,7 @@ Produce the result document.`,
   outcomeOf: (doc) =>
     typeof doc.verdict === "string" ? (doc.verdict === "approve" ? "ok" : doc.verdict) : undefined,
   limits: DEFAULT_LIMITS,
-  contextInputs: ["spec", "plan", "implementation", "tests", "checks", "review"],
+  contextInputs: ["spec", "plan", "implementation", "tests", "checks", "standards-check", "review"],
   baseChars: 100_000,
   // up to 60 calls, each re-sending the inputs and what it read where nothing is cached
   uncached: { baseChars: 60_000, workingSet: 40_000 },
