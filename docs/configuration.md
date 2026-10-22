@@ -39,6 +39,8 @@ relatedWork:                   # ADR-0026: ветки и PR смежных за�
     types: [Story]
     includes: ["Включает в себя", includes]      # имя связи со стороны Story
     includedIn: ["Включена в", "is included in"] # со стороны задачи
+    # другие команды: types: [Story, User Story], includes: [..., "is parent task of"], includedIn: [..., "is subtask of"];
+    # направление связи в Jira неважно — сопоставляется по именам; список заменяет умолчание, перечисляйте все нужные
     branch: "feature/{key}"    # ветка Story, одинаковая во всех репозиториях; задачи сравниваются с ней (или с destination своего PR)
     base: true                 # прогон задачи из Story начинается от её ветки и PR идёт в неё — если ветка есть в репо; иначе обычная база и предупреждение
   # Нужны capability jira.devInfo (Atlassian) и, если репозитория нет на машине, bitbucket.branch.commits,

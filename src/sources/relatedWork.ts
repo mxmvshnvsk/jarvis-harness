@@ -224,9 +224,8 @@ export interface Inclusion {
 
 /**
  * The issue's inclusion links (`relatedWork.story`): the issues it is included in (a task → its Story)
- * and the issues it includes (a Story → its tasks). Jira gives a link from the issue's side: the other
- * issue as `inwardIssue` — the other one's outward name points at this one («Включает в себя» it), so
- * this one is included in it; as `outwardIssue` — this one includes it.
+ * and the issues it includes (a Story → its tasks), by the link's names — «Включает в себя» / «Включена
+ * в», «is parent task of» / «is subtask of» — whichever way the link type is drawn.
  */
 export function inclusionsOf(
   text: string,
@@ -254,12 +253,19 @@ export function inclusionsOf(
     if (!t) continue;
     const inward = str(t.inward)?.toLowerCase();
     const outward = str(t.outward)?.toLowerCase();
-    const isInclusion = (!!inward && inNames.has(inward)) || (!!outward && outNames.has(outward));
-    if (!isInclusion) continue;
+    // by the names, whichever way the project's link type is drawn: X as the inward issue reads
+    // «X <outward> this» and «this <inward> X»; as the outward issue — «this <outward> X», «X <inward> this»
+    const has = (set: Set<string>, name?: string) => !!name && set.has(name);
     const other = issueOf(o.inward_issue ?? o.inwardIssue);
-    if (other) includedIn.push(other);
+    if (other) {
+      if (has(inNames, inward) || has(outNames, outward)) includedIn.push(other);
+      else if (has(outNames, inward) || has(inNames, outward)) includes.push(other);
+    }
     const mine = issueOf(o.outward_issue ?? o.outwardIssue);
-    if (mine) includes.push(mine);
+    if (mine) {
+      if (has(outNames, outward) || has(inNames, inward)) includes.push(mine);
+      else if (has(inNames, outward) || has(outNames, inward)) includedIn.push(mine);
+    }
   }
   const unique = (xs: Inclusion[]) => xs.filter((x, i) => xs.findIndex((y) => y.key === x.key) === i);
   return { includedIn: unique(includedIn), includes: unique(includes) };

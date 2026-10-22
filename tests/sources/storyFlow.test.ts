@@ -326,3 +326,44 @@ describe("the run's base: the Story's branch", () => {
     ).toBeUndefined();
   });
 });
+
+describe("another team's Stories: User Story, «is parent task of» / «is subtask of»", () => {
+  const names = {
+    types: ["Story", "User Story"],
+    includes: ["Включает в себя", "is parent task of"],
+    includedIn: ["Включена в", "is subtask of"],
+  };
+  const link = (
+    type: Record<string, string>,
+    side: "inward_issue" | "outward_issue",
+    key: string,
+    issuetype: string,
+  ) => ({
+    type,
+    [side]: { key, fields: { issuetype: { name: issuetype } } },
+  });
+  it("the task's Story, the Story's tasks — drawn either way", () => {
+    const drawn = { name: "Parent", inward: "is subtask of", outward: "is parent task of" };
+    const reversed = { name: "Child", inward: "is parent task of", outward: "is subtask of" };
+    const task = (l: unknown) => JSON.stringify({ key: "ABC-77", fields: { issuelinks: [l] } });
+    expect(storyOf(task(link(drawn, "inward_issue", "ABC-70", "User Story")), names)).toBe("ABC-70");
+    expect(storyOf(task(link(reversed, "outward_issue", "ABC-70", "User Story")), names)).toBe("ABC-70");
+    const story = JSON.stringify({
+      key: "ABC-70",
+      fields: {
+        issuelinks: [
+          link(drawn, "outward_issue", "ABC-77", "Front Task"),
+          link(reversed, "inward_issue", "ABC-78", "Middle Task"),
+        ],
+      },
+    });
+    expect(inclusionsOf(story, names).includes.map((i) => i.key)).toEqual(["ABC-77", "ABC-78"]);
+    // a link of another kind is not an inclusion
+    expect(
+      storyOf(
+        task(link({ inward: "is blocked by", outward: "blocks" }, "inward_issue", "ABC-70", "User Story")),
+        names,
+      ),
+    ).toBeUndefined();
+  });
+});
