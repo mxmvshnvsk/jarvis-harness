@@ -178,6 +178,11 @@ const McpServerCommonShape = {
   readOnly: z.boolean().default(false),
   /** How long one tool call may take (ms); the MCP client's default is 60 s (a large design frame takes longer). */
   timeoutMs: z.int().positive().optional(),
+  /**
+   * Calls per minute to this server, for the user across processes; over the profile's and
+   * `mcp.defaults`. 0 — no limit. A 429 from the server is waited out and asked again either way.
+   */
+  rateLimit: z.strictObject({ rpm: z.int().nonnegative() }).optional(),
 };
 
 const McpStdioEnvSchema = z.record(z.string(), z.string()).superRefine((env, ctx) => {
@@ -218,6 +223,10 @@ export type McpServerConfig = z.infer<typeof McpServerConfigSchema>;
 
 export const McpConfigSchema = z.strictObject({
   servers: z.record(z.string(), McpServerConfigSchema).prefault({}),
+  /** For every server without its own (or its profile's) value. */
+  defaults: z
+    .strictObject({ rateLimit: z.strictObject({ rpm: z.int().nonnegative() }).optional() })
+    .prefault({}),
 });
 
 /* ------------------------------------------------------------------------------------------------

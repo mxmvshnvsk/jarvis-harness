@@ -1134,6 +1134,28 @@ export function feedItem(e: StoredEvent): FeedItem | undefined {
         }),
         "ok",
       );
+    case "mcp.throttled": {
+      const server = str(p.server) ?? "?";
+      const secs = Math.max(1, Math.round((Number(p.waitMs) || 0) / 1000));
+      if (p.reason === "rpm")
+        return at(
+          t("{server}: its {rpm} calls a minute are used, waiting {s} s", {
+            server,
+            rpm: Number(p.rpm) || 0,
+            s: secs,
+          }),
+          "warn",
+        );
+      return at(
+        p.gaveUp === true
+          ? t("{server} answered 429 (too many requests) {n} times: gave up for now", {
+              server,
+              n: Number(p.attempt) || 0,
+            })
+          : t("{server} answered 429 (too many requests): asking again in {s} s", { server, s: secs }),
+        "warn",
+      );
+    }
     case "related.skipped":
       return at(t("related work not read: {why}", { why: str(p.reason) ?? "?" }));
     case "related.moved":

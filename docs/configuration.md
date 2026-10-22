@@ -295,6 +295,7 @@ mcp:
       network: intranet        # none | intranet | internet; по умолчанию — из профиля, иначе internet
       profile: atlassian       # atlassian | bitbucket | figma | { base: atlassian, map: { … } }
       timeoutMs: 60000         # на один вызов инструмента (по умолчанию 60 с)
+      rateLimit: { rpm: 150 }  # запросов в минуту на пользователя, по всем процессам; у профиля atlassian — 150
       allow: [jira.get, jira.search, jira.comment]   # пусто = все возможности профиля
       deny: [jira.transition]
     bitbucket:
@@ -308,6 +309,8 @@ mcp:
       transport: http
       url: https://mcp.corp.local/elastic
       readOnly: true           # все инструменты — чистые чтения; иначе каждый — непроверяемый эффект
+  defaults:
+    rateLimit: { rpm: 0 }      # для серверов без своего и без профильного значения; 0 — без лимита
 
 profiles:                      # ADR-0009 §1 — только сужение
   ci:

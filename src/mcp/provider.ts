@@ -2,6 +2,13 @@ import type { McpServerConfig, Network, ResolvedConfig } from "../core/config/sc
 import { capabilityMatches, matchesAny } from "../tools/registry.ts";
 import type { Capability, ToolContext, ToolOutput, ToolProvider } from "../tools/types.ts";
 import type { McpPool } from "./client/pool.ts";
+import {
+  type McpRateLimiter,
+  RETRY_WAIT_MAX_S,
+  RETRY_WAITS,
+  retryAfterOf,
+  tooManyRequests,
+} from "./client/rateLimit.ts";
 import { McpResultStore } from "./client/results.ts";
 import { BUILTIN_PROFILES, resolveProfile } from "./profiles/index.ts";
 import type { McpCallResult, McpProfile, McpToolInfo, ProfileCapability } from "./types.ts";
@@ -46,6 +53,8 @@ interface Planned {
   readonly profileCap: ProfileCapability;
   readonly parameters: Record<string, unknown>;
   readonly verifiable: boolean;
+  /** Calls per minute allowed to the server (0 — no limit). */
+  readonly rpm: number;
 }
 
 /**
@@ -59,11 +68,20 @@ export class McpToolProvider implements ToolProvider {
   private readonly pool: McpPool;
 
   private readonly results: McpResultStore | undefined;
+  private readonly limiter: McpRateLimiter | undefined;
+  private readonly sleep: (ms: number) => Promise<void>;
 
-  constructor(config: ResolvedConfig, pool: McpPool, results?: McpResultStore) {
+  constructor(
+    config: ResolvedConfig,
+    pool: McpPool,
+    results?: McpResultStore,
+    options: { limiter?: McpRateLimiter; sleep?: (ms: number) => Promise<void> } = {},
+  ) {
     this.config = config;
     this.pool = pool;
     this.results = results;
+    this.limiter = options.limiter;
+    this.sleep = options.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
   }
 
   capabilities(): readonly Capability[] {
@@ -92,6 +110,8 @@ export class McpToolProvider implements ToolProvider {
       profileError = error instanceof Error ? error.message : String(error);
     }
     const network = serverNetwork(server, profile);
+    const rpm =
+      server.rateLimit?.rpm ?? profile?.rateLimit?.rpm ?? this.config.mcp.defaults.rateLimit?.rpm ?? 0;
     const cached = this.pool.cachedTools(serverId);
     const cacheEntry = this.pool.cacheEntry(serverId);
     const byName = new Map((cached ?? []).map((t) => [t.name, t]));
@@ -126,6 +146,7 @@ export class McpToolProvider implements ToolProvider {
           profileCap: cap,
           parameters: schema,
           verifiable: cap.verify !== undefined,
+          rpm,
         });
       }
     } else if (cached) {
@@ -147,6 +168,7 @@ export class McpToolProvider implements ToolProvider {
           },
           parameters: tool.inputSchema,
           verifiable: false,
+          rpm,
         });
       }
     }
@@ -202,10 +224,51 @@ export class McpToolProvider implements ToolProvider {
   }
 
   /** A call as it goes out, then what the profile adds to a read's answer (`enrich`). */
+  /**
+   * One call to the server within its calls per minute, and a 429 waited out and asked again: the
+   * server's limit is per minute, the call goes through a few seconds later. A 429 means the call was
+   * not made, so an effect is asked again too (its journal still holds it). A wait past a minute is not
+   * waited out: the answer says so (a profile may then hold the server off, as Figma's does).
+   */
+  private async send(
+    planned: Planned,
+    tool: string,
+    sent: Record<string, unknown>,
+    ctx: ToolContext | undefined,
+  ): Promise<McpCallResult> {
+    const connection = this.pool.connection(planned.serverId);
+    const say = (payload: Record<string, unknown>) =>
+      ctx?.runtime.events.emit({
+        kind: "mcp.throttled",
+        runId: ctx.run.id,
+        stepId: ctx.stepId,
+        iteration: ctx.iteration,
+        payload: { server: planned.serverId, capability: planned.name, ...payload },
+      });
+    for (let attempt = 0; ; attempt += 1) {
+      await this.limiter?.acquire(planned.serverId, planned.rpm, (ms) =>
+        say({ reason: "rpm", rpm: planned.rpm, waitMs: ms }),
+      );
+      const result = await connection.callTool(tool, sent);
+      if (!tooManyRequests(result)) return result;
+      const wait = retryAfterOf(result.text) ?? RETRY_WAITS[attempt];
+      if (wait === undefined || attempt >= RETRY_WAITS.length || wait > RETRY_WAIT_MAX_S) {
+        say({ reason: "429", attempt: attempt + 1, gaveUp: true });
+        return {
+          ...result,
+          text: `${result.text}\n[jarvis: MCP server "${planned.serverId}" answered 429 (too many requests) ${attempt + 1} time(s); its limit is per minute — ask again a little later]`,
+        };
+      }
+      say({ reason: "429", attempt: attempt + 1, waitMs: wait * 1000 });
+      await this.sleep(wait * 1000);
+    }
+  }
+
   private async callPlanned(
     planned: Planned,
     args: Record<string, unknown>,
     marker?: string,
+    ctx?: ToolContext,
   ): Promise<{ tool: string; sent: Record<string, unknown>; result: McpCallResult }> {
     const cap = planned.profileCap;
     const serverId = planned.serverId;
@@ -230,7 +293,7 @@ export class McpToolProvider implements ToolProvider {
       read && cap.cacheMs && args.fresh !== true && args.fresh !== "true"
         ? this.results?.get(serverId, key, cap.cacheMs)
         : undefined;
-    let result = kept ?? (await connection.callTool(tool, sent));
+    let result = kept ?? (await this.send(planned, tool, sent, ctx));
     const wait = !kept && !result.ok ? cap.retryAfterSeconds?.(result) : undefined;
     if (wait && this.results) {
       const reason = (result.text.split("\n")[0] ?? "").slice(0, 200);
@@ -241,7 +304,7 @@ export class McpToolProvider implements ToolProvider {
     if (cap.enrich && read && result.ok) {
       const again = async (other: Record<string, unknown>) => {
         const next = await this.prepare(planned, other);
-        return connection.callTool(next.tool, next.sent);
+        return this.send(planned, next.tool, next.sent, ctx);
       };
       try {
         result = await cap.enrich(result, args, again);
@@ -287,8 +350,11 @@ export class McpToolProvider implements ToolProvider {
     const connection = this.pool.connection(serverId);
     const toolsOf = async () => this.pool.cachedTools(serverId) ?? (await connection.listTools());
 
-    const call = async (args: Record<string, unknown>, marker?: string): Promise<McpCallResult> =>
-      (await this.callPlanned(planned, args, marker)).result;
+    const call = async (
+      args: Record<string, unknown>,
+      marker?: string,
+      ctx?: ToolContext,
+    ): Promise<McpCallResult> => (await this.callPlanned(planned, args, marker, ctx)).result;
 
     const toOutput = (r: McpCallResult): ToolOutput => ({
       ok: r.ok,
@@ -308,7 +374,7 @@ export class McpToolProvider implements ToolProvider {
       effect: cap.effect,
       parameters: planned.parameters,
       handler: async (args: Record<string, unknown>, ctx: ToolContext) =>
-        toOutput(await call(args, cap.effect ? ctx.effect?.marker : undefined)),
+        toOutput(await call(args, cap.effect ? ctx.effect?.marker : undefined, ctx)),
     };
     if (cap.verify) {
       const verify = cap.verify;

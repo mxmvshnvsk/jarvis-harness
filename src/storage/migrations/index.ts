@@ -277,6 +277,19 @@ ALTER TABLE events ADD COLUMN on_behalf_of TEXT;
 CREATE INDEX events_run_kind ON events(run_id, kind, step_id, iteration);
 `,
   },
+  {
+    version: 8,
+    name: "mcp_calls",
+    sql: `
+-- Calls to an MCP server in the last minutes, for its calls-per-minute limit across processes
+-- (src/mcp/client/rateLimit.ts). Pilot: Jira allows 200 a minute per user and answers 429 past it.
+CREATE TABLE mcp_calls (
+  server TEXT NOT NULL,
+  ts     INTEGER NOT NULL
+);
+CREATE INDEX mcp_calls_server_ts ON mcp_calls(server, ts);
+`,
+  },
 ];
 
 export const LATEST_SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]?.version ?? 0;

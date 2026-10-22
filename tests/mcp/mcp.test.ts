@@ -282,6 +282,18 @@ describe("profiled server", () => {
     expect(denied.denied).toContain("unknown capability");
   });
 
+  it("a 429 is waited out and asked again; each wait is in the run's events", async () => {
+    const { bind, run } = await setup(serverYaml("jira", "      profile: atlassian", { FAKE_MCP_429: "2" }));
+    const result = await bind(["jira.*"]).invoke("jira.get", { key: "ABC-42" });
+    expect(result.ok).toBe(true);
+    expect(result.text).toContain("Allow onboarding restart");
+    const waits = (rt as Runtime).events.list({ runId: run.id, kind: "mcp.throttled" });
+    expect(waits.map((e) => e.payload)).toMatchObject([
+      { server: "jira", reason: "429", attempt: 1, waitMs: 1000 },
+      { server: "jira", reason: "429", attempt: 2, waitMs: 1000 },
+    ]);
+  }, 20_000);
+
   it("refuses intranet servers for confidential data when network is internet", async () => {
     const { bind } = await setup(
       serverYaml("jira", "      profile: atlassian\n      network: internet"),

@@ -16,6 +16,7 @@ import { repoIdOf } from "../knowledge/graph/update.ts";
 import { type Embedder, OpenAiCompatibleEmbedder } from "../knowledge/retrieval/embedder.ts";
 import { KnowledgeIndex } from "../knowledge/retrieval/index.ts";
 import { McpPool, ToolsCache } from "../mcp/client/pool.ts";
+import { McpRateLimiter } from "../mcp/client/rateLimit.ts";
 import { McpResultStore } from "../mcp/client/results.ts";
 import { McpToolProvider } from "../mcp/provider.ts";
 import { type CassetteMode, FileCassetteStore } from "../models/cassette.ts";
@@ -186,6 +187,7 @@ export function createRuntime(loaded: LoadedConfig, options: RuntimeOptions = {}
     loaded.config,
     pool,
     new McpResultStore(join(loaded.home.cacheDir, "mcp-results")),
+    { limiter: new McpRateLimiter(db.db) },
   );
   registry.register(mcpProvider);
   const partial = {

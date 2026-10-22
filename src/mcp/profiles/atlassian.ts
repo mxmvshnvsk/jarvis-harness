@@ -201,6 +201,9 @@ export const atlassianProfile: McpProfile = {
   name: "atlassian",
   version: 1,
   network: "intranet",
+  // Jira Server allows 200 calls a minute per user, counted on each node behind the balancer: a 429
+  // may come before 200 (pilot) — some room under it
+  rateLimit: { rpm: 150 },
   map: {
     "jira.get": jiraGet,
     "jira.search": jiraSearch,

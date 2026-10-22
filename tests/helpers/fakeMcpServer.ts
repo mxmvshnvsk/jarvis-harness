@@ -7,6 +7,7 @@ import { z } from "zod";
  * A stdio MCP server that plays a tiny Jira. Spawned by tests as a stdio server.
  *   FAKE_MCP_STATE   — file the comments are appended to (so a second process sees them)
  *   FAKE_MCP_CRASH   — "comment": exit right after writing the comment, before replying
+ *   FAKE_MCP_429     — the first N issue reads answer 429 Too Many Requests (Retry-After: 1)
  *   JIRA_TOKEN       — echoed by `whoami` (to prove env injection and redaction)
  */
 const stateFile = process.env.FAKE_MCP_STATE;
@@ -22,23 +23,35 @@ function allComments(): string[] {
 
 const server = new McpServer({ name: "fake-jira", version: "1.0.0" });
 
+let refusals = Number(process.env.FAKE_MCP_429 ?? 0);
+/** Jira past its calls per minute, as mcp-atlassian words it. */
+function tooMany() {
+  if (refusals <= 0) return undefined;
+  refusals -= 1;
+  return {
+    isError: true,
+    content: [{ type: "text" as const, text: "Error: HTTP 429 Too Many Requests (Retry-After: 1)" }],
+  };
+}
+
 server.registerTool(
   "getJiraIssue",
   { description: "issue by key", inputSchema: { issueKey: z.string() } },
-  async ({ issueKey }) => ({
-    content: [
-      {
-        type: "text",
-        text: JSON.stringify({
-          key: issueKey,
-          summary: "Allow onboarding restart",
-          description: "Requirements: https://confluence.example.corp/spaces/WEB/pages/77770077/Order-form",
-          status: "To Do",
-          comments: allComments(),
-        }),
-      },
-    ],
-  }),
+  async ({ issueKey }) =>
+    tooMany() ?? {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            key: issueKey,
+            summary: "Allow onboarding restart",
+            description: "Requirements: https://confluence.example.corp/spaces/WEB/pages/77770077/Order-form",
+            status: "To Do",
+            comments: allComments(),
+          }),
+        },
+      ],
+    },
 );
 
 server.registerTool(

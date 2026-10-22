@@ -64,6 +64,8 @@ export interface McpProfile {
   readonly name: string;
   readonly version: number;
   readonly network: Network;
+  /** Calls per minute the server allows a user, when known (a server's own `rateLimit` overrides it). */
+  readonly rateLimit?: { readonly rpm: number };
   readonly map: Readonly<Record<string, ProfileCapability>>;
 }
 

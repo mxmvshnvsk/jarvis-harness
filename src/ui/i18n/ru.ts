@@ -1613,6 +1613,12 @@ export const RU: Readonly<Record<string, string>> = {
   // ---- related work (ADR-0026)
   "related work: {issues}, {branches} with a branch, {contract} contract changes":
     "смежная работа: {issues}, с веткой — {branches}, изменений контракта — {contract}",
+  "{server}: its {rpm} calls a minute are used, waiting {s} s":
+    "{server}: лимит {rpm} запросов в минуту выбран, ждём {s} с",
+  "{server} answered 429 (too many requests) {n} times: gave up for now":
+    "{server} {n} раз ответил 429 (слишком много запросов): пока отступились",
+  "{server} answered 429 (too many requests): asking again in {s} s":
+    "{server} ответил 429 (слишком много запросов): повтор через {s} с",
   "related work not read: {why}": "смежная работа не прочитана: {why}",
   "{issue}: its branch was merged since the spec": "{issue}: ветка влита после спеки",
   "{issue}: its branch moved on and its contract changed since the spec — check the spec":
