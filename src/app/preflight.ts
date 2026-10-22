@@ -22,27 +22,70 @@ export function workflowCapabilities(runtime: Runtime, workflow: WorkflowDefinit
   return [...patterns].sort();
 }
 
+/** What the workflow's steps without a model read through MCP servers (related work, sources). */
+function workflowToolReads(workflow: WorkflowDefinition): string[] {
+  const out = new Set<string>();
+  for (const step of workflow.steps)
+    if (step.kind === "deterministic" && step.tool) for (const c of TOOL_READS[step.tool] ?? []) out.add(c);
+  return [...out].sort();
+}
+
+/** What the deterministic tools read through MCP servers. */
+const TOOL_READS: Readonly<Record<string, readonly string[]>> = {
+  "sources.collect": ["jira.get", "confluence.get", "figma.get"],
+  "related.collect": ["jira.get", "jira.search", "jira.devInfo", "bitbucket.*"],
+  "related.check": ["jira.devInfo", "bitbucket.*"],
+};
+
+/**
+ * Whether a run of the workflow runs the project's commands (builds, tests, typecheck): only then does
+ * its checkout need `workspace.setup` (pilot: spec runs waited minutes for an install nothing used).
+ */
+export function workflowRunsProjectCommands(runtime: Runtime, workflow: WorkflowDefinition): boolean {
+  const agents = new AgentRegistry(BUILTIN_AGENTS, runtime.loaded.project?.root);
+  return workflow.steps.some((step) =>
+    step.kind === "deterministic"
+      ? !!step.tool && step.tool.startsWith("project.") && step.tool !== "project.discover"
+      : step.kind === "agentic" && step.agent
+        ? (agents.get(step.agent)?.capabilities ?? []).some((c) =>
+            /^(project\.|code\.diagnostics|shell\.)/.test(c),
+          )
+        : false,
+  );
+}
+
 /**
  * ADR-0017 §6: before a run is created, every MCP server its agents may reach must answer
  * `tools/list`; discovery refreshes the cache and the registry so unprofiled tools are exposed.
  */
 export async function preflightMcp(runtime: Runtime, workflow: WorkflowDefinition): Promise<McpPreflight> {
   const needed = serversNeeded(runtime.loaded.config, workflowCapabilities(runtime, workflow));
+  // the servers only a step without a model reads: started now too, not in the middle of that step —
+  // but not required: such a step says what it could not read and the run goes on
+  const warmed = serversNeeded(runtime.loaded.config, workflowToolReads(workflow)).filter(
+    (id) => !needed.includes(id),
+  );
   const servers: McpPreflight["servers"] = [];
-  for (const id of needed) {
-    try {
-      const entry = await runtime.mcp.pool.discover(id);
-      servers.push({ id, ok: true, tools: entry.tools.length });
-      runtime.events.emit({
-        kind: "mcp.discovered",
-        payload: { server: id, tools: entry.tools.length, hash: entry.hash },
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      servers.push({ id, ok: false, error: message });
-      runtime.events.emit({ kind: "mcp.unavailable", payload: { server: id, error: message } });
-    }
-  }
+  // side by side: each stdio server takes seconds to start (npx, uvx), one after another they added up
+  const warming = Promise.all(warmed.map((id) => runtime.mcp.pool.discover(id).catch(() => undefined)));
+  await Promise.all(
+    needed.map(async (id) => {
+      try {
+        const entry = await runtime.mcp.pool.discover(id);
+        servers.push({ id, ok: true, tools: entry.tools.length });
+        runtime.events.emit({
+          kind: "mcp.discovered",
+          payload: { server: id, tools: entry.tools.length, hash: entry.hash },
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        servers.push({ id, ok: false, error: message });
+        runtime.events.emit({ kind: "mcp.unavailable", payload: { server: id, error: message } });
+      }
+    }),
+  );
+  await warming;
+  servers.sort((a, b) => needed.indexOf(a.id) - needed.indexOf(b.id));
   runtime.registry.replace(runtime.mcp.provider);
   return { servers, ok: servers.every((s) => s.ok) };
 }

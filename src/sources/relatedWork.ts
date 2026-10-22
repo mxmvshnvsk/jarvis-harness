@@ -446,16 +446,21 @@ export function localReader(path: string, git: Git, base?: string): WorkReader {
       const files = mb
         ? (await git(["diff", "--name-only", mb, ref], path)).stdout.split("\n").filter(Boolean)
         : [];
-      const read = [];
-      for (const file of files.filter(isContractFile).slice(0, MAX_CONTRACT_FILES)) {
-        const after = await git(["show", `${ref}:${file}`], path);
-        const before = mb ? await git(["show", `${mb}:${file}`], path) : { code: 1, stdout: "" };
-        read.push({
-          file,
-          before: before.code === 0 ? before.stdout : "",
-          after: after.code === 0 ? after.stdout : "",
-        });
-      }
+      const read = await inTurns(
+        files.filter(isContractFile).slice(0, MAX_CONTRACT_FILES),
+        READS_AT_ONCE,
+        async (file) => {
+          const [after, before] = await Promise.all([
+            git(["show", `${ref}:${file}`], path),
+            mb ? git(["show", `${mb}:${file}`], path) : Promise.resolve({ code: 1, stdout: "" }),
+          ]);
+          return {
+            file,
+            before: before.code === 0 ? before.stdout : "",
+            after: after.code === 0 ? after.stdout : "",
+          };
+        },
+      );
       return { commit: head, ...(baseRef ? { base: baseRef.replace(/^origin\//, "") } : {}), files, read };
     },
   };
@@ -481,8 +486,10 @@ export function bitbucketReader(
       const head = commits[0]?.id;
       const own = commits.filter((c) => c.message.includes(issue)).slice(0, 10);
       const files = new Set<string>();
-      for (const c of own) {
-        const detail = await invoke("bitbucket.commit.get", { ...at, commit: c.id });
+      const details = await inTurns(own, READS_AT_ONCE, (c) =>
+        invoke("bitbucket.commit.get", { ...at, commit: c.id }),
+      );
+      for (const detail of details) {
         if (!detail.ok) continue;
         for (const { o } of walk(json(detail.text))) {
           const p = str(o.path) ?? str(o.toString) ?? str(o.filename) ?? str(o.new_path);
@@ -497,10 +504,37 @@ export function bitbucketReader(
           return (doc as Record<string, string>).content as string;
         return body(r.text);
       };
-      const read = [];
-      for (const file of [...files].filter(isContractFile).slice(0, MAX_CONTRACT_FILES))
-        read.push({ file, before: await content(file, base ?? "dev"), after: await content(file, branch) });
+      const read = await inTurns(
+        [...files].filter(isContractFile).slice(0, MAX_CONTRACT_FILES),
+        READS_AT_ONCE,
+        async (file) => {
+          const [before, after] = await Promise.all([content(file, base ?? "dev"), content(file, branch)]);
+          return { file, before, after };
+        },
+      );
       return { ...(head ? { commit: head } : {}), base: base ?? "dev", files: [...files], read };
     },
   };
+}
+
+/** Reads at once against one server or repository (the MCP limiter still counts each). */
+export const READS_AT_ONCE = 4;
+
+/** `work` on each item, `limit` at a time; the answers in the items' order. */
+export async function inTurns<T, R>(
+  items: readonly T[],
+  limit: number,
+  work: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let next = 0;
+  const lane = async () => {
+    while (next < items.length) {
+      const i = next;
+      next += 1;
+      out[i] = await work(items[i] as T);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, lane));
+  return out;
 }

@@ -248,8 +248,16 @@ export class McpPool {
     const factory = this.options.transportFactory ?? defaultTransportFactory;
     const transport = await factory(serverId, config, this.options.secrets, this.options.env ?? process.env);
     const client = new Client({ name: "jarvis", version: this.options.clientVersion ?? "0.0.0" });
-    await client.connect(transport);
-    const listed = await client.listTools();
+    // a server that never answers its start must not hang the run's start (no limit before)
+    const listed = await withinMs(
+      (async () => {
+        await client.connect(transport);
+        return client.listTools();
+      })(),
+      CONNECT_TIMEOUT_MS,
+      `MCP server "${serverId}" did not start within ${CONNECT_TIMEOUT_MS / 1000} s`,
+      () => void client.close().catch(() => undefined),
+    );
     const tools: McpToolInfo[] = listed.tools.map((t) => ({
       name: t.name,
       description: t.description ?? "",
@@ -272,4 +280,18 @@ export class McpPool {
       }),
     );
   }
+}
+
+/** How long a server may take to start and list its tools (npx and uvx fetch packages on a cold start). */
+export const CONNECT_TIMEOUT_MS = 60_000;
+
+function withinMs<T>(work: Promise<T>, ms: number, message: string, onTimeout: () => void): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      onTimeout();
+      reject(new Error(message));
+    }, ms);
+  });
+  return Promise.race([work, late]).finally(() => clearTimeout(timer));
 }

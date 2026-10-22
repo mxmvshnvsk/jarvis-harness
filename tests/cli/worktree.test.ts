@@ -200,9 +200,14 @@ describe("worktree workspace end to end (ADR-0003)", () => {
 
   it("says what it prepares, and a failed setup leaves no worktree or branch behind (pilot)", async () => {
     sb.write("project/.jarvis/project.yaml", "version: 1\nworkspace:\n  setup: 'echo boom >&2; exit 3'\n");
+    // a workflow that runs the project's commands: only such a checkout gets workspace.setup
+    sb.write(
+      "project/.jarvis/workflows/chk.yaml",
+      "name: chk\nversion: 1\nentry: checks\nsteps:\n  - id: checks\n    kind: deterministic\n    tool: project.checks\n    outputs: [checks]\n    transitions: { onSuccess: DONE }\n",
+    );
     sh(sb.project, ["add", "-A"]);
     sh(sb.project, ["commit", "-q", "-m", "broken setup"]);
-    const r = await jarvis(["work", "T-1", "--workflow", "smoke"]);
+    const r = await jarvis(["work", "T-1", "--workflow", "chk"]);
     expect(r.code).toBe(1);
     expect(r.err).toContain("◌ own checkout");
     expect(r.err).toContain("◌ workspace.setup echo boom >&2; exit 3");

@@ -196,6 +196,7 @@ describe("jarvis work / resume / approve / daemon", () => {
     rt.close();
     expect(steps).toEqual([
       "discover",
+      "gather",
       "sources",
       "related-work",
       "research",

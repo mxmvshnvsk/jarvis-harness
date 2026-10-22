@@ -12,21 +12,25 @@ steps:
     kind: deterministic
     tool: project.discover
     outputs: [project-capabilities]
-    transitions: { onSuccess: sources }
+    transitions: { onSuccess: gather }
+  # the task's inputs and its related work read side by side: neither needs the other (pilot: related
+  # work waited for the design frames, a minute and more)
+  - id: gather
+    kind: composite
+    children: [sources, related-work]
+    transitions: { onSuccess: research }
   # the task's inputs, by code, no model: its issue and pages as read, the API methods they name checked
   # against the contract maps, their design frames described
   - id: sources
     kind: deterministic
     tool: sources.collect
     outputs: [sources, design]
-    transitions: { onSuccess: related-work }
   # ADR-0026: the branches and PRs of related tasks and the contract they change, by code; off for a run
   # that does not want it (--no-related, relatedWork.enabled)
   - id: related-work
     kind: deterministic
     tool: related.collect
     outputs: [related-work]
-    transitions: { onSuccess: research }
   - id: research
     kind: agentic
     agent: research
@@ -203,21 +207,25 @@ steps:
     kind: deterministic
     tool: project.discover
     outputs: [project-capabilities]
-    transitions: { onSuccess: sources }
+    transitions: { onSuccess: gather }
+  # the task's inputs and its related work read side by side: neither needs the other (pilot: related
+  # work waited for the design frames, a minute and more)
+  - id: gather
+    kind: composite
+    children: [sources, related-work]
+    transitions: { onSuccess: research }
   # the task's inputs, by code, no model: its issue and pages as read, the API methods they name checked
   # against the contract maps, their design frames described
   - id: sources
     kind: deterministic
     tool: sources.collect
     outputs: [sources, design]
-    transitions: { onSuccess: related-work }
   # ADR-0026: the branches and PRs of related tasks and the contract they change, by code; off for a run
   # that does not want it (--no-related, relatedWork.enabled)
   - id: related-work
     kind: deterministic
     tool: related.collect
     outputs: [related-work]
-    transitions: { onSuccess: research }
   - id: research
     kind: agentic
     agent: research
@@ -238,21 +246,25 @@ steps:
     kind: deterministic
     tool: project.discover
     outputs: [project-capabilities]
-    transitions: { onSuccess: sources }
+    transitions: { onSuccess: gather }
+  # the task's inputs and its related work read side by side: neither needs the other (pilot: related
+  # work waited for the design frames, a minute and more)
+  - id: gather
+    kind: composite
+    children: [sources, related-work]
+    transitions: { onSuccess: research }
   # the task's inputs, by code, no model: its issue and pages as read, the API methods they name checked
   # against the contract maps, their design frames described
   - id: sources
     kind: deterministic
     tool: sources.collect
     outputs: [sources, design]
-    transitions: { onSuccess: related-work }
   # ADR-0026: the branches and PRs of related tasks and the contract they change, by code; off for a run
   # that does not want it (--no-related, relatedWork.enabled)
   - id: related-work
     kind: deterministic
     tool: related.collect
     outputs: [related-work]
-    transitions: { onSuccess: research }
   - id: research
     kind: agentic
     agent: research
@@ -357,21 +369,25 @@ steps:
     kind: deterministic
     tool: project.discover
     outputs: [project-capabilities]
-    transitions: { onSuccess: sources }
+    transitions: { onSuccess: gather }
+  # the task's inputs and its related work read side by side: neither needs the other (pilot: related
+  # work waited for the design frames, a minute and more)
+  - id: gather
+    kind: composite
+    children: [sources, related-work]
+    transitions: { onSuccess: research }
   # the task's inputs, by code, no model: its issue and pages as read, the API methods they name checked
   # against the contract maps, their design frames described
   - id: sources
     kind: deterministic
     tool: sources.collect
     outputs: [sources, design]
-    transitions: { onSuccess: related-work }
   # ADR-0026: the branches and PRs of related tasks and the contract they change, by code; off for a run
   # that does not want it (--no-related, relatedWork.enabled)
   - id: related-work
     kind: deterministic
     tool: related.collect
     outputs: [related-work]
-    transitions: { onSuccess: research }
   - id: research
     kind: agentic
     agent: research

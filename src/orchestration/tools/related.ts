@@ -10,9 +10,11 @@ import {
   devInfoOf,
   type Git,
   type IssueFacts,
+  inTurns,
   issueFacts,
   localReader,
   pickRelated,
+  READS_AT_ONCE,
   RELATED_ABOUT,
   RELATED_WORK,
   type RelatedItem,
@@ -140,16 +142,19 @@ async function itemsOf(ctx: StepContext, issue: IssueFacts & { key: string }): P
   ].slice(0, MAX_REPOS);
   if (repos.length === 0) return [{ ...head, found: "none", contract: [] }];
   const items: RelatedItem[] = [];
-  for (const slug of repos)
-    items.push(
-      await repoItem(
-        ctx,
-        issue.key,
-        head,
-        branches.filter((b) => (b.repo?.slug ?? "") === slug),
-        prs.filter((p) => (p.repo?.slug ?? "") === slug),
+  items.push(
+    ...(await Promise.all(
+      repos.map((slug) =>
+        repoItem(
+          ctx,
+          issue.key,
+          head,
+          branches.filter((b) => (b.repo?.slug ?? "") === slug),
+          prs.filter((p) => (p.repo?.slug ?? "") === slug),
+        ),
       ),
-    );
+    )),
+  );
   return items;
 }
 
@@ -275,7 +280,9 @@ export const collectRelated: DeterministicTool = async (ctx) => {
   const related = await relatedIssues(ctx, self);
   const issues = related.picked.filter((i): i is IssueFacts & { key: string } => !!i.key);
   const items: RelatedItem[] = [];
-  for (const issue of issues) items.push(...(await itemsOf(ctx, issue)));
+  // the related issues side by side, a few at a time; the document keeps their order
+  for (const found of await inTurns(issues, READS_AT_ONCE, (issue) => itemsOf(ctx, issue)))
+    items.push(...found);
   const doc: RelatedWorkDoc = {
     about: RELATED_ABOUT,
     from: key,

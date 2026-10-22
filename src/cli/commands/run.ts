@@ -9,7 +9,7 @@ import { createEngine } from "../../app/engine.ts";
 import { canForget, forgetRuns } from "../../app/forget.ts";
 import { continuationStep, continuedBy, handOff } from "../../app/handoff.ts";
 import { duration } from "../../app/journey.ts";
-import { preflightMcp, preflightModels } from "../../app/preflight.ts";
+import { preflightMcp, preflightModels, workflowRunsProjectCommands } from "../../app/preflight.ts";
 import { noteForStart, requestRedo } from "../../app/redo.ts";
 import { carriedSteps, RESTARTABLE, restartPlanOf } from "../../app/restart.ts";
 import { createRuntime, type Runtime } from "../../app/runtime.ts";
@@ -388,6 +388,8 @@ export async function prepareWorkspace(
   task: string,
   base: string | undefined,
   prompt?: Prompt,
+  /** The run's workflow runs the project's commands: without, the checkout skips `workspace.setup`. */
+  setup = true,
 ): Promise<WorkspaceRef> {
   const loaded = runtime.loaded;
   const root = loaded.project?.root ?? ctx.cwd;
@@ -418,7 +420,8 @@ export async function prepareWorkspace(
       runId,
       task,
       ...(base ? { baseRef: base } : {}),
-      ...(loaded.config.workspace.setup ? { setup: loaded.config.workspace.setup } : {}),
+      // a run that only reads the code (spec, research) does not wait for an install it never uses
+      ...(setup && loaded.config.workspace.setup ? { setup: loaded.config.workspace.setup } : {}),
       checkout: loaded.config.workspace.checkout,
       setupTimeoutMs: loaded.config.tools.commandTimeoutMs,
       env: ctx.env,
@@ -500,7 +503,15 @@ async function startContinuation(
   // research or spec across services goes on as sdd-cross in the same knowledge repository
   const workspace: WorkspaceRef = CROSS_WORKFLOWS.has(targetName)
     ? { mode: "cwd", repoRoot: from.workspace.repoRoot, path: from.workspace.repoRoot, baseRef: "HEAD" }
-    : await prepareWorkspace(ctx, runtime, runId, from.task, undefined, prompt);
+    : await prepareWorkspace(
+        ctx,
+        runtime,
+        runId,
+        from.task,
+        undefined,
+        prompt,
+        workflowRunsProjectCommands(runtime, target),
+      );
   const run = runtime.runs.create({
     id: runId,
     task: from.task,
@@ -625,7 +636,15 @@ export async function runRestart(
     const prompt = promptFor(here, runtime);
     const workspace: WorkspaceRef = CROSS_WORKFLOWS.has(from.workflow)
       ? { mode: "cwd", repoRoot: from.workspace.repoRoot, path: from.workspace.repoRoot, baseRef: "HEAD" }
-      : await prepareWorkspace(here, runtime, runId, from.task, undefined, prompt);
+      : await prepareWorkspace(
+          here,
+          runtime,
+          runId,
+          from.task,
+          undefined,
+          prompt,
+          workflowRunsProjectCommands(runtime, workflow),
+        );
     const run = runtime.runs.create({
       id: runId,
       task: from.task,
@@ -805,7 +824,15 @@ export async function runWork(
           path: loaded.project?.root ?? ctx.cwd,
           baseRef: "HEAD",
         } satisfies WorkspaceRef)
-      : await prepareWorkspace(ctx, runtime, runId, task, options.base);
+      : await prepareWorkspace(
+          ctx,
+          runtime,
+          runId,
+          task,
+          options.base,
+          undefined,
+          workflowRunsProjectCommands(runtime, workflow),
+        );
     const run = runtime.runs.create({
       id: runId,
       task,

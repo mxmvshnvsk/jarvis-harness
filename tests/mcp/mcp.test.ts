@@ -2,7 +2,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Writable } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { preflightMcp, workflowCapabilities } from "../../src/app/preflight.ts";
+import { preflightMcp, workflowCapabilities, workflowRunsProjectCommands } from "../../src/app/preflight.ts";
 import type { Runtime } from "../../src/app/runtime.ts";
 import { run } from "../../src/cli/main.ts";
 import { formatRunHeader } from "../../src/cli/progress.ts";
@@ -738,6 +738,17 @@ describe("preflight", () => {
     const result = await preflightMcp(runtime, sdd);
     expect(result).toEqual({ ok: true, servers: [{ id: "jira", ok: true, tools: 7 }] });
     expect(runtime.mcp.provider.report("jira").discovered).toBeDefined();
-    expect(runtime.mcp.provider.report("bb").discovered).toBeUndefined();
+    // read only by related work, a step without a model: started too, but not required
+    expect(runtime.mcp.provider.report("bb").discovered).toBeDefined();
+  });
+
+  it("only a workflow that runs the project's commands needs workspace.setup", async () => {
+    await setup(serverYaml("jira", "      profile: atlassian"));
+    const all = loadWorkflows(undefined);
+    const need = (name: string) => workflowRunsProjectCommands(rt as Runtime, all.get(name) as never);
+    expect(need("sdd")).toBe(true);
+    expect(need("fix")).toBe(true);
+    expect(need("spec")).toBe(false);
+    expect(need("research")).toBe(false);
   });
 });
