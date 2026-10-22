@@ -346,7 +346,7 @@ export class LocalWorkflowEngine {
     skipBecause?: string,
   ): Promise<StepOutcome> {
     lease.check();
-    const skip = skipBecause ?? this.skipReason(run, step);
+    const skip = skipBecause ?? this.skipReason(run, step, iteration);
     if (skip) {
       const historyId = this.rt.history.start(run.id, step.id, iteration, []);
       this.emit(run, "step.start", { stepId: step.id, iteration, kind: step.kind, inputs: [] });
@@ -428,12 +428,16 @@ export class LocalWorkflowEngine {
   }
 
   /** Why a conditional step (`when:`) has nothing to do in this run; undefined when it runs. */
-  private skipReason(run: Run, step: StepDefinition): string | undefined {
+  private skipReason(run: Run, step: StepDefinition, iteration = 1): string | undefined {
     // ADR-0026: reading related work is the person's choice per run
     if ((step.tool === "related.collect" || step.tool === "related.check") && !relatedOn(this.rt, run))
       return "related work is off for this run";
     const affects = step.when?.affects;
     if (!affects) return undefined;
+    // a later round fixes what review or checks found: the docs and telemetry of the first round
+    // stand (pilot: each fix round wrote them again, minutes of model calls for the same text)
+    if (iteration > 1 && step.outputs.some((t) => this.rt.artifacts.listLatest(run.id, t).length > 0))
+      return "done in an earlier round: a fix round does not write it again";
     const impact = this.rt.artifacts.listLatest(run.id, "impact")[0];
     if (!impact) return undefined;
     try {

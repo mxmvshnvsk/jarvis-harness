@@ -243,6 +243,15 @@ export class AgentRuntimeRunner implements AgentRunner {
       ctx,
       (rt.capabilities?.list() ?? []).map((a) => a.graphExtractor?.()).filter((x) => x !== undefined),
     ).catch(() => new Map());
+    // review starts from the change itself: the diff goes into the task message (each round began
+    // with a call for it, and its answer stayed in the working set)
+    const change =
+      def.output.type === "review" && toolDescriptors.some((t) => t.name === "git.diff")
+        ? await bound
+            .invoke("git.diff", {})
+            .then((r) => (r.ok && r.text ? r.text : undefined))
+            .catch(() => undefined)
+        : undefined;
     // the files the task message shows whole: a read of one of them gets a pointer (rereads.ts)
     let baseShown = new Map<string, string>();
     const buildBase = (chars: number) => {
@@ -257,6 +266,7 @@ export class AgentRuntimeRunner implements AgentRunner {
         budget: { chars },
         shown: baseShown,
         outlines,
+        ...(change ? { change } : {}),
       });
     };
     let base = buildBase(charBudget);

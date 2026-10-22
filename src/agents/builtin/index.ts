@@ -242,7 +242,7 @@ export const REVIEW_AGENT: AgentDefinition = {
   instructions: `You are the review agent of Jarvis.
 Goal: decide whether the change satisfies the specification and the project's conventions.
 Method:
-- Read the diff of the workspace against its base (git.diff). Check every requirement's acceptance criteria against the code and the test results.
+- The diff of the workspace against its base is in your inputs (call git.diff with a path only for a file it cut). Check every requirement's acceptance criteria against the code and the test results.
 - A previous review in your inputs means this is a later round: first check each of its findings — fixed or not, say which in the finding's issue — then look at the code changed for them. Do not raise new minor or nit findings on code the previous round already saw; a new blocker or major still counts.
 - The project's checks and the tests ran in verify before you, and passed: their results are in your inputs. You run no commands; judge the code.
 - Look for correctness, missing cases, convention violations, and scope creep. Each finding has a severity, a location and a concrete suggestion.
@@ -264,6 +264,9 @@ Produce the result document.`,
   limits: DEFAULT_LIMITS,
   contextInputs: ["spec", "plan", "implementation", "tests", "checks", "review"],
   baseChars: 100_000,
+  // up to 60 calls, each re-sending the inputs and what it read where nothing is cached
+  uncached: { baseChars: 60_000, workingSet: 40_000 },
+  reasoningEffort: "medium",
 };
 
 export const REVIEW_ANALYSIS_AGENT: AgentDefinition = {
@@ -295,8 +298,10 @@ Read the code around each comment before classifying; quote the comment id in ev
       ? undefined
       : (({ fix_code: "fix_required", nothing_to_do: "ok" } as Record<string, string>)[doc.verdict] ??
         doc.verdict),
-  limits: DEFAULT_LIMITS,
+  limits: { ...DEFAULT_LIMITS, maxToolCalls: 20, maxModelCalls: 25 },
   contextInputs: ["review-package", "spec", "requirements"],
+  uncached: { baseChars: 50_000, workingSet: 30_000 },
+  reasoningEffort: "medium",
 };
 
 export const DOCS_AGENT: AgentDefinition = {
@@ -316,6 +321,8 @@ Produce the result document when every requirement has a documentation home or a
   output: { type: "docs", schema: DocsResult, outcomes: ["ok"] },
   limits: DEFAULT_LIMITS,
   contextInputs: ["spec", "implementation"],
+  uncached: { baseChars: 40_000, workingSet: 30_000 },
+  reasoningEffort: "low",
 };
 
 export const TELEMETRY_AGENT: AgentDefinition = {
@@ -335,6 +342,8 @@ Produce the result document.`,
   output: { type: "telemetry", schema: TelemetryResult, outcomes: ["ok", "spec_gap"] },
   limits: DEFAULT_LIMITS,
   contextInputs: ["spec", "impact", "implementation"],
+  uncached: { baseChars: 40_000, workingSet: 30_000 },
+  reasoningEffort: "low",
 };
 
 export const RELEASE_NOTES_AGENT: AgentDefinition = {
@@ -352,8 +361,11 @@ Produce the result document.`,
   capabilities: [...READ_REPO],
   requires: { tools: true, structuredOutput: "json" },
   output: { type: "release-notes", schema: ReleaseNotesResult, outcomes: ["ok"] },
-  limits: DEFAULT_LIMITS,
+  // the notes are written from the spec, the change and the review; the changelog's head is all it reads
+  limits: { ...DEFAULT_LIMITS, maxToolCalls: 8, maxModelCalls: 12 },
   contextInputs: ["spec", "implementation", "review"],
+  uncached: { baseChars: 40_000, workingSet: 20_000 },
+  reasoningEffort: "low",
 };
 
 export const ONBOARD_MAPPER_AGENT: AgentDefinition = {

@@ -313,8 +313,9 @@ describe("sdd end to end", () => {
       "implementation/implementation.json@2",
       "tests/tests.json@2",
       "review/review.json@2",
-      "docs/docs.json@2",
-      "telemetry/telemetry.json@2",
+      // the fix round does not write docs and telemetry again
+      "docs/docs.json@1",
+      "telemetry/telemetry.json@1",
       "release-notes/release-notes.json@1",
     ]) {
       expect(status.out).toContain(t);

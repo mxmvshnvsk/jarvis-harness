@@ -154,6 +154,8 @@ export interface BuildInput {
   readonly shown?: Map<string, string>;
   /** Classes and methods of the long files the task message may show (`outlinesFor`): shown sliced. */
   readonly outlines?: ReadonlyMap<string, readonly OutlineSymbol[]>;
+  /** The change under review as git.diff gives it (review): in the message, not a first call for it. */
+  readonly change?: string;
 }
 
 /** L0–L4 as two messages: a byte-stable system message and the task message. */
@@ -216,6 +218,10 @@ export function buildBaseMessages(input: BuildInput): Message[] {
     : codeReadInRun(ctx, Math.min(Math.floor(inputBudget * 0.25), 40_000), input.shown, input.outlines);
   if (read) l3.push(read);
   if (step) l3.push(step);
+  if (input.change)
+    l3.push(
+      `## The change under review (git.diff against the base; call git.diff with a path for a file it cut)\n${clip(input.change, Math.min(Math.floor(inputBudget * 0.35), 24_000))}`,
+    );
   // the version the human sent back comes first: the agent revises it rather than starting over
   if (review) l3.unshift(review.previous(perInput > 0 ? perInput : inputBudget));
 
