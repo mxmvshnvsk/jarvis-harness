@@ -204,7 +204,12 @@ export async function preparePr(
     title,
     description: descriptionOf(run, docs, files),
     source: branch,
-    target: options.target?.trim() || config.target || (await defaultBranchOf(ws.repoRoot, remote)),
+    // a task in a Story goes into the Story's branch the run started from (`relatedWork.story`)
+    target:
+      options.target?.trim() ||
+      (ws.story?.based ? ws.story.branch : undefined) ||
+      config.target ||
+      (await defaultBranchOf(ws.repoRoot, remote)),
     remote,
     ...((config.workspace ?? coordinates.workspace)
       ? { workspace: config.workspace ?? coordinates.workspace }

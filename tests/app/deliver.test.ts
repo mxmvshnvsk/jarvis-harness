@@ -242,6 +242,21 @@ describe("jarvis apply --pr", () => {
     expect((prs[0] as FakePr).args.target).toBe("release");
   });
 
+  it("a task in a Story goes into the Story's branch the run started from (relatedWork.story)", async () => {
+    await setup();
+    const run = await runOf();
+    rt.db.db
+      .prepare("UPDATE runs SET workspace_json = ? WHERE id = ?")
+      .run(
+        JSON.stringify({ ...run.workspace, story: { key: "ABC-40", branch: "feature/ABC-40", based: true } }),
+        run.id,
+      );
+    const done = await engine().execute(run.id, { owner: "cli:test:1" });
+    sh(sb.project, ["push", "-q", "origin", "main:feature/ABC-40"]);
+    await deliverPr(rt, done.run, { actor: ACTOR, channel: "cli" });
+    expect((prs[0] as FakePr).args.target).toBe("feature/ABC-40");
+  });
+
   it("a failed PR is not recorded done: the next try opens it, the push is not repeated", async () => {
     await setup();
     const run = await completed();

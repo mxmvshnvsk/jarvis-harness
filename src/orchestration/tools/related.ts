@@ -9,7 +9,9 @@ import {
   type DevPr,
   devInfoOf,
   type Git,
+  type Inclusion,
   type IssueFacts,
+  inclusionsOf,
   inTurns,
   issueFacts,
   localReader,
@@ -20,6 +22,9 @@ import {
   type RelatedItem,
   type RelatedWorkDoc,
   searchHits,
+  sideOfIssue,
+  storyBranch,
+  storyOf,
   type WorkReader,
 } from "../../sources/relatedWork.ts";
 import { git as runGit } from "../../tools/local/exec.ts";
@@ -64,15 +69,50 @@ async function call(ctx: StepContext, name: string, args: Record<string, unknown
   }
 }
 
-/** The related issues: the issue's links, its epic's (or parent's) other issues; the other side first. */
+/** The run's Story: its key and branch, its tasks, and the issue the Story itself is (its facts). */
+interface StoryOfRun {
+  readonly key: string;
+  readonly branch: string;
+  readonly tasks: readonly Inclusion[];
+  readonly facts?: IssueFacts;
+}
+
+/** Where a related issue's branch is compared: its Story's branch for a task of the run's Story. */
+interface InStory {
+  readonly key: string;
+  readonly branch: string;
+}
+
+/**
+ * The related issues: the tasks of the run's Story (and the Story), the issue's links, its epic's (or
+ * parent's) other issues; the other side first.
+ */
 async function relatedIssues(
   ctx: StepContext,
   self: IssueFacts & { key: string },
+  story?: StoryOfRun,
 ): Promise<{ picked: IssueFacts[]; notRead: string[] }> {
   const cfg = ctx.runtime.loaded.config.relatedWork;
   const available = new Set(ctx.tools.list().map((d) => d.name));
   const candidates: IssueFacts[] = [];
-  const group = self.epic ?? self.parent;
+  const members = new Set<string>();
+  if (story) {
+    for (const t of story.tasks) {
+      candidates.push({
+        key: t.key,
+        ...(t.type ? { type: t.type } : {}),
+        ...(t.summary ? { summary: t.summary } : {}),
+        links: [],
+      });
+      members.add(t.key);
+    }
+    if (story.key !== self.key) {
+      candidates.push(story.facts ? { ...story.facts, key: story.key } : { key: story.key, links: [] });
+      members.add(story.key);
+    }
+  }
+  // a task in a Story may name only the Story: the epic is the Story's
+  const group = self.epic ?? self.parent ?? story?.facts?.epic ?? story?.facts?.parent;
   if (group && available.has("jira.search")) {
     for (const jql of [`"Epic Link" = ${group} OR parent = ${group}`, `parent = ${group}`]) {
       const r = await call(ctx, "jira.search", {
@@ -93,11 +133,12 @@ async function relatedIssues(
   for (const key of first) if (!candidates.some((c) => c.key === key)) candidates.push({ key, links: [] });
   const all = pickRelated(
     self.key,
-    self.type ? cfg.sides[self.type] : undefined,
+    sideOfIssue(self, cfg.sides, cfg.prefixes),
     candidates,
-    cfg.sides,
+    (c) => sideOfIssue(c, cfg.sides, cfg.prefixes),
     Number.POSITIVE_INFINITY,
     first,
+    members,
   );
   return {
     picked: all.slice(0, cfg.maxIssues),
@@ -112,13 +153,18 @@ const MAX_REPOS = 3;
  * One related issue's work, an item per repository: its branch and PR from Jira's Development panel,
  * read where it can be (pilot: a back task changed a shared library and a service at once).
  */
-async function itemsOf(ctx: StepContext, issue: IssueFacts & { key: string }): Promise<RelatedItem[]> {
+async function itemsOf(
+  ctx: StepContext,
+  issue: IssueFacts & { key: string },
+  inStory?: InStory,
+): Promise<RelatedItem[]> {
   const available = new Set(ctx.tools.list().map((d) => d.name));
   const head = {
     issue: issue.key,
     ...(issue.type ? { type: issue.type } : {}),
     ...(issue.status ? { status: issue.status } : {}),
     ...(issue.summary ? { summary: issue.summary } : {}),
+    ...(inStory ? { story: inStory.key } : {}),
   };
   if (!available.has("jira.devInfo"))
     return [
@@ -151,6 +197,7 @@ async function itemsOf(ctx: StepContext, issue: IssueFacts & { key: string }): P
           head,
           branches.filter((b) => (b.repo?.slug ?? "") === slug),
           prs.filter((p) => (p.repo?.slug ?? "") === slug),
+          inStory,
         ),
       ),
     )),
@@ -179,6 +226,7 @@ async function repoItem(
   head: Pick<RelatedItem, "issue" | "type" | "status" | "summary">,
   branches: readonly DevBranch[],
   prs: readonly DevPr[],
+  inStory?: InStory,
 ): Promise<RelatedItem> {
   const cfg = ctx.runtime.loaded.config.relatedWork;
   const available = new Set(ctx.tools.list().map((d) => d.name));
@@ -186,10 +234,14 @@ async function repoItem(
   if (!name) return { ...head, found: "none", contract: [] };
   const repo = branch?.repo ?? pr?.repo;
   const local = repo ? localRepos(ctx.runtime, ctx.run).get(repo.slug.toLowerCase()) : undefined;
+  // compared with where it goes: its PR's destination, else a Story task's Story branch (the same
+  // name in each repository, read in this one), else the base; the Story itself — with the base
+  const compareWith =
+    pr?.destination ?? (inStory && inStory.key !== head.issue ? inStory.branch : undefined) ?? cfg.base;
   const reader: WorkReader | undefined = local
-    ? localReader(local.path, git, cfg.base)
+    ? localReader(local.path, git, compareWith)
     : repo && available.has("bitbucket.branch.commits")
-      ? bitbucketReader((n, a) => call(ctx, n, a), repo, cfg.base)
+      ? bitbucketReader((n, a) => call(ctx, n, a), repo, compareWith)
       : undefined;
   const merged = /merged/i.test(pr?.state ?? "") && !prs.some((p) => /open/i.test(p.state ?? ""));
   const base = {
@@ -241,7 +293,10 @@ async function repoItem(
     files: { contract: work.read.length, other: Math.max(0, work.files.length - work.read.length) },
     ...(merged
       ? {
-          note: `merged into ${work.base ?? "the base"}: the contract is what is there now (its fields shown as added), not a pending change`,
+          note:
+            inStory && work.base === inStory.branch
+              ? `merged into the Story's branch ${work.base}: there, not in the base yet until the Story's PR is merged — the contract is what that branch has now (its fields shown as added)`
+              : `merged into ${work.base ?? "the base"}: the contract is what is there now (its fields shown as added), not a pending change`,
         }
       : {}),
   };
@@ -254,6 +309,33 @@ async function epicAmong(ctx: StepContext, keys: readonly string[]): Promise<{ e
     if (r.ok && /^(epic|эпик)$/i.test(issueFacts(r.text).type ?? "")) return { epic: k };
   }
   return {};
+}
+
+/**
+ * The run's Story (`relatedWork.story`): the issue itself when it is a Story, else the Story it is
+ * included in — read for its tasks (its inclusion links) and its epic.
+ */
+async function storyOfRun(
+  ctx: StepContext,
+  key: string,
+  self: IssueFacts,
+  text: string,
+): Promise<StoryOfRun | undefined> {
+  const cfg = ctx.runtime.loaded.config.relatedWork.story;
+  const isStory = cfg.types.some((t) => t.toLowerCase() === (self.type ?? "").toLowerCase());
+  if (isStory) return { key, branch: storyBranch(cfg.branch, key), tasks: inclusionsOf(text, cfg).includes };
+  const storyKey = storyOf(text, cfg) ?? ctx.run.workspace.story?.key;
+  if (!storyKey) return undefined;
+  const got = await call(ctx, "jira.get", { key: storyKey, fields: "*all" });
+  if (!got.ok) return { key: storyKey, branch: storyBranch(cfg.branch, storyKey), tasks: [] };
+  const facts = issueFacts(got.text);
+  const epic = facts.epic ? {} : await epicAmong(ctx, facts.keyFields ?? []);
+  return {
+    key: storyKey,
+    branch: storyBranch(cfg.branch, storyKey),
+    tasks: inclusionsOf(got.text, cfg).includes.filter((t) => t.key !== key),
+    facts: { ...facts, ...epic },
+  };
 }
 
 /** `related.collect`: the related-work document, or nothing when there is no issue to start from. */
@@ -277,11 +359,35 @@ export const collectRelated: DeterministicTool = async (ctx) => {
   if (!got.ok) return say(`jira.get ${key} failed`);
   const facts = issueFacts(got.text);
   const self = { ...facts, key, ...(facts.epic ? {} : await epicAmong(ctx, facts.keyFields ?? [])) };
-  const related = await relatedIssues(ctx, self);
+  const story = await storyOfRun(ctx, key, self, got.text);
+  if (story) {
+    const based = ctx.run.workspace.story?.based === true;
+    ctx.runtime.events.emit({
+      kind: "related.story",
+      runId: ctx.run.id,
+      stepId: ctx.step.id,
+      iteration: ctx.iteration,
+      payload: {
+        story: story.key,
+        branch: story.branch,
+        tasks: story.tasks.length,
+        self: story.key === key,
+        based,
+        // the task is in a Story, the checkout did not start from its branch: why, for the feed
+        ...(story.key !== key && !based
+          ? { why: ctx.run.workspace.story ? "no-branch" : ctx.run.workspace.mode === "cwd" ? "cwd" : "base" }
+          : {}),
+      },
+    });
+  }
+  const related = await relatedIssues(ctx, self, story);
   const issues = related.picked.filter((i): i is IssueFacts & { key: string } => !!i.key);
+  const members = new Set([...(story?.tasks.map((t) => t.key) ?? []), ...(story ? [story.key] : [])]);
   const items: RelatedItem[] = [];
   // the related issues side by side, a few at a time; the document keeps their order
-  for (const found of await inTurns(issues, READS_AT_ONCE, (issue) => itemsOf(ctx, issue)))
+  for (const found of await inTurns(issues, READS_AT_ONCE, (issue) =>
+    itemsOf(ctx, issue, story && members.has(issue.key) ? story : undefined),
+  ))
     items.push(...found);
   const doc: RelatedWorkDoc = {
     about: RELATED_ABOUT,
@@ -289,6 +395,16 @@ export const collectRelated: DeterministicTool = async (ctx) => {
     items: items.filter((i) => i.found !== "none" || i.note),
     notFound: items.filter((i) => i.found === "none" && !i.note).map((i) => i.issue),
     ...(related.notRead.length > 0 ? { notRead: related.notRead } : {}),
+    ...(story
+      ? {
+          story: {
+            key: story.key,
+            branch: story.branch,
+            tasks: story.tasks.map((t) => t.key),
+            ...(story.key !== key ? { based: ctx.run.workspace.story?.based === true } : {}),
+          },
+        }
+      : {}),
     ...(issues.length === 0
       ? {
           note:
@@ -355,7 +471,15 @@ export const checkRelated: DeterministicTool = async (ctx) => {
     }
     let read = byIssue.get(item.issue);
     if (!read) {
-      read = await itemsOf(ctx, { key: item.issue, links: [], ...(item.type ? { type: item.type } : {}) });
+      const inStory =
+        item.story && doc.story?.key === item.story
+          ? { key: doc.story.key, branch: doc.story.branch }
+          : undefined;
+      read = await itemsOf(
+        ctx,
+        { key: item.issue, links: [], ...(item.type ? { type: item.type } : {}) },
+        inStory,
+      );
       byIssue.set(item.issue, read);
     }
     const fresh = read.find((r) => r.repo === item.repo) ?? (read[0] as RelatedItem);

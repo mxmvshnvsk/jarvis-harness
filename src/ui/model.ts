@@ -1156,6 +1156,26 @@ export function feedItem(e: StoredEvent): FeedItem | undefined {
         "warn",
       );
     }
+    case "related.story": {
+      const story = str(p.story) ?? "?";
+      const branch = str(p.branch) ?? "?";
+      if (p.self === true)
+        return at(t("Story {story}: its tasks read first, compared with {branch}", { story, branch }));
+      if (p.based === true)
+        return at(
+          t("in Story {story}: the run started from {branch}, its PR goes into it", { story, branch }),
+          "ok",
+        );
+      return at(
+        p.why === "no-branch"
+          ? t("in Story {story}: the repository has no {branch} yet, the run started from the usual base", {
+              story,
+              branch,
+            })
+          : t("in Story {story} ({branch}): the run did not start from its branch", { story, branch }),
+        "warn",
+      );
+    }
     case "related.skipped":
       return at(t("related work not read: {why}", { why: str(p.reason) ?? "?" }));
     case "related.moved":

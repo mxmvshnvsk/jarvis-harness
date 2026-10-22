@@ -82,6 +82,11 @@ export const WorkspaceRefSchema = z.strictObject({
   headCommit: z.string().min(1).optional(),
   /** How the run's checkout is made (`workspace.checkout`): absent — a git worktree. */
   checkout: z.enum(["clone"]).optional(),
+  /**
+   * The task is in a Story (`relatedWork.story`): its key and branch, and whether the run started from
+   * that branch (its PR goes into it) — false when the repository has no such branch yet.
+   */
+  story: z.strictObject({ key: z.string().min(1), branch: z.string().min(1), based: z.boolean() }).optional(),
 });
 export type WorkspaceRef = z.infer<typeof WorkspaceRefSchema>;
 

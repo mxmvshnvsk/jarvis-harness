@@ -33,7 +33,14 @@ relatedWork:                   # ADR-0026: ветки и PR смежных за�
   enabled: true                # по умолчанию для прогонов; на прогон — --related / --no-related, галочка в New task
   maxIssues: 12               # сначала связанные с задачей и названные в её описании; кто не влез — в notRead
   sides: { "Back Task": back, "Middle Task": back, "Front Task": front }   # тип задачи Jira → сторона: сначала читается другая
+  prefixes: { java: back, back: back, middle: back, js: front, front: front }   # префикс в названии ([Java] …, регистр любой) → сторона, когда тип её не говорит (Change)
   # base: dev                  # с чем сравнивать ветку; по умолчанию — ветка по умолчанию репозитория
+  story:                       # Story между эпиком и задачами; задача без такой связи работает как раньше
+    types: [Story]
+    includes: ["Включает в себя", includes]      # имя связи со стороны Story
+    includedIn: ["Включена в", "is included in"] # со стороны задачи
+    branch: "feature/{key}"    # ветка Story, одинаковая во всех репозиториях; задачи сравниваются с ней (или с destination своего PR)
+    base: true                 # прогон задачи из Story начинается от её ветки и PR идёт в неё — если ветка есть в репо; иначе обычная база и предупреждение
   # Нужны capability jira.devInfo (Atlassian) и, если репозитория нет на машине, bitbucket.branch.commits,
   # bitbucket.commit.get, bitbucket.file.get — с allow у сервера их надо добавить туда.
 feedback:                      # «Сообщить о проблеме» в jarvis ui; то же можно задать в проекте

@@ -1639,8 +1639,16 @@ export const RU: Readonly<Record<string, string>> = {
   "{issue}: its branch moved on since the spec, the contract is the same":
     "{issue}: ветка ушла вперёд после спеки, контракт тот же",
   "Look at related tasks and their branches": "Смотреть смежные задачи и их ветки",
-  "the branches and PRs of the epic's other tasks and the contract they change, before the spec":
-    "ветки и PR других задач эпика и что они меняют в контракте — до спеки",
+  "the branches and PRs of the epic's or Story's other tasks and the contract they change, before the spec; a task in a Story starts from the Story's branch and its PR goes into it":
+    "ветки и PR других задач эпика или Story и что они меняют в контракте — до спеки; задача из Story начинается от ветки Story, и её PR идёт в неё",
+  "Story {story}: its tasks read first, compared with {branch}":
+    "Story {story}: сначала её задачи, сравнение с {branch}",
+  "in Story {story}: the run started from {branch}, its PR goes into it":
+    "задача из Story {story}: прогон начат от {branch}, PR пойдёт в неё",
+  "in Story {story}: the repository has no {branch} yet, the run started from the usual base":
+    "задача из Story {story}: в репо ещё нет {branch}, прогон начат от обычной базы",
+  "in Story {story} ({branch}): the run did not start from its branch":
+    "задача из Story {story} ({branch}): прогон начат не от её ветки",
 };
 
 /**

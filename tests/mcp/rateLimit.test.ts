@@ -37,8 +37,18 @@ describe("McpRateLimiter: calls per minute to a server", () => {
   it("counts across limiters on one database: processes of one user", async () => {
     const shared = db();
     let now = 5_000_000;
-    const a = new McpRateLimiter(shared, { now: () => now, sleep: async (ms) => void (now += ms) });
-    const b = new McpRateLimiter(shared, { now: () => now, sleep: async (ms) => void (now += ms) });
+    const a = new McpRateLimiter(shared, {
+      now: () => now,
+      sleep: async (ms) => {
+        now += ms;
+      },
+    });
+    const b = new McpRateLimiter(shared, {
+      now: () => now,
+      sleep: async (ms) => {
+        now += ms;
+      },
+    });
     await a.acquire("jira", 1);
     const before = now;
     await b.acquire("jira", 1);

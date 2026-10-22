@@ -14,6 +14,7 @@ import { noteForStart, requestRedo } from "../../app/redo.ts";
 import { carriedSteps, RESTARTABLE, restartPlanOf } from "../../app/restart.ts";
 import { createRuntime, type Runtime } from "../../app/runtime.ts";
 import { runDetail } from "../../app/status.ts";
+import { storyBaseOf } from "../../app/storyBase.ts";
 import { afterRunStops, CROSS_WORKFLOWS, workflowHere } from "../../app/subtasks.ts";
 import { EDITABLE_TYPES, editableFile, isEditable, syncEditable } from "../../artifacts/editable.ts";
 import type { Approval } from "../../artifacts/store.ts";
@@ -390,13 +391,32 @@ export async function prepareWorkspace(
   prompt?: Prompt,
   /** The run's workflow runs the project's commands: without, the checkout skips `workspace.setup`. */
   setup = true,
+  /** The run reads related work (`--related`); none — `relatedWork.enabled`. */
+  related?: boolean,
 ): Promise<WorkspaceRef> {
   const loaded = runtime.loaded;
   const root = loaded.project?.root ?? ctx.cwd;
-  const cwd: WorkspaceRef = { mode: "cwd", repoRoot: root, path: root, baseRef: base ?? "HEAD" };
   const useWorktree = loaded.config.workspace.mode === "worktree" && loaded.project?.isGitRepo === true;
-  if (!useWorktree) return cwd;
   const st = ctx.out.errStyle;
+  // a task in a Story is made on the Story's branch, when this repository has it (`relatedWork.story`)
+  const story =
+    base === undefined && loaded.project?.isGitRepo === true
+      ? await storyBaseOf(runtime, task, root, related)
+      : undefined;
+  if (story)
+    ctx.out.note(
+      story.based && useWorktree
+        ? `${st.ok("→")} the task is in Story ${story.key}: the run starts from ${story.ref} and its PR goes into ${story.branch}`
+        : story.based
+          ? `${st.warn("note:")} the task is in Story ${story.key}: its branch is ${story.branch}; the run works in the current checkout as it is`
+          : `${st.warn("note:")} the task is in Story ${story.key}, but this repository has no ${story.branch} yet: the run starts from the usual base — create the branch from it for the Story's tasks`,
+    );
+  const storyRef = story
+    ? { story: { key: story.key, branch: story.branch, based: story.based && useWorktree } }
+    : {};
+  const from = base ?? (story?.based && useWorktree ? story.ref : undefined);
+  const cwd: WorkspaceRef = { mode: "cwd", repoRoot: root, path: root, baseRef: base ?? "HEAD", ...storyRef };
+  if (!useWorktree) return cwd;
   if (await WorktreeWorkspace.isDirty(root)) {
     ctx.out.note(
       `${st.warn("note:")} the working tree has uncommitted changes; the run starts from the last commit (ADR-0003 §2)`,
@@ -419,7 +439,7 @@ export async function prepareWorkspace(
       worktreesDir: loaded.home.worktreesDir,
       runId,
       task,
-      ...(base ? { baseRef: base } : {}),
+      ...(from ? { baseRef: from } : {}),
       // a run that only reads the code (spec, research) does not wait for an install it never uses
       ...(setup && loaded.config.workspace.setup ? { setup: loaded.config.workspace.setup } : {}),
       checkout: loaded.config.workspace.checkout,
@@ -454,7 +474,7 @@ export async function prepareWorkspace(
     stop();
     runtime.log.info("workspace.ready", { runId, path: wt.ref.path, ms: Date.now() - started });
     ctx.out.note(`${st.ok("✓")} checkout ready ${st.muted(`in ${duration(Date.now() - started)}`)}`);
-    return wt.ref;
+    return { ...wt.ref, ...storyRef };
   } catch (error) {
     stop();
     if (!(error instanceof WorktreeError)) throw error;
@@ -511,6 +531,7 @@ async function startContinuation(
         undefined,
         prompt,
         workflowRunsProjectCommands(runtime, target),
+        from.options?.related,
       );
   const run = runtime.runs.create({
     id: runId,
@@ -644,6 +665,7 @@ export async function runRestart(
           undefined,
           prompt,
           workflowRunsProjectCommands(runtime, workflow),
+          from.options?.related,
         );
     const run = runtime.runs.create({
       id: runId,
@@ -832,6 +854,7 @@ export async function runWork(
           options.base,
           undefined,
           workflowRunsProjectCommands(runtime, workflow),
+          options.related,
         );
     const run = runtime.runs.create({
       id: runId,

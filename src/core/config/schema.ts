@@ -605,8 +605,34 @@ export const RelatedWorkConfigSchema = z.strictObject({
   sides: z
     .record(z.string().min(1), z.string().min(1))
     .default({ "Back Task": "back", "Middle Task": "back", "Front Task": "front" }),
+  /**
+   * A prefix in the task's title → its side, for types that do not say it ("Change": "[Java] …",
+   * "[Front] …"); in any case. The type's side (`sides`) goes first.
+   */
+  prefixes: z
+    .record(z.string().min(1), z.string().min(1))
+    .default({ java: "back", back: "back", middle: "back", js: "front", front: "front" }),
   /** What a branch is compared with; default — the repository's default branch. */
   base: z.string().min(1).optional(),
+  /**
+   * Stories between an epic and its tasks: a Story includes tasks (an issue link), has its own branch
+   * in each repository it touches (the same name in all), the tasks branch off it and their PRs go
+   * into it, and the Story's PR goes into the base once tested. A task with no such link works as before.
+   */
+  story: z
+    .strictObject({
+      /** The issue types that are Stories. */
+      types: z.array(z.string().min(1)).default(["Story"]),
+      /** The link's name from the Story's side ("includes"). */
+      includes: z.array(z.string().min(1)).default(["Включает в себя", "includes"]),
+      /** The link's name from the task's side ("is included in"). */
+      includedIn: z.array(z.string().min(1)).default(["Включена в", "is included in"]),
+      /** The Story's branch, `{key}` its issue key: the same in every repository. */
+      branch: z.string().min(1).default("feature/{key}"),
+      /** The run of a task in a Story starts from the Story's branch and its PR goes into it, when the repository has the branch. */
+      base: z.boolean().default(true),
+    })
+    .prefault({}),
 });
 
 /**

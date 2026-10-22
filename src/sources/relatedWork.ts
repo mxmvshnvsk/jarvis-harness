@@ -38,6 +38,8 @@ export interface RelatedItem {
   readonly found: "jira-dev-info" | "local-git" | "bitbucket" | "none";
   readonly contract: readonly ContractChange[];
   readonly files?: { readonly contract: number; readonly other: number };
+  /** The Story it is in (or is), when the run's task is in one: its branch is compared with the Story's. */
+  readonly story?: string;
   readonly note?: string;
 }
 
@@ -52,12 +54,22 @@ export interface RelatedWorkDoc {
   readonly note?: string;
   /** Related issues not read: past `relatedWork.maxIssues`. */
   readonly notRead?: readonly string[];
+  /**
+   * The run's task is in a Story (or is one): its branch (the same name in each repository), its
+   * tasks, and whether the run started from that branch.
+   */
+  readonly story?: {
+    readonly key: string;
+    readonly branch: string;
+    readonly tasks: readonly string[];
+    readonly based?: boolean;
+  };
   readonly checkedAt: string;
 }
 
 export const RELATED_WORK = "related-work";
 export const RELATED_ABOUT =
-  "The work of tasks related to this one, read by Jarvis before the agents: their branches and pull requests and the contract they change (DTO fields, endpoints). A branch not merged yet is a dependency, not a fact: write it in the spec's dependencies with its issue, branch, commit and PR state, and build on what the branch has — never on what it might have.";
+  "The work of tasks related to this one, read by Jarvis before the agents: their branches and pull requests and the contract they change (DTO fields, endpoints). A branch not merged yet is a dependency, not a fact: write it in the spec's dependencies with its issue, branch, commit and PR state, and build on what the branch has — never on what it might have. When the task is in a Story (`story`), the tasks of the Story branch off the Story's branch and are merged into it: a task merged into the Story's branch is there, not in the base yet, until the Story's own PR is merged.";
 
 /* ---- reading what the tools answer: they differ between servers, so by shape, not by schema ---- */
 
@@ -198,6 +210,75 @@ export function issueFacts(text: string): IssueFacts {
   };
 }
 
+export interface StoryLinks {
+  readonly types: readonly string[];
+  readonly includes: readonly string[];
+  readonly includedIn: readonly string[];
+}
+
+export interface Inclusion {
+  readonly key: string;
+  readonly type?: string;
+  readonly summary?: string;
+}
+
+/**
+ * The issue's inclusion links (`relatedWork.story`): the issues it is included in (a task → its Story)
+ * and the issues it includes (a Story → its tasks). Jira gives a link from the issue's side: the other
+ * issue as `inwardIssue` — the other one's outward name points at this one («Включает в себя» it), so
+ * this one is included in it; as `outwardIssue` — this one includes it.
+ */
+export function inclusionsOf(
+  text: string,
+  names: StoryLinks,
+): { includedIn: Inclusion[]; includes: Inclusion[] } {
+  const doc = json(text);
+  const includedIn: Inclusion[] = [];
+  const includes: Inclusion[] = [];
+  if (doc === undefined) return { includedIn, includes };
+  const lower = (xs: readonly string[]) => new Set(xs.map((x) => x.trim().toLowerCase()));
+  const inNames = lower(names.includedIn);
+  const outNames = lower(names.includes);
+  const issueOf = (v: unknown): Inclusion | undefined => {
+    if (!v || typeof v !== "object") return undefined;
+    const o = v as Record<string, unknown>;
+    const key = str(o.key);
+    if (!key || !ISSUE_KEY.test(key)) return undefined;
+    const fields = (o.fields && typeof o.fields === "object" ? o.fields : o) as Record<string, unknown>;
+    const type = named(fields.issuetype ?? fields.issue_type ?? fields.type);
+    const summary = str(fields.summary);
+    return { key, ...(type ? { type } : {}), ...(summary ? { summary } : {}) };
+  };
+  for (const { o } of walk(doc)) {
+    const t = o.type && typeof o.type === "object" ? (o.type as Record<string, unknown>) : undefined;
+    if (!t) continue;
+    const inward = str(t.inward)?.toLowerCase();
+    const outward = str(t.outward)?.toLowerCase();
+    const isInclusion = (!!inward && inNames.has(inward)) || (!!outward && outNames.has(outward));
+    if (!isInclusion) continue;
+    const other = issueOf(o.inward_issue ?? o.inwardIssue);
+    if (other) includedIn.push(other);
+    const mine = issueOf(o.outward_issue ?? o.outwardIssue);
+    if (mine) includes.push(mine);
+  }
+  const unique = (xs: Inclusion[]) => xs.filter((x, i) => xs.findIndex((y) => y.key === x.key) === i);
+  return { includedIn: unique(includedIn), includes: unique(includes) };
+}
+
+/** The Story the issue is in: the first issue it is included in that is a Story (or of no type said). */
+export function storyOf(text: string, names: StoryLinks): string | undefined {
+  const types = new Set(names.types.map((x) => x.toLowerCase()));
+  const { includedIn } = inclusionsOf(text, names);
+  return (
+    includedIn.find((i) => i.type && types.has(i.type.toLowerCase())) ?? includedIn.find((i) => !i.type)
+  )?.key;
+}
+
+/** The Story's branch by `relatedWork.story.branch`. */
+export function storyBranch(pattern: string, key: string): string {
+  return pattern.replaceAll("{key}", key);
+}
+
 /** The issues a `jira.search` answered: key, type, status, summary. */
 export function searchHits(text: string): IssueFacts[] {
   const doc = json(text);
@@ -223,6 +304,8 @@ export interface DevPr {
   readonly state?: string;
   readonly url?: string;
   readonly branch?: string;
+  /** The branch it goes into: a task's PR into its Story's branch, the Story's into the base. */
+  readonly destination?: string;
   readonly repo?: { readonly workspace?: string; readonly slug: string };
 }
 
@@ -264,7 +347,17 @@ export function devInfoOf(text: string): { branches: DevBranch[]; prs: DevPr[] }
             str((source as Record<string, unknown>).displayId))
           : undefined);
       const id = str(o.id) ?? (typeof o.id === "number" ? String(o.id) : undefined);
+      const target = (o.destination ?? o.toRef ?? o.destination_branch) as unknown;
+      const destination =
+        str(o.destination_branch) ??
+        str(o.destinationBranch) ??
+        named(target) ??
+        (target && typeof target === "object"
+          ? (str((target as Record<string, unknown>).branch) ??
+            str((target as Record<string, unknown>).displayId))
+          : undefined);
       prs.push({
+        ...(destination ? { destination: destination.replace(/^refs\/heads\//, "") } : {}),
         ...(id ? { id } : {}),
         ...((str(o.status) ?? str(o.state)) ? { state: (str(o.status) ?? str(o.state)) as string } : {}),
         ...(str(o.url) ? { url: str(o.url) as string } : {}),
@@ -279,25 +372,53 @@ export function devInfoOf(text: string): { branches: DevBranch[]; prs: DevPr[] }
 }
 
 /**
- * The issues worth reading first: the ones the task links or names, then the other side's (a front
- * task reads the back ones), then the rest; at most `max`.
+ * The side of an issue's work: by its type (`relatedWork.sides`: "Front Task", "Middle Task"), else
+ * by a prefix in its title (`relatedWork.prefixes`: "[Java] …", "[front] …" — any case), as teams
+ * whose tasks are all "Change" name them.
+ */
+export function sideOfIssue(
+  issue: Pick<IssueFacts, "type" | "summary">,
+  sides: Readonly<Record<string, string>>,
+  prefixes: Readonly<Record<string, string>>,
+): string | undefined {
+  if (issue.type) {
+    const byType =
+      sides[issue.type] ??
+      Object.entries(sides).find(([k]) => k.toLowerCase() === issue.type?.toLowerCase())?.[1];
+    if (byType) return byType;
+  }
+  const lower = Object.fromEntries(Object.entries(prefixes).map(([k, v]) => [k.toLowerCase(), v]));
+  for (const m of (issue.summary ?? "").matchAll(/\[([^\]]{1,30})\]/g)) {
+    const side = lower[(m[1] as string).trim().toLowerCase()];
+    if (side) return side;
+  }
+  return undefined;
+}
+
+/**
+ * The issues worth reading first: the tasks of the run's Story (the other side's first), the ones the
+ * task links or names, then the other side's (a front task reads the back ones), then the rest; at
+ * most `max`.
  */
 export function pickRelated(
   self: string,
   mySide: string | undefined,
   candidates: readonly IssueFacts[],
-  sides: Readonly<Record<string, string>>,
+  sides: Readonly<Record<string, string>> | ((issue: IssueFacts) => string | undefined),
   max: number,
   first: ReadonlySet<string> = new Set(),
+  /** The tasks of the run's Story and the Story itself: before all (the other side first). */
+  story: ReadonlySet<string> = new Set(),
 ): IssueFacts[] {
-  const sideOf = (t?: string) => (t ? sides[t] : undefined);
+  const side = typeof sides === "function" ? sides : (c: IssueFacts) => (c.type ? sides[c.type] : undefined);
   // the issues the task links or names come first: a person pointed at them
   const rank = (c: IssueFacts) => {
+    const sideOfIt = side(c);
+    if (c.key && story.has(c.key)) return mySide && sideOfIt && sideOfIt !== mySide ? -3 : -2;
     if (c.key && first.has(c.key)) return -1;
-    const side = sideOf(c.type);
-    if (mySide && side && side !== mySide) return 0;
-    if (!side) return 1;
-    return side === mySide ? 2 : 1;
+    if (mySide && sideOfIt && sideOfIt !== mySide) return 0;
+    if (!sideOfIt) return 1;
+    return sideOfIt === mySide ? 2 : 1;
   };
   const seen = new Set<string>([self]);
   return candidates
@@ -422,6 +543,8 @@ export function localReader(path: string, git: Git, base?: string): WorkReader {
     found: "local-git",
     async read(branch) {
       await git(["fetch", "--quiet", "origin", branch], path);
+      // a Story's branch the task goes into: fetched too, it moves with every task merged into it
+      if (base) await git(["fetch", "--quiet", "origin", base], path);
       const ref = `origin/${branch}`;
       const head = (await git(["rev-parse", "--verify", "--quiet", ref], path)).stdout.trim();
       if (!head) return undefined;
