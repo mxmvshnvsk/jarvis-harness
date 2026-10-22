@@ -638,7 +638,7 @@ form.clarify>.actions{margin:4px 0}
 .launch .spin{margin-left:auto}
 .launch.failed{border-color:var(--bad)}
 .tail{margin:6px 0 0;padding:10px 12px;border-radius:8px;background:var(--sunken);border:1px solid var(--line);font-size:12px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere;max-height:240px;overflow:auto}
-.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.sr{position:absolute;width:1px;height:1px;padding:0;margin:-1px;border:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 .tabs a[aria-current=page]{color:var(--ink);font-weight:600;border-bottom:2px solid var(--ink)}
 .runtitle{display:flex;align-items:flex-start;justify-content:space-between;gap:16px 24px}
 .runtext{flex:1;min-width:0;display:flex;flex-direction:column;gap:8px}
