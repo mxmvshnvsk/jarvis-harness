@@ -442,6 +442,8 @@ a.ref{text-decoration:none}a.ref code{color:var(--accent)}a.ref:hover code{text-
 .thread .actions .btn{min-height:36px}
 .aside{flex:1 1 320px;min-width:0;padding:20px;display:flex;flex-direction:column;gap:16px;border-color:var(--ink)}
 .aside h2{font-size:18px}
+/* side by side with the document: the decision stays in sight while it scrolls, and scrolls itself when taller than the screen */
+@media (min-width:1000px){.cols>.aside{position:sticky;top:72px;max-height:calc(100vh - 88px);overflow-y:auto;overscroll-behavior:contain}.cols>.aside>form[data-decision]{position:sticky;bottom:-20px;margin:0 -20px -20px;padding:14px 20px 20px;background:var(--panel);border-top:1px solid var(--line)}}
 .facts{display:flex;flex-direction:column;gap:6px;font-size:14px}
 .facts .lbl{font-size:13px;font-weight:500;color:var(--muted)}
 .decide{display:flex;flex-direction:column;gap:8px;border-top:1px solid var(--line-soft);padding-top:16px}
