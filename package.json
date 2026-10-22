@@ -19,7 +19,7 @@
     "README.md"
   ],
   "scripts": {
-    "build": "node scripts/build-client.ts && tsc -p tsconfig.build.json && node scripts/build-info.ts",
+    "build": "tsc -p tsconfig.build.json && node scripts/build-info.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
