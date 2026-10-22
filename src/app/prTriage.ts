@@ -25,7 +25,7 @@ export const PR_TRIAGE = "pr-triage";
 
 export type Verdict = "agree" | "disagree" | "question" | "nothing";
 /** Where a thread stands on Jarvis's side. */
-export type ThreadState = "proposed" | "to-fix" | "replied" | "handled";
+export type ThreadState = "proposed" | "to-fix" | "fixing" | "fixed" | "replied" | "handled";
 
 export interface TriageItem {
   readonly thread: number;
@@ -44,6 +44,8 @@ export interface TriageItem {
     readonly text?: string;
     readonly edited?: boolean;
   };
+  /** The run that fixes it (`jarvis pr-fix`), and the commit it pushed. */
+  readonly fix?: { readonly run: string; readonly commit?: string };
 }
 
 export interface TriageDoc {
@@ -262,6 +264,26 @@ export class ReplyError extends Error {
     super(message);
     this.name = "ReplyError";
   }
+}
+
+/** Threads moved on by the fix run: being fixed by it, or fixed in its commit. */
+export function markThreads(
+  runtime: Runtime,
+  run: Run,
+  threads: readonly number[],
+  state: "fixing" | "fixed" | "to-fix",
+  fix?: TriageItem["fix"],
+): void {
+  const doc = triageOf(runtime, run);
+  const items = doc.items.map((i) =>
+    threads.includes(i.thread) ? { ...i, state, ...(fix ? { fix } : {}) } : i,
+  );
+  save(runtime, run, { items }, "agent");
+}
+
+/** The threads to fix now: the agent agreed (with fixWhenAgreed) or the person asked. */
+export function threadsToFix(runtime: Runtime, run: Run): TriageItem[] {
+  return triageOf(runtime, run).items.filter((i) => i.state === "to-fix");
 }
 
 /** The line that ends a reply: Jarvis wrote it, and how the person took part. */

@@ -70,7 +70,14 @@ import { type McpProbe, mcpHealthOf } from "../app/mcpHealth.ts";
 import { modelsHealthOf } from "../app/modelHealth.ts";
 import { pauseRequested, requestPause } from "../app/pause.ts";
 import { checkPr, followsPr, type PrReviewDoc, prCheckDue, prReviewOf } from "../app/prReview.ts";
-import { decideThread, ReplyError, threadsToWeigh, triageOf, triagePr } from "../app/prTriage.ts";
+import {
+  decideThread,
+  ReplyError,
+  threadsToFix,
+  threadsToWeigh,
+  triageOf,
+  triagePr,
+} from "../app/prTriage.ts";
 import { requestRedo } from "../app/redo.ts";
 import { restartPlanOf } from "../app/restart.ts";
 import { resumableOf } from "../app/resumable.ts";
@@ -447,6 +454,20 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
       });
     }
   };
+  /**
+   * Threads to fix, and no fix running for the PR: `jarvis pr-fix` in the background (the page's
+   * session; without a launcher the person runs it).
+   */
+  const fixIfAsked = (run: Run): void => {
+    if (!options.launcher || threadsToFix(runtime, run).length === 0) return;
+    const running = runtime.runs
+      .list({ limit: 200 })
+      .some((r) => r.options?.prFix?.runId === run.id && !isTerminal(r.state));
+    const launched = options.launcher
+      .list()
+      .some((l) => l.workflow === "pr-fix" && l.from === run.id && l.exitCode === null);
+    if (!running && !launched) options.launcher.fixPr(run);
+  };
   let prBusy = false;
   const prPoll = async () => {
     if (prBusy) return;
@@ -457,6 +478,7 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
         if (run.updatedAt < since || !prCheckDue(runtime, run)) continue;
         try {
           await weigh(run, await checkPr(runtime, run, "poll"));
+          fixIfAsked(run);
         } catch (error) {
           runtime.events.emit({
             kind: "pr.checkFailed",
@@ -2296,6 +2318,7 @@ ${candidateReviewHtml(c, run, run.workspace.repoRoot, actions, { back: `/runs/${
           who,
           text ?? undefined,
         );
+        if (action === "fix") fixIfAsked(run);
         return redirect(
           r,
           `/runs/${short}/pr?notice=${action === "send" ? "pr-replied" : "pr-decided"}#t${thread}`,
@@ -2314,6 +2337,7 @@ ${candidateReviewHtml(c, run, run.workspace.repoRoot, actions, { back: `/runs/${
       try {
         const doc = await checkPr(runtime, run, "ui");
         await weigh(run, doc);
+        fixIfAsked(run);
         const back = form.get("back") === "review" ? `/runs/${short}/pr` : `/runs/${short}`;
         return redirect(r, `${back}?notice=${doc.ready ? "pr-ready" : "pr-checked"}`);
       } catch (error) {

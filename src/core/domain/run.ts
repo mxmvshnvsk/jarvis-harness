@@ -152,6 +152,8 @@ export const RunOptionsSchema = z.strictObject({
   related: z.boolean().optional(),
   /** The PR flow for this run (`--pr-flow` / `--no-pr-flow`, New task); none — `delivery.flow.enabled`. */
   prFlow: z.boolean().optional(),
+  /** A fix of a PR's comments (`jarvis pr-fix`): the run whose PR it is; it pushes onto that PR's branch. */
+  prFix: z.strictObject({ runId: z.string().min(1) }).optional(),
 });
 export type RunOptions = z.infer<typeof RunOptionsSchema>;
 

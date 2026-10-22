@@ -37,6 +37,7 @@ function launcher(): Launcher {
     },
     continueRun: no,
     restartRun: no,
+    fixPr: no,
     startModule: (o) => {
       modules.push({ module: o.module, repoRoot: o.repoRoot });
       return {

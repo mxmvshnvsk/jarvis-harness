@@ -636,7 +636,55 @@ steps:
         request_changes: { to: spec, maxIterations: 3 }
 `;
 
+/**
+ * The PR flow's fixes (`jarvis pr-fix <run>`): the threads of a PR agreed to change, fixed on top of
+ * the PR's branch — the change, the project's checks, and the push as one commit onto the PR with an
+ * answer in each thread. No spec and no approval: the comments are the spec, the reviewers review.
+ */
+export const PR_FIX_WORKFLOW = `
+name: pr-fix
+version: 1
+kind: fix
+description: The PR's review comments fixed on top of its branch and pushed (jarvis pr-fix)
+entry: comments
+steps:
+  - id: comments
+    kind: deterministic
+    tool: pr.fixInput
+    outputs: [review, spec]
+    transitions: { onSuccess: implementation }
+  - id: implementation
+    kind: agentic
+    agent: implementation
+    onLimit: ask
+    phase: implementation
+    inputs: [review, spec]
+    outputs: [implementation]
+    transitions: { onSuccess: verify }
+  - id: verify
+    kind: composite
+    children: [standards, checks]
+    transitions:
+      onSuccess: push
+      onOutcome:
+        defects_found: { to: implementation, maxIterations: 2 }
+        standards_violation: { to: implementation, maxIterations: 2 }
+  - id: standards
+    kind: deterministic
+    tool: standards.check
+    outputs: [standards-check]
+  - id: checks
+    kind: deterministic
+    tool: project.checks
+    outputs: [checks]
+  - id: push
+    kind: deterministic
+    tool: pr.pushFix
+    transitions: { onSuccess: DONE }
+`;
+
 export const BUILTIN_WORKFLOWS: Readonly<Record<string, string>> = {
+  "pr-fix": PR_FIX_WORKFLOW,
   "research-cross": RESEARCH_CROSS_WORKFLOW,
   "spec-cross": SPEC_CROSS_WORKFLOW,
   "sdd-cross": SDD_CROSS_WORKFLOW,

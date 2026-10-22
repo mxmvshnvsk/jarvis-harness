@@ -41,6 +41,9 @@ function stubLauncher(): Launcher {
     restartRun: () => {
       throw new Error("not here");
     },
+    fixPr: () => {
+      throw new Error("not here");
+    },
     exec: async () => {
       throw new Error("not here");
     },

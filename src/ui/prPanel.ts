@@ -119,9 +119,13 @@ function verdictHtml(run: Run, item: TriageItem, token: string | undefined): Htm
       ? html`<p class="hint">${t("Replied")}${item.done?.edited ? ` · ${t("edited by {who}", { who: item.done.by.replace(/^\w+:/, "") })}` : ""}</p>`
       : item.state === "to-fix"
         ? html`<p class="hint">${t("To be fixed: Jarvis changes the code, pushes a commit and answers in the thread")}</p>`
-        : item.state === "handled"
-          ? html`<p class="hint">${t("Left to you")}</p>`
-          : "";
+        : item.state === "fixing"
+          ? html`<p class="hint">${t("Being fixed")}${item.fix ? html` — <a href="/runs/${encodeURIComponent(shortRunId(item.fix.run))}">${t("run {id}", { id: shortRunId(item.fix.run) })}</a>` : ""}</p>`
+          : item.state === "fixed"
+            ? html`<p class="hint">${t("Fixed")}${item.fix?.commit ? html` <code>${item.fix.commit.slice(0, 10)}</code>` : ""}${item.fix ? html` — <a href="/runs/${encodeURIComponent(shortRunId(item.fix.run))}">${t("run {id}", { id: shortRunId(item.fix.run) })}</a>` : ""}</p>`
+            : item.state === "handled"
+              ? html`<p class="hint">${t("Left to you")}</p>`
+              : "";
   const form =
     token && item.state === "proposed"
       ? html`<form method="post" action="${action}" class="pr-reply"><input type="hidden" name="t" value="${token}"><input type="hidden" name="thread" value="${item.thread}">

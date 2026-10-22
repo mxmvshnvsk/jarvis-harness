@@ -10,6 +10,7 @@ import { canForget, forgetRuns } from "../../app/forget.ts";
 import { continuationStep, continuedBy, handOff } from "../../app/handoff.ts";
 import { duration } from "../../app/journey.ts";
 import { preflightMcp, preflightModels, workflowRunsProjectCommands } from "../../app/preflight.ts";
+import { threadsToFix } from "../../app/prTriage.ts";
 import { noteForStart, requestRedo } from "../../app/redo.ts";
 import { carriedSteps, RESTARTABLE, restartPlanOf } from "../../app/restart.ts";
 import { createRuntime, type Runtime } from "../../app/runtime.ts";
@@ -21,7 +22,13 @@ import type { Approval } from "../../artifacts/store.ts";
 import { resolveActor } from "../../core/actor/resolve.ts";
 import type { Actor } from "../../core/domain/actor.ts";
 import type { ApprovalDecision } from "../../core/domain/artifact.ts";
-import type { FreshSource, Run, TaskKind, WorkspaceRef } from "../../core/domain/run.ts";
+import {
+  type FreshSource,
+  isTerminal,
+  type Run,
+  type TaskKind,
+  type WorkspaceRef,
+} from "../../core/domain/run.ts";
 import { layoutOf, rootRelative, versionedAt } from "../../core/paths.ts";
 import { recordInputs, recordKnowledgeRepoInputs } from "../../evals/inputs.ts";
 import { daemonTick } from "../../orchestration/daemon.ts";
@@ -1761,4 +1768,88 @@ export async function runForget(
 async function knowledgeRepoInputsOf(repoRoot: string) {
   const knowledgeRepo = await recordKnowledgeRepoInputs(repoRoot);
   return knowledgeRepo ? { knowledgeRepo } : {};
+}
+
+/**
+ * `jarvis pr-fix <run>`: the threads of the run's PR agreed to change, fixed on top of the PR's branch
+ * (workflow `pr-fix`): a run of its own, its checkout from the PR's head as the remote has it; it
+ * pushes one commit onto the PR and answers the threads. Started by `jarvis ui` when the agent agrees
+ * with a comment (`delivery.flow.fixWhenAgreed`) or the person asks «Fix».
+ */
+export async function runPrFix(ctx: CliContext, ref: string): Promise<void> {
+  const loaded = await loadForCli(ctx);
+  const runtime = createRuntime(loaded, { env: ctx.env });
+  try {
+    const parent = requireRun(ctx, runtime, ref);
+    const pr = prOf(runtime, parent);
+    if (!pr) {
+      ctx.out.error(`run ${shortRunId(parent.id)} has no PR`);
+      throw new CliExit(EXIT.error);
+    }
+    const fixes = threadsToFix(runtime, parent);
+    if (fixes.length === 0) {
+      ctx.out.line(`no thread of PR ${pr.id ?? ""} is to be fixed`);
+      return;
+    }
+    const busy = runtime.runs
+      .list({ limit: 200 })
+      .find((r) => r.options?.prFix?.runId === parent.id && !isTerminal(r.state));
+    if (busy) {
+      ctx.out.error(`the PR is being fixed by run ${shortRunId(busy.id)} (${busy.state})`);
+      throw new CliExit(EXIT.error);
+    }
+    const root = parent.workspace.repoRoot;
+    const remote = loaded.config.delivery.remote;
+    const fetched = await git(["fetch", "--quiet", remote, pr.source], root, { timeoutMs: 120_000 });
+    if (fetched.code !== 0) {
+      ctx.out.error(`${remote}/${pr.source} could not be fetched: ${fetched.stderr.trim()}`);
+      throw new CliExit(EXIT.error);
+    }
+    const engine = createEngine(runtime);
+    const workflow = engine.workflow("pr-fix");
+    const runId = newRunId();
+    const task = `${parent.task.split("\n")[0]} — ${fixes.length} PR comment${fixes.length === 1 ? "" : "s"} to fix`;
+    ctx.out.note(
+      `${ctx.out.errStyle.ok("→")} fixing ${fixes.length} thread(s) of PR ${pr.id ?? ""} on ${pr.source}`,
+    );
+    const workspace = await prepareWorkspace(
+      ctx,
+      runtime,
+      runId,
+      task,
+      `${remote}/${pr.source}`,
+      undefined,
+      workflowRunsProjectCommands(runtime, workflow),
+      false,
+    );
+    const run = runtime.runs.create({
+      id: runId,
+      task,
+      workflow: "pr-fix",
+      owner: await actorFor(ctx, runtime),
+      workspace,
+      dataClass: loaded.config.dataClass,
+      ...(loaded.config.profile ? { profile: loaded.config.profile } : {}),
+      options: {
+        prFix: { runId: parent.id },
+        prFlow: false,
+        related: false,
+        ...(parent.options?.kind ? { kind: parent.options.kind } : {}),
+        ...(parent.options?.autonomous ? { autonomous: true as const } : {}),
+      },
+    });
+    runtime.events.emit({
+      kind: "run.created",
+      runId: run.id,
+      payload: { task, workflow: "pr-fix", fixes: parent.id },
+    });
+    runtime.events.emit({
+      kind: "pr.fixStarted",
+      runId: parent.id,
+      payload: { run: run.id, threads: fixes.length },
+    });
+    await executeAndReport(ctx, runtime, engine, run, false);
+  } finally {
+    await runtime.close();
+  }
 }

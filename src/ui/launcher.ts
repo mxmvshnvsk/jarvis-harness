@@ -60,7 +60,7 @@ const COMMAND: Record<Workflow, string> = {
 export interface Launch {
   readonly id: string;
   readonly task: string;
-  readonly workflow: Workflow | "onboard-module";
+  readonly workflow: Workflow | "onboard-module" | "pr-fix";
   /** Module research: the folder it maps, and what matters to the person who asked. */
   readonly module?: string;
   readonly note?: string;
@@ -94,6 +94,8 @@ export interface Launcher {
   }): Launch;
   /** A finished research/spec goes on as its next workflow: `jarvis continue <run>` in the background. */
   continueRun(from: Run, workflow: Workflow): Launch;
+  /** The PR's threads agreed to change, fixed on the PR's branch: `jarvis pr-fix <run>` in the background. */
+  fixPr(parent: Run): Launch;
   /** A cancelled or failed run again from a step: `jarvis restart <run> --from <step>` in the background. */
   restartRun(from: Run, step: string, note?: string): Launch;
   /** Research one module (or a folder): now, or after the research in front of it. */
@@ -315,6 +317,25 @@ export function createLauncher(options: LauncherOptions): Launcher {
       });
       return launch;
     },
+    fixPr(parent) {
+      const id = randomBytes(6).toString("hex");
+      const launch: Launch = {
+        id,
+        task: parent.task,
+        workflow: "pr-fix",
+        from: parent.id,
+        repoRoot: parent.workspace.repoRoot,
+        startedAt: new Date().toISOString(),
+        log: join(options.logDir, `launch-${id}.log`),
+        exitCode: null,
+      };
+      launches.unshift(launch);
+      spawnCli(["pr-fix", parent.id], parent.workspace.repoRoot, launch.log, (code) => {
+        launch.exitCode = code ?? 1;
+        if (launch.runId) busy.delete(launch.runId);
+      });
+      return launch;
+    },
     restartRun(from, step, note) {
       const id = randomBytes(6).toString("hex");
       const launch: Launch = {
@@ -359,7 +380,9 @@ export function createLauncher(options: LauncherOptions): Launcher {
               r.createdAt >= l.startedAt.slice(0, 19) &&
               (l.module
                 ? r.workflow === "onboard-module" && moduleOfRun(runtime, r.id)?.module === l.module
-                : r.task === l.task && (!l.from || (r.id !== l.from && r.workflow === l.workflow))),
+                : l.workflow === "pr-fix"
+                  ? r.options?.prFix?.runId === l.from
+                  : r.task === l.task && (!l.from || (r.id !== l.from && r.workflow === l.workflow))),
           );
         if (!run) continue;
         l.runId = run.id;

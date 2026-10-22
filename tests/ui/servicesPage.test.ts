@@ -37,6 +37,7 @@ function launcher(): Launcher {
     },
     continueRun: no,
     restartRun: no,
+    fixPr: no,
     startModule: no,
     unqueue: () => false,
     list: () => [],

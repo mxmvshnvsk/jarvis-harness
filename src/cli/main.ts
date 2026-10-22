@@ -63,6 +63,7 @@ import {
   runForget,
   runGc,
   runOpen,
+  runPrFix,
   runRedo,
   runRestart,
   runResume,
@@ -551,6 +552,12 @@ export function buildProgram(options: RunOptions = {}): Command {
     .description("back to the run that waits for you (no id needed): decide right here and go on")
     .action(async (run: string | undefined) => {
       await runContinue(ctxFor(), run);
+    });
+  program
+    .command("pr-fix <run>")
+    .description("the comments of the run's PR agreed to change: fixed on the PR's branch, pushed, answered")
+    .action(async (run: string) => {
+      await runPrFix(ctxFor(), run);
     });
   program
     .command("restart <run>")

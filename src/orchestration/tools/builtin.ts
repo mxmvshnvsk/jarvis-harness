@@ -13,6 +13,7 @@ import type { DeterministicTool } from "../executors.ts";
 import { failingOnBase, junitFailures } from "./baseline.ts";
 import { CROSS_TOOLS } from "./cross.ts";
 import { excerptText } from "./excerpt.ts";
+import { PR_FIX_TOOLS } from "./prFix.ts";
 import { rebuildsFor } from "./rebuild.ts";
 import { RELATED_TOOLS } from "./related.ts";
 import { classSelection, coveringTests, fileSelection, testRunnerOf } from "./relatedTests.ts";
@@ -112,6 +113,7 @@ export const BUILTIN_TOOLS: Record<string, DeterministicTool> = {
 
   /** The work of related tasks (ADR-0026): read before the spec, checked again before implementation. */
   ...RELATED_TOOLS,
+  ...PR_FIX_TOOLS,
 
   /** The task's inputs read by code (src/design/collect.ts): its issues and pages, API methods, design frames. */
   "sources.collect": collectSources,

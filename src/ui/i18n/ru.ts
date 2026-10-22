@@ -1717,6 +1717,12 @@ export const RU: Readonly<Record<string, string>> = {
   "reply posted in thread {thread}{by}": "ответ отправлен в тред {thread}{by}",
   "thread {thread}: to be fixed{by}": "тред {thread}: будет исправлено{by}",
   "thread {thread}: left to the person{by}": "тред {thread}: оставлено человеку{by}",
+  "Being fixed": "Исправляется",
+  Fixed: "Исправлено",
+  "run {id}": "прогон {id}",
+  "fixing the PR's comments: {threads}, run {run}": "исправляются комментарии PR: {threads}, прогон {run}",
+  "the fix is pushed to {branch}: {commit}, {threads} answered":
+    "исправление запушено в {branch}: {commit}, ответы в {threads}",
   "Put up the PR after the review and follow its comments": "Выставить PR после ревью и вести комментарии",
   "once you approve the work Jarvis pushes the branch and opens the PR, then reads its comments; the merge stays yours":
     "после вашего аппрува Jarvis пушит ветку и открывает PR, затем читает комментарии; merge остаётся за вами",
@@ -1742,6 +1748,7 @@ export const RU: Readonly<Record<string, string>> = {
 export const RU_PLURALS: Readonly<Record<string, readonly [string, string, string]>> = {
   run: ["прогон", "прогона", "прогонов"],
   comment: ["комментарий", "комментария", "комментариев"],
+  thread: ["тред", "треда", "тредов"],
   "comment waits": ["комментарий ждёт", "комментария ждут", "комментариев ждут"],
   research: ["исследование", "исследования", "исследований"],
   "related task": ["смежная задача", "смежные задачи", "смежных задач"],

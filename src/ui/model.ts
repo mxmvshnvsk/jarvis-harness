@@ -1258,6 +1258,22 @@ export function feedItem(e: StoredEvent): FeedItem | undefined {
             ? t("thread {thread}: to be fixed{by}", { thread: String(p.thread), by })
             : t("thread {thread}: left to the person{by}", { thread: String(p.thread), by }),
       );
+    case "pr.fixStarted":
+      return at(
+        t("fixing the PR's comments: {threads}, run {run}", {
+          threads: plural(Number(p.threads) || 0, "thread"),
+          run: (str(p.run) ?? "").replace(/^run_/, "").slice(0, 8),
+        }),
+      );
+    case "pr.fixPushed":
+      return at(
+        t("the fix is pushed to {branch}: {commit}, {threads} answered", {
+          branch: str(p.branch) ?? "?",
+          commit: str(p.commit) ?? "?",
+          threads: plural(Number(p.threads) || 0, "thread"),
+        }),
+        "ok",
+      );
     case "pr.checkFailed":
       return at(t("the PR could not be read: {why}", { why: str(p.reason) ?? "?" }), "warn");
     case "delivery.skipped":

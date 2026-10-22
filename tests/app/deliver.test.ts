@@ -4,6 +4,7 @@ import { request } from "node:http";
 import { join } from "node:path";
 import { Writable } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { parse } from "yaml";
 import { recordDecision } from "../../src/app/decide.ts";
 import {
   DeliveryError,
@@ -27,6 +28,7 @@ import type { Capability, ToolProvider } from "../../src/tools/types.ts";
 import { inLang } from "../../src/ui/i18n.ts";
 import { feedItem } from "../../src/ui/model.ts";
 import { startUiServer, type UiServer } from "../../src/ui/server.ts";
+import { PR_FIX_WORKFLOW } from "../../src/workflows/builtin.ts";
 import { ACTOR, engineFor, testRuntime, workflowOf } from "../helpers/engine.ts";
 import { type Sandbox, sandbox } from "../helpers/tmp.ts";
 
@@ -698,5 +700,124 @@ describe("activity says on whose behalf (ADR-0006 §2)", () => {
     expect(feedItem(resumed)?.text).toBe(
       "running — resumed from WAITING_HUMAN by daemon on behalf of me@corp",
     );
+  });
+});
+
+describe("the PR flow's fixes (jarvis pr-fix)", () => {
+  it("the agreed threads fixed on top of the PR's branch: one commit pushed, each thread answered", async () => {
+    await setup('delivery:\n  commit: { fix: "{subject}" }\n');
+    const replies: Array<Record<string, unknown>> = [];
+    const comment: Capability = {
+      name: "bitbucket.pr.comment",
+      description: "comment",
+      network: "intranet",
+      access: "write",
+      effect: true,
+      server: "bitbucket",
+      parameters: { type: "object" },
+      async handler(args) {
+        replies.push(args);
+        return { ok: true, text: "{}" };
+      },
+    };
+    rt.registry.register({ name: "fake-comments", capabilities: () => [comment] });
+    const parent = await completed();
+    const pr = await deliverPr(rt, parent, { actor: ACTOR, channel: "cli" });
+    const prHead = remoteHead(pr.source);
+    const put = (type: string, content: unknown) =>
+      rt.artifacts.put({
+        runId: parent.id,
+        type,
+        name: `${type}.json`,
+        content: JSON.stringify(content),
+        provenance: { kind: "tool", capability: "test" },
+        stepId: "pr",
+      });
+    put("pr-review", {
+      threads: [
+        {
+          id: 101,
+          author: "reviewer-a",
+          text: "total may be negative",
+          file: "orders.ts",
+          line: 1,
+          replies: [],
+        },
+      ],
+    });
+    put("pr-triage", {
+      items: [
+        {
+          thread: 101,
+          comment: 101,
+          verdict: "agree",
+          reason: "r",
+          reply: "Agreed: the total is never negative now.",
+          change: "orders.ts: clamp the total at 0",
+          sources: [],
+          state: "to-fix",
+        },
+      ],
+    });
+    // the fix run's checkout: the PR's head as the remote has it
+    sh(sb.project, ["fetch", "-q", "origin", pr.source]);
+    const id = newRunId();
+    const wt = await WorktreeWorkspace.create({
+      repoRoot: sb.project,
+      worktreesDir: join(sb.home, "worktrees"),
+      runId: id,
+      task: "ABC-42 PR comments",
+      baseRef: `origin/${pr.source}`,
+      env,
+    });
+    const fix = rt.runs.create({
+      id,
+      task: "ABC-42 PR comments",
+      workflow: "pr-fix",
+      owner: ACTOR,
+      workspace: wt.ref,
+      dataClass: rt.loaded.config.dataClass,
+      options: { prFix: { runId: parent.id }, prFlow: false },
+    });
+    let asked = "";
+    const engine = engineFor(
+      rt,
+      [workflowOf(parse(PR_FIX_WORKFLOW) as Record<string, unknown>)],
+      {
+        implementation: async (ctx) => {
+          asked = ctx.inputs
+            .map((ref) => {
+              const [artifactId, version] = ref.split("@");
+              return rt.artifacts.text(rt.artifacts.get(artifactId as string, Number(version)) as never);
+            })
+            .join("\n");
+          writeFileSync(join(ctx.workspace.ref.path, "orders.ts"), "export const total = Math.max(0, 42);\n");
+          return { status: "success" };
+        },
+      },
+      undefined,
+      workspaceFactory(env),
+    );
+    const done = await engine.execute(fix.id, { owner: "cli:test:1" });
+    expect(done.run.state).toBe("COMPLETED");
+    expect(asked).toContain("total may be negative");
+    expect(asked).toContain("clamp the total at 0");
+    // one commit on the PR's head, pushed onto its branch
+    const head = remoteHead(pr.source);
+    expect(head).not.toBe(prHead);
+    expect(
+      execFileSync("git", ["rev-parse", `${head}^`], { cwd: remote, encoding: "utf8", env }).trim(),
+    ).toBe(prHead);
+    expect(
+      execFileSync("git", ["log", "-1", "--format=%s", head], { cwd: remote, encoding: "utf8", env }).trim(),
+    ).toBe("address review comments");
+    // the thread answered, marked fixed with the commit
+    expect(replies[0]).toMatchObject({ id: pr.id, parent: 101 });
+    expect(String(replies[0]?.content)).toMatch(
+      /^Agreed: the total is never negative now\.\n\n— Jarvis: fixed in [0-9a-f]{10}$/,
+    );
+    const triage = JSON.parse(rt.artifacts.text(rt.artifacts.listLatest(parent.id, "pr-triage")[0] as never));
+    expect(triage.items[0]).toMatchObject({ state: "fixed", fix: { run: fix.id, commit: head } });
+    expect(rt.events.list({ runId: parent.id, kind: "pr.fixPushed" })).toHaveLength(1);
   });
 });
