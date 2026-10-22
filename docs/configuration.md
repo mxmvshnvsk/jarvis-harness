@@ -65,7 +65,7 @@ models:                        # ADR-0007, ADR-0017 §2
     supports: { tools: true, parallelTools: false, jsonSchema: false, jsonMode: true,
                 systemRole: true, reasoning: false, prefixCache: true }
     tokenizer: deepseek
-    timeoutMs: 120000
+    timeoutMs: 120000          # сколько модель может молчать: до начала ответа и между его кусками; весь вызов — до ×10, не меньше 30 мин
     maxConcurrency: 2
     stream: true               # ответ потоком (SSE); по умолчанию включено, см. ниже
     prefixCache: { ttlSeconds: 120, minTokens: 8192 }   # шлюз кэширует префикс, но не пишет это в usage

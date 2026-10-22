@@ -326,9 +326,34 @@ export class OpenAiCompatibleAdapter implements ProviderAdapter {
     const stream = model.stream !== false && !NO_STREAM.has(serverKey);
     const names = toolNamesFor(request);
     const body = JSON.stringify(buildChatBody(request, model, stream, names));
-    const timeout = AbortSignal.timeout(model.timeoutMs);
-    const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
+    // `timeoutMs` is how long the server may stay silent — before the answer starts and between its
+    // chunks — not the whole answer's time: a long answer still streaming was cut at 120 s and asked
+    // again from the start, twice (pilot). A cap of its own bounds the whole call.
+    const idle = idleTimeout(model.timeoutMs);
+    const cap = AbortSignal.timeout(Math.max(model.timeoutMs * 10, STREAM_CAP_MS));
+    const signal = AbortSignal.any([idle.signal, cap, ...(options.signal ? [options.signal] : [])]);
+    try {
+      return await this.send(request, model, options, { url, serverKey, stream, names, body, signal, idle });
+    } finally {
+      idle.stop();
+    }
+  }
 
+  private async send(
+    request: ModelRequest,
+    model: ModelConfig,
+    options: ProviderCallOptions,
+    call: {
+      url: string;
+      serverKey: string;
+      stream: boolean;
+      names: ReturnType<typeof toolNamesFor>;
+      body: string;
+      signal: AbortSignal;
+      idle: ReturnType<typeof idleTimeout>;
+    },
+  ): Promise<ProviderResult> {
+    const { url, serverKey, stream, names, body, signal, idle } = call;
     const dispatcher = await dispatcherFor(model.timeoutMs);
     const started = Date.now();
     let response: Response;
@@ -351,7 +376,7 @@ export class OpenAiCompatibleAdapter implements ProviderAdapter {
     if (response.ok && sse && response.body) {
       try {
         const read = await readStream(
-          response.body as unknown as AsyncIterable<Uint8Array>,
+          touching(response.body as unknown as AsyncIterable<Uint8Array>, idle.touch),
           request.modelId,
           started,
           options.onProgress,
@@ -412,6 +437,32 @@ export class OpenAiCompatibleAdapter implements ProviderAdapter {
       ...(sse ? { streamed: true } : {}),
       ...(firstTokenMs !== undefined ? { firstTokenMs } : {}),
     };
+  }
+}
+
+/** The whole call's bound, however long the stream keeps going (`timeoutMs` × 10 when more). */
+export const STREAM_CAP_MS = 30 * 60_000;
+
+/** An abort after `ms` of silence: `touch` on every chunk starts the wait again. */
+export function idleTimeout(ms: number): { signal: AbortSignal; touch: () => void; stop: () => void } {
+  const controller = new AbortController();
+  const fire = () =>
+    controller.abort(new DOMException(`no data from the model for ${ms} ms`, "TimeoutError"));
+  let timer = setTimeout(fire, ms);
+  return {
+    signal: controller.signal,
+    touch: () => {
+      clearTimeout(timer);
+      timer = setTimeout(fire, ms);
+    },
+    stop: () => clearTimeout(timer),
+  };
+}
+
+async function* touching(body: AsyncIterable<Uint8Array>, touch: () => void): AsyncIterable<Uint8Array> {
+  for await (const chunk of body) {
+    touch();
+    yield chunk;
   }
 }
 

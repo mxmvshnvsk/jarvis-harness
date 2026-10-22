@@ -84,6 +84,7 @@ export const ModelConfigSchema = z.strictObject({
   maxOutput: z.int().positive(),
   supports: ModelSupportsSchema.prefault({}),
   tokenizer: z.string().min(1).optional(),
+  /** How long the server may stay silent: before the answer starts and between its streamed chunks. */
   timeoutMs: z.int().positive().default(120_000),
   maxConcurrency: z.int().positive().default(2),
   /**
