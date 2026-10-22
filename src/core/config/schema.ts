@@ -686,6 +686,12 @@ export const RelatedWorkConfigSchema = z.strictObject({
       branch: z.string().min(1).default("feature/{key}"),
       /** The run of a task in a Story starts from the Story's branch and its PR goes into it, when the repository has the branch. */
       base: z.boolean().default(true),
+      /**
+       * The repository has no branch for the Story yet (the Story's first task here): Jarvis makes it
+       * from the base (`delivery.target`, else `relatedWork.base`, else the remote's default) and pushes
+       * it, then starts the run from it.
+       */
+      create: z.boolean().default(true),
     })
     .prefault({}),
 });

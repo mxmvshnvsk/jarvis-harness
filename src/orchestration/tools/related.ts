@@ -373,6 +373,7 @@ export const collectRelated: DeterministicTool = async (ctx) => {
         tasks: story.tasks.length,
         self: story.key === key,
         based,
+        ...(ctx.run.workspace.story?.created ? { created: true } : {}),
         // the task is in a Story, the checkout did not start from its branch: why, for the feed
         ...(story.key !== key && !based
           ? { why: ctx.run.workspace.story ? "no-branch" : ctx.run.workspace.mode === "cwd" ? "cwd" : "base" }

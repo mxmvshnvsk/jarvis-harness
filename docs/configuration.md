@@ -42,7 +42,9 @@ relatedWork:                   # ADR-0026: ветки и PR смежных за�
     # другие команды: types: [Story, User Story], includes: [..., "is parent task of"], includedIn: [..., "is subtask of"];
     # направление связи в Jira неважно — сопоставляется по именам; список заменяет умолчание, перечисляйте все нужные
     branch: "feature/{key}"    # ветка Story, одинаковая во всех репозиториях; задачи сравниваются с ней (или с destination своего PR)
-    base: true                 # прогон задачи из Story начинается от её ветки и PR идёт в неё — если ветка есть в репо; иначе обычная база и предупреждение
+    base: true                 # прогон задачи из Story начинается от её ветки и PR идёт в неё
+    create: true               # ветки Story в репо ещё нет (первая задача Story здесь) — Jarvis создаёт её от базы
+                               # (delivery.target, иначе relatedWork.base, иначе ветка по умолчанию remote'а) и пушит
   # Нужны capability jira.devInfo (Atlassian) и, если репозитория нет на машине, bitbucket.branch.commits,
   # bitbucket.commit.get, bitbucket.file.get — с allow у сервера их надо добавить туда.
 feedback:                      # «Сообщить о проблеме» в jarvis ui; то же можно задать в проекте

@@ -420,18 +420,29 @@ export async function prepareWorkspace(
   // a task in a Story is made on the Story's branch, when this repository has it (`relatedWork.story`)
   const story =
     base === undefined && loaded.project?.isGitRepo === true
-      ? await storyBaseOf(runtime, task, root, related)
+      ? await storyBaseOf(runtime, task, root, related, useWorktree)
       : undefined;
+  if (story?.created)
+    ctx.out.note(
+      `${st.ok("→")} Story ${story.key} had no branch in this repository: ${story.branch} made from ${story.created.from} and pushed`,
+    );
   if (story)
     ctx.out.note(
       story.based && useWorktree
         ? `${st.ok("→")} the task is in Story ${story.key}: the run starts from ${story.ref} and its PR goes into ${story.branch}`
         : story.based
           ? `${st.warn("note:")} the task is in Story ${story.key}: its branch is ${story.branch}; the run works in the current checkout as it is`
-          : `${st.warn("note:")} the task is in Story ${story.key}, but this repository has no ${story.branch} yet: the run starts from the usual base — create the branch from it for the Story's tasks`,
+          : `${st.warn("note:")} the task is in Story ${story.key}, but this repository has no ${story.branch} yet${story.notCreated ? ` and it could not be made (${story.notCreated})` : ""}: the run starts from the usual base`,
     );
   const storyRef = story
-    ? { story: { key: story.key, branch: story.branch, based: story.based && useWorktree } }
+    ? {
+        story: {
+          key: story.key,
+          branch: story.branch,
+          based: story.based && useWorktree,
+          ...(story.created ? { created: true } : {}),
+        },
+      }
     : {};
   let from = base ?? (story?.based && useWorktree ? story.ref : undefined);
   // the PR flow: the run starts from its PR's target as the remote has it now — not from whatever the

@@ -284,12 +284,15 @@ describe("the run's base: the Story's branch", () => {
         config: {
           relatedWork: {
             enabled: true,
-            story: { ...NAMES, branch: "feature/{key}", base: true, ...over },
+            story: { ...NAMES, branch: "feature/{key}", base: true, create: true, ...over },
+            base: "dev",
           },
           delivery: { remote: "origin" },
         },
       },
       registry: { get: () => ({ name: "jira.get" }) },
+      env: process.env,
+      events: { emit: () => {} },
       tools: { policy: () => ({ allowed: true }) },
       mcp: {
         provider: {
@@ -308,6 +311,28 @@ describe("the run's base: the Story's branch", () => {
       based: true,
       ref: "origin/feature/ABC-48",
     });
+  });
+
+  it("the Story's first task in the repository: its branch made from the base and pushed, the run starts from it", async () => {
+    const root = repoWith([]);
+    const got = await storyBaseOf(fakeRuntime(task("ABC-50", "ABC-48")), "ABC-50", root, undefined, true);
+    expect(got).toEqual({
+      key: "ABC-48",
+      branch: "feature/ABC-48",
+      based: true,
+      ref: "origin/feature/ABC-48",
+      created: { from: "origin/dev" },
+    });
+    const dev = execFileSync("git", ["rev-parse", "origin/dev"], { cwd: root, encoding: "utf8" }).trim();
+    const made = execFileSync("git", ["ls-remote", "origin", "refs/heads/feature/ABC-48"], {
+      cwd: root,
+      encoding: "utf8",
+    });
+    expect(made.startsWith(dev)).toBe(true);
+    // the next task finds it there: nothing made again
+    const next = await storyBaseOf(fakeRuntime(task("ABC-51", "ABC-48")), "ABC-51", root, undefined, true);
+    expect(next?.created).toBeUndefined();
+    expect(next?.based).toBe(true);
   });
 
   it("says the branch is not there yet; nothing for a task with no Story, or when turned off", async () => {

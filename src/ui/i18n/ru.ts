@@ -1751,6 +1751,8 @@ export const RU: Readonly<Record<string, string>> = {
     "ветки и PR других задач эпика или Story и что они меняют в контракте — до спеки; задача из Story начинается от ветки Story, и её PR идёт в неё",
   "Story {story}: its tasks read first, compared with {branch}":
     "Story {story}: сначала её задачи, сравнение с {branch}",
+  "in Story {story}: {branch} was not in the repository — Jarvis made it from the base and pushed it; the run started from it, its PR goes into it":
+    "задача из Story {story}: ветки {branch} в репо не было — Jarvis создал её от базы и запушил; прогон начат от неё, PR пойдёт в неё",
   "in Story {story}: the run started from {branch}, its PR goes into it":
     "задача из Story {story}: прогон начат от {branch}, PR пойдёт в неё",
   "in Story {story}: the repository has no {branch} yet, the run started from the usual base":

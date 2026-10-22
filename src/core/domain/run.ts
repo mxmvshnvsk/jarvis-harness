@@ -86,7 +86,15 @@ export const WorkspaceRefSchema = z.strictObject({
    * The task is in a Story (`relatedWork.story`): its key and branch, and whether the run started from
    * that branch (its PR goes into it) — false when the repository has no such branch yet.
    */
-  story: z.strictObject({ key: z.string().min(1), branch: z.string().min(1), based: z.boolean() }).optional(),
+  story: z
+    .strictObject({
+      key: z.string().min(1),
+      branch: z.string().min(1),
+      based: z.boolean(),
+      /** The branch was made at this run's start (the Story's first task in the repository). */
+      created: z.boolean().optional(),
+    })
+    .optional(),
 });
 export type WorkspaceRef = z.infer<typeof WorkspaceRefSchema>;
 

@@ -1161,6 +1161,15 @@ export function feedItem(e: StoredEvent): FeedItem | undefined {
       const branch = str(p.branch) ?? "?";
       if (p.self === true)
         return at(t("Story {story}: its tasks read first, compared with {branch}", { story, branch }));
+      // t("in Story {story}: {branch} was not in the repository — Jarvis made it from the base and pushed it; the run started from it, its PR goes into it")
+      if (p.based === true && p.created === true)
+        return at(
+          t(
+            "in Story {story}: {branch} was not in the repository — Jarvis made it from the base and pushed it; the run started from it, its PR goes into it",
+            { story, branch },
+          ),
+          "ok",
+        );
       if (p.based === true)
         return at(
           t("in Story {story}: the run started from {branch}, its PR goes into it", { story, branch }),
