@@ -112,6 +112,7 @@ import { caseOfRun, casesRootOf, runToCase } from "../evals/runToCase.ts";
 import {
   answersText,
   givenFromForm,
+  openQuestionDetailsOf,
   openQuestionsOf,
   prepareSuggestions,
   recordGiven,
@@ -2619,10 +2620,16 @@ ${candidateReviewHtml(c, run, run.workspace.repoRoot, actions, { back: `/runs/${
     if (decision !== "approve" && decision !== "request_changes") return redirect(r, back());
     const lines = linesOf(form.get("lines"));
     // the open questions answered on the page: read against the document, not taken from the form
-    const questions = openQuestionsOf(runtime.artifacts.text(awaited.artifact));
+    const docText = runtime.artifacts.text(awaited.artifact);
+    const questions = openQuestionsOf(docText);
     const given =
       questions.length > 0
-        ? givenFromForm(questions, suggestionsFor(runtime, awaited.artifact), (k) => form.get(k))
+        ? givenFromForm(
+            questions,
+            suggestionsFor(runtime, awaited.artifact),
+            (k) => form.get(k),
+            openQuestionDetailsOf(docText),
+          )
         : [];
     const comment = [
       decision === "request_changes" && given.length > 0 ? answersText(given) : "",

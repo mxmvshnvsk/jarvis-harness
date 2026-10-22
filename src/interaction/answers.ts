@@ -7,7 +7,7 @@ import type { Run } from "../core/domain/run.ts";
 import { frameNamesOf, humanizeNodeIds, humanizeSource } from "../design/frames.ts";
 import { resolveModel } from "../models/router.ts";
 import { generateStructured } from "../models/structured.ts";
-import { questionsOf } from "./questions.ts";
+import { type QuestionDetail, questionDetailsOf, questionsOf } from "./questions.ts";
 
 /**
  * Answers to a document's open questions, prepared before its approval gate (pilot: eight questions of
@@ -89,6 +89,16 @@ export function openQuestionsOf(text: string): string[] {
   try {
     const doc = JSON.parse(text) as { openQuestions?: unknown };
     return questionsOf(doc.openQuestions);
+  } catch {
+    return [];
+  }
+}
+
+/** The open questions with their own options apart (a page offers them as choices). */
+export function openQuestionDetailsOf(text: string): QuestionDetail[] {
+  try {
+    const doc = JSON.parse(text) as { openQuestions?: unknown };
+    return questionDetailsOf(doc.openQuestions);
   } catch {
     return [];
   }
@@ -326,14 +336,15 @@ export function givenFor(runtime: Runtime, doc: ArtifactVersion): GivenAnswer[] 
 }
 
 /**
- * What the form sent for each question (`qa-<n>`: jarvis | opt-<k> | own | analyst | scope, the own text
- * in `qa-text-<n>`), read against the document and its suggestions — nothing of the question's text is
+ * What the form sent for each question (`qa-<n>`: jarvis | opt-<k> | q-opt-<k> | own | analyst | scope —
+ * `opt-` a suggestion's option, `q-opt-` the question's own —, the own text in `qa-text-<n>`), read against the document and its suggestions — nothing of the question's text is
  * taken from the form. Questions left without an answer are not in the list.
  */
 export function givenFromForm(
   questions: readonly string[],
   suggestions: SuggestionsDoc | undefined,
   get: (key: string) => string | null,
+  details: readonly QuestionDetail[] = [],
 ): GivenAnswer[] {
   const out: GivenAnswer[] = [];
   questions.forEach((question, i) => {
@@ -346,6 +357,9 @@ export function givenFromForm(
     else if (mode?.startsWith("opt-")) {
       const o = s?.options[Number(mode.slice(4))];
       if (o) out.push({ question, mode: "answer", text: o.text });
+    } else if (mode?.startsWith("q-opt-")) {
+      const o = details[i]?.line === question ? details[i]?.options[Number(mode.slice(6))] : undefined;
+      if (o) out.push({ question, mode: "answer", text: o });
     } else if (own) out.push({ question, mode: "answer", text: own });
   });
   return out;

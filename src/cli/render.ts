@@ -83,6 +83,7 @@ function itemLines(item: unknown, indent: string): string[] {
   const id = scalar(o.id);
   const headKey = [
     "text",
+    "question",
     "title",
     "summary",
     "detail",

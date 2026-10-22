@@ -2260,8 +2260,25 @@ function questionsHtml(page: ArtifactPage, extras: ArtifactExtras): Html {
     const n = i + 1;
     const s = items[i];
     const given = q.given?.find((g) => g.question === question);
+    // the question's own options, when no suggestion offers some: choices, not words in the question
+    const d = q.details?.[i];
+    const ownOptions = s?.kind !== "decision" && d && d.options.length > 0 ? d.options : [];
+    const text = ownOptions.length > 0 || s?.kind === "decision" ? (d?.head ?? question) : question;
     const picked =
-      s?.kind === "answer" ? "jarvis" : s?.kind === "decision" ? s.options.findIndex((o) => o.suggested) : -1;
+      s?.kind === "answer"
+        ? "jarvis"
+        : s?.kind === "decision"
+          ? s.options.findIndex((o) => o.suggested)
+          : ownOptions.length > 0
+            ? "none"
+            : -1;
+    const choices =
+      ownOptions.length > 0
+        ? ownOptions.map(
+            (o, k) =>
+              html`<label class="opt">${radio(n, `q-opt-${String(k)}`, false)}<span><span class="said">${o}</span></span></label>`,
+          )
+        : "";
     const hint =
       s?.kind === "answer" && s.answer
         ? html`<label class="opt">${radio(n, "jarvis", true)}<span><span class="lbl">✦ ${t("From the sources")}</span><span class="said">${s.answer}</span>${sourceChips(s.sources)}</span></label>`
@@ -2284,8 +2301,8 @@ function questionsHtml(page: ArtifactPage, extras: ArtifactExtras): Html {
       : "";
     return html`<fieldset class="q">
 <legend class="sr">${t("Question {n}", { n })}</legend><span class="n${answered ? " ok" : ""}" aria-hidden="true">${answered ? "✓" : String(n)}</span>
-<div class="body"><p class="qtext">${question}</p>${s && s.about.length > 0 ? html`<div class="about">${s.about.map((x) => html`<span class="tag">${x}</span>`)}</div>` : ""}
-${answered || html`${hint}${own}`}</div>
+<div class="body"><p class="qtext">${text}</p>${s && s.about.length > 0 ? html`<div class="about">${s.about.map((x) => html`<span class="tag">${x}</span>`)}</div>` : ""}
+${answered || html`${hint}${choices}${own}`}</div>
 </fieldset>`;
   };
   const preparing =
@@ -2296,22 +2313,27 @@ ${answered || html`${hint}${own}`}</div>
 <div class="qs-head"><span class="pill wait">${plural(q.list.length, "open question")}</span><h2 id="qs-h">${live ? t("Answer before accepting") : t("Open questions")}</h2>${tally ? html`<span class="meta">${tally}</span>` : ""}</div>
 ${preparing}
 ${q.list.map(card)}
-${
-  live && extras.actions
-    ? form(
-        extras.actions,
-        `${runHref(page.run)}/decide`,
-        html`<input type="hidden" name="artifact" value="${page.artifact.artifactId}"><input type="hidden" name="version" value="${page.artifact.version}"><input type="hidden" name="lines" value="">
+</section>`;
+}
+
+/**
+ * The decision under the questions: on the page's bottom strip, the last thing in the page — inside
+ * the questions it came unstuck once they scrolled away. The answers' inputs name it by `form`.
+ */
+function questionsDockHtml(page: ArtifactPage, extras: ArtifactExtras): Html {
+  const live = page.questions !== undefined && page.awaited && extras.actions !== undefined;
+  if (!live || !extras.actions) return html``;
+  return form(
+    extras.actions,
+    `${runHref(page.run)}/decide`,
+    html`<input type="hidden" name="artifact" value="${page.artifact.artifactId}"><input type="hidden" name="version" value="${page.artifact.version}"><input type="hidden" name="lines" value="">
 <span class="sum">${t("Answered questions go back with «Send back» — the next version must follow them; the rest stays open.")}</span>
 <details class="note"><summary>+ ${t("A note")}</summary><label class="field grow">${t("Anything else to change")}<textarea name="comment" rows="3" placeholder="${t("What the answers above do not cover")}"></textarea></label></details>
 <div class="actions"><button type="submit" name="decision" value="request_changes" class="btn strong big">${t("Send back with the answers")}</button>
 <button type="submit" name="decision" value="approve" class="btn accept big">${t("Accept as is")}</button>
 <span class="hint">${page.terminal ? t("The terminal waiting there picks the decision up and goes on.") : th("Same as {a} / {c} on the terminal's card.", { a: html`<code>a</code>`, c: html`<code>c</code>` })}</span></div>`,
-        html` class="dock" data-decision id="decide-form"`,
-      )
-    : ""
-}
-</section>`;
+    html` class="dock" data-decision id="decide-form"`,
+  );
 }
 
 /** « · made from 12 model calls, 30 tool calls» — nothing for a document written before refs were kept. */
@@ -2435,7 +2457,8 @@ ${
 }
 </div>
 ${aside}
-</div>`;
+</div>
+${questionsDockHtml(page, extras)}`;
 }
 
 export function errorContent(status: number, message: string, hint?: Part): Html {

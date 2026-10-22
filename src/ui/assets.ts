@@ -566,11 +566,11 @@ form.clarify>.actions{margin:4px 0}
 .qs .q .pick:has(input:checked){border-color:var(--wait);color:var(--wait)}
 .qs .q .pick input{margin:0;accent-color:var(--wait)}
 .qs .q .done{font-size:14px;line-height:21px;padding:8px 12px;border-radius:8px;background:var(--ok-bg);color:var(--ink);white-space:pre-wrap}
-.qs .dock{display:flex;flex-direction:column;gap:10px;padding:14px 20px;background:var(--panel);border-top:1px solid var(--line);border-bottom-left-radius:inherit;border-bottom-right-radius:inherit}
-.qs .dock .sum{font-size:13px;line-height:19px;color:var(--muted)}
-.qs .dock .note summary{cursor:pointer;font-size:13px;color:var(--accent)}
-.qs .dock .note[open]{display:flex;flex-direction:column;gap:8px}
-.qs .dock .note textarea{padding:8px 10px;border-radius:6px;resize:vertical;min-height:64px}
+.dock[data-decision]{display:flex;flex-direction:column;gap:10px}
+.dock[data-decision] .sum{font-size:13px;line-height:19px;color:var(--muted)}
+.dock[data-decision] .note summary{cursor:pointer;font-size:13px;color:var(--accent)}
+.dock[data-decision] .note[open]{display:flex;flex-direction:column;gap:8px}
+.dock[data-decision] .note textarea{padding:8px 10px;border-radius:6px;resize:vertical;min-height:64px}
 .tryit{padding:20px 24px;display:flex;flex-direction:column;gap:14px}
 .tryit h2{font-size:18px;line-height:24px}
 .trysteps{margin:0;padding-left:22px;list-style:decimal;display:flex;flex-direction:column;gap:14px}

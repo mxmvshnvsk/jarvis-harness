@@ -59,6 +59,7 @@ import { type ScheduledEvalOutcome, scheduledEvalNotices } from "../evals/schedu
 import {
   type GivenAnswer,
   givenFor,
+  openQuestionDetailsOf,
   openQuestionsOf,
   type SuggestionsDoc,
   suggestionsFor,
@@ -71,6 +72,7 @@ import {
 } from "../interaction/clarify.ts";
 import { conflictFilesOf } from "../interaction/conflict.ts";
 import { notesOf, type RunNote } from "../interaction/notes.ts";
+import type { QuestionDetail } from "../interaction/questions.ts";
 import type { Interaction, InteractionMessage } from "../interaction/store.ts";
 import type { NamedService } from "../knowledge/catalog.ts";
 import type { LocalWorkflowEngine } from "../orchestration/runtime.ts";
@@ -1641,6 +1643,8 @@ function continuationLinks(
 /** The document's open questions with what Jarvis prepared for them (src/interaction/answers.ts). */
 export interface QuestionsView {
   readonly list: readonly string[];
+  /** Per question: its words without the options, and its own options (offered when no suggestion has some). */
+  readonly details?: readonly QuestionDetail[];
   readonly suggestions?: SuggestionsDoc;
   /** What a person answered on this version, if they decided here. */
   readonly given?: readonly GivenAnswer[];
@@ -1729,9 +1733,17 @@ function questionsOf(
 ): Pick<ArtifactPage, "questions"> {
   const list = openQuestionsOf(text);
   if (list.length === 0) return {};
+  const details = openQuestionDetailsOf(text);
   const suggestions = suggestionsFor(runtime, artifact);
   const given = givenFor(runtime, artifact);
-  return { questions: { list, ...(suggestions ? { suggestions } : {}), ...(given ? { given } : {}) } };
+  return {
+    questions: {
+      list,
+      ...(details.length === list.length ? { details } : {}),
+      ...(suggestions ? { suggestions } : {}),
+      ...(given ? { given } : {}),
+    },
+  };
 }
 
 export interface FixView {

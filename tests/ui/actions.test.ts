@@ -311,6 +311,11 @@ describe("open questions answered on the page", () => {
     expect(page).toContain("<span>ABC-42 · plan, item 3</span>");
     // the decision under the questions, a note folded there; no side column repeating the document
     expect(page).toContain('class="dock" data-decision id="decide-form"');
+    // the dock is the last thing on the page: inside the questions it came unstuck once they scrolled away
+    expect(page).toMatch(/id="decide-form"[\s\S]*<\/form>\s*<\/main>/);
+    expect(page.slice(page.indexOf('data-live="questions"'), page.indexOf('id="decide-form"'))).toContain(
+      "</section>",
+    );
     expect(page).toContain('<details class="note"><summary>+ A note</summary>');
     expect(page).not.toContain("Your decision");
     const res = await post(`/runs/${short}/decide`, {

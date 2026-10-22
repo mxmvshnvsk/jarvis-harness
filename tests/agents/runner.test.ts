@@ -10,6 +10,7 @@ import { requestPause } from "../../src/app/pause.ts";
 import type { Runtime } from "../../src/app/runtime.ts";
 import { recordGiven } from "../../src/interaction/answers.ts";
 import { addNote, notesOf } from "../../src/interaction/notes.ts";
+import { questionsOf } from "../../src/interaction/questions.ts";
 import { afterAnalysis, seedComments } from "../../src/interaction/review/lifecycle.ts";
 import { AgenticExecutor, DeterministicExecutor } from "../../src/orchestration/executors.ts";
 import { LocalWorkflowEngine } from "../../src/orchestration/runtime.ts";
@@ -1329,9 +1330,14 @@ context: { maxContext: 8000 }
     );
     await engineWith(rt, wf).execute(run.id, { owner: "cli:t" });
     const spec = JSON.parse(rt.artifacts.text(rt.artifacts.listLatest(run.id, "spec")[0] as never)) as {
-      openQuestions: string[];
+      openQuestions: unknown[];
     };
+    // kept whole, so the page offers the options as choices; the words for people, the ids for the tools
     expect(spec.openQuestions).toEqual([
+      "Which variant of frame «Delivery slots» is the target?",
+      { question: "Is a slot required?", about: "the order form", options: ["yes", "no"], refs: ["R1"] },
+    ]);
+    expect(questionsOf(spec.openQuestions)).toEqual([
       "Which variant of frame «Delivery slots» is the target?",
       "Is a slot required? (the order form) — yes / no",
     ]);

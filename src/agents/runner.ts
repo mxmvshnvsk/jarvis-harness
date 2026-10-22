@@ -11,7 +11,7 @@ import {
 import type { ArtifactVersion } from "../core/domain/artifact.ts";
 import { frameNamesOf, humanizeNodeIds } from "../design/frames.ts";
 import { NOTE_DELIVERED, notesOf, notesText } from "../interaction/notes.ts";
-import { questionsOf } from "../interaction/questions.ts";
+import { questionForPeople } from "../interaction/questions.ts";
 import { loadSkills } from "../knowledge/skills.ts";
 import { knowledgeRootsOf } from "../knowledge/sources.ts";
 import { ModelError } from "../models/errors.ts";
@@ -118,7 +118,9 @@ function forPeople(rt: StepContext["runtime"], runId: string, value: unknown): u
   const human = (v: unknown) => (typeof v === "string" ? humanizeNodeIds(v, names) : v);
   return {
     ...doc,
-    ...(Array.isArray(doc.openQuestions) ? { openQuestions: questionsOf(doc.openQuestions, names) } : {}),
+    ...(Array.isArray(doc.openQuestions)
+      ? { openQuestions: doc.openQuestions.map((q) => questionForPeople(q, names)) }
+      : {}),
     ...(clarification && typeof clarification === "object"
       ? {
           clarification: {

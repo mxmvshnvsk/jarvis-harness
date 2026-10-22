@@ -56,3 +56,69 @@ export function questionsOf(value: unknown, names?: ReadonlyMap<string, FrameNam
     ? value.map((q) => questionText(q, names)).filter((q): q is string => q !== undefined)
     : [];
 }
+
+/** A question as the page asks it: its line (the question's identity), the question alone, its options. */
+export interface QuestionDetail {
+  readonly line: string;
+  /** The question with what it is about, without the options. */
+  readonly head: string;
+  readonly options: readonly string[];
+}
+
+/**
+ * A question kept as one line («question (about) — A / B / C», documents before the questions were kept
+ * whole): its options taken back, when the line reads so — the question ends with «?» or «)» and two or
+ * more options follow.
+ */
+function splitLine(line: string): { head: string; options: string[] } {
+  const m = /^(.*?[?)]) — (.+)$/s.exec(line);
+  const options = m ? (m[2] as string).split(" / ").map((x) => x.trim()) : [];
+  return m && options.length >= 2 && options.every(Boolean)
+    ? { head: m[1] as string, options }
+    : { head: line, options: [] };
+}
+
+/** A document's `openQuestions` with their options apart, for a page to offer them as choices. */
+export function questionDetailsOf(
+  value: unknown,
+  names: ReadonlyMap<string, FrameName> = new Map(),
+): QuestionDetail[] {
+  if (!Array.isArray(value)) return [];
+  const out: QuestionDetail[] = [];
+  for (const q of value) {
+    const line = questionText(q, names);
+    if (line === undefined) continue;
+    if (typeof q === "string") {
+      out.push({ line, ...splitLine(line) });
+      continue;
+    }
+    const o = q as { question?: unknown; about?: unknown; options?: unknown };
+    const question = String(o.question).trim();
+    const about = typeof o.about === "string" ? o.about.trim() : "";
+    const head = humanizeNodeIds(
+      `${question}${about && !question.includes(about) ? ` (${about})` : ""}`,
+      names,
+    );
+    const options = Array.isArray(o.options)
+      ? o.options
+          .filter((x): x is string => typeof x === "string" && x.trim().length > 0)
+          .map((x) => humanizeNodeIds(x.trim(), names))
+      : [];
+    out.push({ line, head, options });
+  }
+  return out;
+}
+
+/** A question kept whole, its words for people: frame ids as titles; the ids for the tools stay. */
+export function questionForPeople(q: unknown, names: ReadonlyMap<string, FrameName>): unknown {
+  if (typeof q === "string") return humanizeNodeIds(q, names);
+  if (!q || typeof q !== "object") return q;
+  const o = q as Record<string, unknown>;
+  const h = (v: unknown) => (typeof v === "string" ? humanizeNodeIds(v, names) : v);
+  return {
+    ...o,
+    question: h(o.question),
+    ...(o.about !== undefined ? { about: h(o.about) } : {}),
+    ...(Array.isArray(o.options) ? { options: o.options.map(h) } : {}),
+  };
+}

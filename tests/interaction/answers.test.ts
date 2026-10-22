@@ -5,6 +5,7 @@ import {
   givenFromForm,
   openQuestionsOf,
 } from "../../src/interaction/answers.ts";
+import { questionDetailsOf } from "../../src/interaction/questions.ts";
 import { type Sandbox, sandbox } from "../helpers/tmp.ts";
 
 /** Answers to a document's open questions before its gate: what the model proposes is checked in code. */
@@ -143,5 +144,45 @@ describe("suggested answers", () => {
     const given = givenFromForm(QUESTIONS, suggestions, (k) => form[k] ?? null);
     expect(given.map((g) => g.mode)).toEqual(["scope", "answer", "answer"]);
     expect(answersText(given)).toContain("→ out of the task's scope: drop it.");
+  });
+});
+
+describe("a question's own options", () => {
+  it("takes them apart from a question kept whole, and back from one kept as a line", () => {
+    const details = questionDetailsOf([
+      { question: "Remove the events?", about: "the banner's analytics", options: ["Remove", "Keep"] },
+      "Update the page spec — here or later? (page «Services») — Here / In a task of its own / Never",
+      "A plain one — with a dash, no options?",
+      "Which one? — only one",
+    ]);
+    expect(details).toEqual([
+      {
+        line: "Remove the events? (the banner's analytics) — Remove / Keep",
+        head: "Remove the events? (the banner's analytics)",
+        options: ["Remove", "Keep"],
+      },
+      {
+        line: "Update the page spec — here or later? (page «Services») — Here / In a task of its own / Never",
+        head: "Update the page spec — here or later? (page «Services»)",
+        options: ["Here", "In a task of its own", "Never"],
+      },
+      {
+        line: "A plain one — with a dash, no options?",
+        head: "A plain one — with a dash, no options?",
+        options: [],
+      },
+      { line: "Which one? — only one", head: "Which one? — only one", options: [] },
+    ]);
+  });
+
+  it("an option picked on the page is the answer, read from the document, not the form", () => {
+    const details = questionDetailsOf([{ question: "Remove the events?", options: ["Remove", "Keep"] }]);
+    const question = details[0]?.line as string;
+    const form: Record<string, string> = { "qa-1": "q-opt-1" };
+    expect(givenFromForm([question], undefined, (k) => form[k] ?? null, details)).toEqual([
+      { question, mode: "answer", text: "Keep" },
+    ]);
+    form["qa-1"] = "q-opt-7";
+    expect(givenFromForm([question], undefined, (k) => form[k] ?? null, details)).toEqual([]);
   });
 });
