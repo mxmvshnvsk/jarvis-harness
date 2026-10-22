@@ -166,6 +166,8 @@ export class LocalToolProvider implements ToolProvider {
   /** Per checkout and rebuild command: the state of its sources at the last build (src/orchestration/tools/rebuild.ts). */
   private readonly built = new Map<string, string>();
   private readonly queues = new Map<string, Promise<unknown>>();
+  /** `code.diagnostics`: each checker's output for a state of the workspace (its fingerprint). */
+  private readonly diagnosed = new Map<string, { at: string; out: ToolOutput }>();
 
   constructor(config: ResolvedConfig) {
     this.config = config;
@@ -788,10 +790,23 @@ export class LocalToolProvider implements ToolProvider {
           const files = Array.isArray(args.files) ? args.files.map(String) : [];
           const found: Diagnostic[] = [];
           const ran: string[] = [];
-          for (const name of checkers) {
-            const command = this.config.tools.local[name] as string;
-            const out = await this.projectCommand(name, command, ctx);
-            ran.push(`${name}: ${out.ok ? "passed" : "failed"}`);
+          // the checkers side by side (a typecheck still waits for its rebuild), and not again for a
+          // workspace as it was at the last call: the agent asks after each edit, and for each file
+          const at = await workspaceFingerprint(ctx.workspacePath);
+          const outs = await Promise.all(
+            checkers.map(async (name) => {
+              const key = `${ctx.workspacePath}\0${name}`;
+              const seen = at ? this.diagnosed.get(key) : undefined;
+              if (seen && seen.at === at) return { name, out: seen.out, cached: true };
+              const out = await this.projectCommand(name, this.config.tools.local[name] as string, ctx);
+              if (at) this.diagnosed.set(key, { at, out });
+              return { name, out, cached: false };
+            }),
+          );
+          for (const { name, out, cached } of outs) {
+            ran.push(
+              `${name}: ${out.ok ? "passed" : "failed"}${cached ? " (nothing changed since its last run)" : ""}`,
+            );
             const text = `${out.text ?? ""}\n${out.error ?? ""}`;
             found.push(...parseDiagnostics(text, name));
           }
@@ -1053,4 +1068,29 @@ export function reformatted(
     to: head + lines.length,
     text: lines.map((l, i) => `${String(from + i).padStart(5)}  ${l}`).join("\n"),
   };
+}
+
+/**
+ * The workspace's state as one hash: HEAD and every changed or new file's path, size and mtime.
+ * Two git calls instead of a typecheck; undefined where git cannot say (nothing is cached then).
+ */
+export async function workspaceFingerprint(cwd: string): Promise<string | undefined> {
+  const [head, status] = await Promise.all([
+    git(["rev-parse", "HEAD"], cwd, { timeoutMs: 30_000 }),
+    git(["status", "--porcelain=v1", "-z", "-uall"], cwd, { timeoutMs: 30_000 }),
+  ]);
+  if (head.code !== 0 || status.code !== 0) return undefined;
+  const hash = createHash("sha256").update(head.stdout.trim());
+  for (const entry of status.stdout.split("\0")) {
+    if (entry.length < 4) continue;
+    const path = entry.slice(3);
+    hash.update(`\0${entry}`);
+    try {
+      const st = statSync(join(cwd, path));
+      hash.update(`:${st.size}:${st.mtimeMs}`);
+    } catch {
+      hash.update(":gone");
+    }
+  }
+  return hash.digest("hex");
 }

@@ -214,7 +214,8 @@ Method:
 - Report commands run, whether everything passed, and each failure with detail. If defects remain, set outcome "defects_found" with reasons that name the failing criteria.
 Produce the result document.`,
   // the tests only: typecheck, lint and builds are project.checks' (pilot: 48 commands a round)
-  capabilities: [...READ_REPO, ...WRITE_REPO, "project.test*", "code.diagnostics"],
+  // no code.diagnostics either: it runs every typecheck and lint, and the checks document has them
+  capabilities: [...READ_REPO, ...WRITE_REPO, "project.test*"],
   writes: TEST_FILES,
   requires: { tools: true, structuredOutput: "json" },
   output: { type: "tests", schema: TestResult, outcomes: ["ok", "defects_found"] },

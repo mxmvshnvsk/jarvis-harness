@@ -268,6 +268,24 @@ describe("local tools", () => {
     expect(r.text).not.toContain("other.ts");
   });
 
+  it("code.diagnostics does not run the checkers again for a workspace that did not change", async () => {
+    const { bind } = await setup(
+      `version: 1\ntools:\n  local:\n    typecheck: "echo run >> ../count.txt; true"\n`,
+    );
+    const count = () =>
+      readFileSync(join(sb.project, "..", "count.txt"), "utf8")
+        .split("\n")
+        .filter(Boolean).length;
+    const tools = bind();
+    await tools.invoke("code.diagnostics", {});
+    const again = await tools.invoke("code.diagnostics", { files: ["index.ts"] });
+    expect(count()).toBe(1);
+    expect(again.text).toContain("nothing changed since its last run");
+    writeFileSync(join(sb.project, "src/index.ts"), "export const answer = 43;\n");
+    await tools.invoke("code.diagnostics", {});
+    expect(count()).toBe(2);
+  });
+
   it("runs project commands from tools.local and exposes shell.run only when enabled", async () => {
     const { bind, registry } = await setup();
     expect(registry.get("shell.run")).toBeUndefined();
