@@ -51,7 +51,10 @@ function localRepos(runtime: Runtime, run: Run): Map<string, { path: string; ser
 async function call(ctx: StepContext, name: string, args: Record<string, unknown>) {
   try {
     const r = await ctx.tools.invoke(name, args);
-    return { ok: r.ok, text: r.text };
+    // the whole answer, not the agent's cut: a cut JSON does not parse (pilot: a Development panel of
+    // 58 KB came cut, and every branch and PR of the issue was lost)
+    const text = r.truncated && r.fullRef ? ctx.runtime.blobs.getText(r.fullRef) : r.text;
+    return { ok: r.ok, text };
   } catch (error) {
     return { ok: false, text: error instanceof Error ? error.message : String(error) };
   }
@@ -107,7 +110,11 @@ async function itemOf(ctx: StepContext, issue: IssueFacts & { key: string }): Pr
   const dev = await call(ctx, "jira.devInfo", { key: issue.key });
   if (!dev.ok)
     return { ...head, found: "none", contract: [], note: `jira.devInfo failed: ${dev.text.slice(0, 160)}` };
-  const { branches, prs } = devInfoOf(dev.text);
+  const info = devInfoOf(dev.text);
+  // the issue's own branches and PRs: the panel also lists the repository's dev, master and the like
+  const own = (name?: string) => !!name && name.toUpperCase().includes(issue.key.toUpperCase());
+  const branches = info.branches.filter((b) => own(b.name));
+  const prs = info.prs.filter((p) => !p.branch || own(p.branch));
   const pr = prs.find((p) => /open/i.test(p.state ?? "")) ?? prs[0];
   const branch = branches.find((b) => b.name === pr?.branch) ?? branches[0];
   const name = branch?.name ?? pr?.branch;

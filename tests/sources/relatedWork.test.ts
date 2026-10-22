@@ -319,6 +319,29 @@ describe("the related-work step", () => {
     expect(searched[0]).toContain('"Epic Link" = EP-9');
   });
 
+  it("reads a long answer whole, not as the agent's cut; the repository's own branches are not the issue's", async () => {
+    const ctx = ctxFor("ABC-42 discount on the order screen");
+    const base = ctx.tools.invoke;
+    (ctx.tools as unknown as { invoke: (n: string, a: Record<string, unknown>) => unknown }).invoke = async (
+      name: string,
+      args: Record<string, unknown>,
+    ) => {
+      const r = (await base(name, args)) as { ok: boolean; text: string };
+      if (name !== "jira.devInfo" || args.key !== "ABC-41") return r;
+      const full = r.text.replace(
+        '"branches":[',
+        '"branches":[{"name":"dev","url":"https://git.example.com/projects/SHOP/repos/orders-api/browse"},',
+      );
+      const fullRef = rt.blobs.put(full, "text/plain").contentRef;
+      return { ok: true, text: full.slice(0, 60), truncated: true, fullRef };
+    };
+    await collectRelated(ctx, {});
+    const doc = JSON.parse(
+      rt.artifacts.text(rt.artifacts.listLatest(ctx.run.id, "related-work")[0] as never),
+    ) as RelatedWorkDoc;
+    expect(doc.items[0]).toMatchObject({ issue: "ABC-41", branch: "feature/ABC-41-discount" });
+  });
+
   it("before implementation: a branch that moved on with its contract changed is said", async () => {
     const ctx = ctxFor("ABC-42 discount on the order screen");
     await collectRelated(ctx, {});
