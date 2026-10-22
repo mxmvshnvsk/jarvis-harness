@@ -294,6 +294,31 @@ describe("the related-work step", () => {
     expect(doc.about).toContain("dependency");
   });
 
+  it("the epic from nameless custom fields: the key whose issue is an Epic", async () => {
+    const searched: string[] = [];
+    const ctx = ctxFor("ABC-42 discount on the order screen");
+    const base = ctx.tools.invoke;
+    (ctx.tools as unknown as { invoke: (n: string, a: Record<string, unknown>) => unknown }).invoke = async (
+      name: string,
+      args: Record<string, unknown>,
+    ) => {
+      if (name === "jira.search") searched.push(String(args.jql));
+      if (name !== "jira.get") return base(name, args);
+      const doc =
+        args.key === "ABC-42"
+          ? {
+              key: "ABC-42",
+              issue_type: { name: "Front Task" },
+              customfield_1: { value: "TEAM-7" },
+              customfield_2: { value: "EP-9" },
+            }
+          : { key: args.key, issue_type: { name: args.key === "EP-9" ? "Epic" : "Team" } };
+      return { ok: true, text: `[jira.get] ok\n${JSON.stringify(doc)}` };
+    };
+    await collectRelated(ctx, {});
+    expect(searched[0]).toContain('"Epic Link" = EP-9');
+  });
+
   it("before implementation: a branch that moved on with its contract changed is said", async () => {
     const ctx = ctxFor("ABC-42 discount on the order screen");
     await collectRelated(ctx, {});
@@ -363,8 +388,8 @@ describe("issueFacts: Epic Link as a custom field", () => {
   });
 });
 
-describe("issueFacts: Epic Link as a nameless custom field", () => {
-  it("the custom field holding an issue key of the same project", () => {
+describe("issueFacts: issue keys in nameless custom fields", () => {
+  it("are candidates for the epic, the same project first", () => {
     const text = JSON.stringify({
       key: "ABC-42",
       customfield_100: { value: null },
@@ -372,6 +397,8 @@ describe("issueFacts: Epic Link as a nameless custom field", () => {
       customfield_102: { value: "ABC-1" },
       customfield_103: { value: 0.0 },
     });
-    expect(issueFacts(text).epic).toBe("ABC-1");
+    const facts = issueFacts(text);
+    expect(facts.epic).toBeUndefined();
+    expect(facts.keyFields).toEqual(["ABC-1", "XYZ-7"]);
   });
 });

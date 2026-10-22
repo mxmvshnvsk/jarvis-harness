@@ -165,6 +165,15 @@ async function itemOf(ctx: StepContext, issue: IssueFacts & { key: string }): Pr
   };
 }
 
+/** Of the issue keys in nameless custom fields, the one of type Epic (read one by one, at most 5). */
+async function epicAmong(ctx: StepContext, keys: readonly string[]): Promise<{ epic?: string }> {
+  for (const k of keys.slice(0, 5)) {
+    const r = await call(ctx, "jira.get", { key: k });
+    if (r.ok && /^(epic|эпик)$/i.test(issueFacts(r.text).type ?? "")) return { epic: k };
+  }
+  return {};
+}
+
 /** `related.collect`: the related-work document, or nothing when there is no issue to start from. */
 export const collectRelated: DeterministicTool = async (ctx) => {
   const available = new Set(ctx.tools.list().map((d) => d.name));
@@ -184,7 +193,8 @@ export const collectRelated: DeterministicTool = async (ctx) => {
   // all fields: the community server's default set has no issue links, no parent and no Epic Link
   const got = await call(ctx, "jira.get", { key, fields: "*all" });
   if (!got.ok) return say(`jira.get ${key} failed`);
-  const self = { ...issueFacts(got.text), key };
+  const facts = issueFacts(got.text);
+  const self = { ...facts, key, ...(facts.epic ? {} : await epicAmong(ctx, facts.keyFields ?? [])) };
   const issues = (await relatedIssues(ctx, self)).filter((i): i is IssueFacts & { key: string } => !!i.key);
   const items: RelatedItem[] = [];
   for (const issue of issues) items.push(await itemOf(ctx, issue));

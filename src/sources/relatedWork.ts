@@ -92,6 +92,11 @@ export interface IssueFacts {
   readonly summary?: string;
   readonly parent?: string;
   readonly epic?: string;
+  /**
+   * Issue keys in nameless custom fields, the issue's own project first: one of them may be the Epic
+   * Link (mcp-atlassian gives no field names) — the caller reads them and takes the one of type Epic.
+   */
+  readonly keyFields?: readonly string[];
   /** Keys of the issues it links to. */
   readonly links: readonly string[];
 }
@@ -131,7 +136,7 @@ function epicField(doc: unknown, fields: Record<string, unknown>): string | unde
  * Without the fields' names (mcp-atlassian gives custom fields as `customfield_NNNNN: {value}`) the
  * Epic Link is the custom field whose value is an issue's key — of the issue's own project first.
  */
-function keyInCustomField(fields: Record<string, unknown>, self: string | undefined): string | undefined {
+function keysInCustomFields(fields: Record<string, unknown>, self: string | undefined): string[] {
   const keys: string[] = [];
   for (const [id, v] of Object.entries(fields)) {
     if (!id.startsWith("customfield_")) continue;
@@ -139,7 +144,11 @@ function keyInCustomField(fields: Record<string, unknown>, self: string | undefi
     if (k && ISSUE_KEY.test(k) && k !== self) keys.push(k);
   }
   const project = self?.split("-")[0];
-  return keys.find((k) => k.split("-")[0] === project) ?? keys[0];
+  const unique = [...new Set(keys)];
+  return [
+    ...unique.filter((k) => k.split("-")[0] === project),
+    ...unique.filter((k) => k.split("-")[0] !== project),
+  ];
 }
 
 export function issueFacts(text: string): IssueFacts {
@@ -157,11 +166,11 @@ export function issueFacts(text: string): IssueFacts {
   const epic =
     parentOf(pick("epic", "epic_link", "epicLink", "epic_key", "Epic Link")) ??
     epicField(doc, fields) ??
-    keyInCustomField(fields, key) ??
     /"epic[_ ]?(?:link|key)?"\s*:\s*"([A-Z][A-Z0-9]+-\d+)"/i.exec(raw)?.[1] ??
     /"name"\s*:\s*"Epic Link"[^{}]{0,200}?"([A-Z][A-Z0-9]+-\d+)"/i.exec(raw)?.[1] ??
     /"([A-Z][A-Z0-9]+-\d+)"[^{}]{0,200}?"name"\s*:\s*"Epic Link"/i.exec(raw)?.[1];
   const parent = parentOf(pick("parent"));
+  const keyFields = epic ? [] : keysInCustomFields(fields, key);
   const linkText = JSON.stringify(pick("issuelinks", "issue_links", "links") ?? "");
   const links = [...new Set(linkText.match(KEY) ?? [])].filter(
     (k) => k !== key && k !== parent && k !== epic,
@@ -176,6 +185,7 @@ export function issueFacts(text: string): IssueFacts {
     ...(summary ? { summary } : {}),
     ...(parent ? { parent } : {}),
     ...(epic ? { epic } : {}),
+    ...(keyFields.length > 0 ? { keyFields } : {}),
     links,
   };
 }
