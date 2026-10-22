@@ -283,7 +283,7 @@ details.panel.redo>summary{color:var(--muted);font-size:13.5px}
 .steer{display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center}
 .steer .hint{display:none}
 /* the dock: the page's actions at the bottom of the screen, the full width behind them */
-.dock{position:sticky;bottom:0;z-index:30;margin-top:auto;padding:12px 0;background:color-mix(in srgb,var(--panel) 92%,transparent);-webkit-backdrop-filter:saturate(1.4) blur(10px);backdrop-filter:saturate(1.4) blur(10px);box-shadow:0 0 0 100vmax color-mix(in srgb,var(--panel) 92%,transparent),0 -6px 24px rgba(24,22,18,.05);clip-path:inset(-24px -100vmax 0 -100vmax);border-top:1px solid var(--line);border-image:linear-gradient(var(--line),var(--line)) 1/1px 0 0 0/0 100vmax 0 100vmax}
+.dock{position:sticky;bottom:0;z-index:30;margin-top:auto;padding:12px 0;background:color-mix(in srgb,var(--panel) 92%,transparent);-webkit-backdrop-filter:saturate(1.4) blur(10px);backdrop-filter:saturate(1.4) blur(10px);box-shadow:0 0 0 100vmax color-mix(in srgb,var(--panel) 92%,transparent);clip-path:inset(0 -100vmax 0 -100vmax);border-top:1px solid var(--line);border-image:linear-gradient(var(--line),var(--line)) 1/1px 0 0 0/0 100vmax 0 100vmax}
 .dock-in{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
 .dock .what{display:flex;flex-direction:column;gap:1px;min-width:0;flex:0 1 auto}
 .dock .what b{font-size:14px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
