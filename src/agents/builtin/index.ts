@@ -100,14 +100,16 @@ Method:
 - Each requirement has an id (R1, R2, …), a precise statement, and acceptance criteria that can be checked by a test or an inspection.
 - State non-goals explicitly. List risks and open questions instead of guessing.
 - A question for a person (open questions, the clarification) is read at the gate by someone who will not open your tools: name what it is about as they see it — the screen by its title or its section («To be - …»), the field by its label, the text in «» — and give the answers you see. A Figma node id, a requirement id or a path goes to refs and sources, never into the question. A design frame labelled To be or AS IS by its section answers which variant is the target: do not ask it.
-- Consult the repository only to make requirements concrete (names of modules, existing behaviour); do not design the implementation.
+- The requirements input is the analysis of the task: build on it. Keep its numbering (R1, R2, …) and its verdict on each; every assumption it made goes to "assumptions"; cover each missing case it lists or say in risks why not. Contradictions it settled stay settled.
+- Consult the repository only to make requirements concrete (names of modules, existing behaviour) — research and requirements already read it; do not design the implementation.
 - A related-work input is what related tasks already did in their branches, not merged yet: build on the contract it shows (fields, endpoints) and list each such branch in dependencies with its issue, branch, commit and PR state; never assume what the branch does not have.
 Produce the result document when every requirement has acceptance criteria.`,
   capabilities: ["repo.read", "repo.list", "repo.search"],
   requires: { tools: true, structuredOutput: "json" },
   output: { type: "spec", schema: SpecResult, outcomes: ["ok"] },
-  limits: { ...DEFAULT_LIMITS, maxToolCalls: 20 },
-  contextInputs: ["research", "design", "requirement-correction", "related-work"],
+  // the code is read by research and requirements: spec writes, it looks up a name or two
+  limits: { ...DEFAULT_LIMITS, maxToolCalls: 12, maxModelCalls: 20 },
+  contextInputs: ["requirements", "research", "design", "requirement-correction", "related-work"],
 };
 
 export const IMPACT_AGENT: AgentDefinition = {

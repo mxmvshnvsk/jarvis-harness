@@ -58,7 +58,11 @@ export function numberedLines(text: string): string {
 /** An input produced by an agent that ran out of its budget: say so, so it is not taken as complete. */
 export function incompleteNote(a: ArtifactVersion): string {
   const p = a.provenance;
-  if (p.kind !== "agent" || !p.budgetExhausted) return "";
+  if (p.kind !== "agent") return "";
+  if (!p.budgetExhausted)
+    return p.shortened
+      ? `> SHORTENED: agent ${p.agentId}'s document was cut at the output limit and written again shorter; items may be missing. Verify what you rely on.\n\n`
+      : "";
   const what =
     p.budgetExhausted === "tools"
       ? "tool calls"

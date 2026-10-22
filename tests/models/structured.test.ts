@@ -134,6 +134,8 @@ describe("generateStructured", () => {
       messages,
     });
     expect(r.repairs).toBe(1);
+    // written again shorter: said, so the document is not taken as complete
+    expect(r.shortened).toBe(true);
     const second = server.requests[1]?.body as { messages: Array<{ role: string; content: string }> };
     expect(second.messages).toHaveLength(messages.length);
     expect(second.messages.at(-1)?.content).toContain("cut off at the output limit");

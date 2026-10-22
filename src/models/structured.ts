@@ -30,6 +30,8 @@ export interface StructuredResult<T> {
   readonly repairs: number;
   readonly mode: StructuredMode;
   readonly totalUsage: { promptTokens: number; cachedTokens: number; outputTokens: number };
+  /** The answer was cut at the output limit and asked for again shorter: items may have been dropped. */
+  readonly shortened?: boolean;
 }
 
 export class StructuredOutputError extends ModelError {
@@ -188,6 +190,7 @@ export async function generateStructured<T>(
   const firstMessages = messages;
   const totalUsage = { promptTokens: 0, cachedTokens: 0, outputTokens: 0 };
   let repairs = 0;
+  let shortened = false;
   let lastText = "";
   let lastIssues: string[] = [];
 
@@ -199,7 +202,14 @@ export async function generateStructured<T>(
     lastText = response.text;
     const parsed = parseStructured(response.text, options.schema, options.mode);
     if (parsed.ok) {
-      return { value: parsed.value, response, repairs, mode: options.mode, totalUsage };
+      return {
+        value: parsed.value,
+        response,
+        repairs,
+        mode: options.mode,
+        totalUsage,
+        ...(shortened ? { shortened } : {}),
+      };
     }
     // the answer hit the output limit: asking to "correct" it brings the same long document, cut again
     // (pilot: three answers of 4096 tokens, each cut mid-string) — ask for a shorter one instead
@@ -214,6 +224,7 @@ export async function generateStructured<T>(
     if (repairs >= maxRepairs) break;
     repairs += 1;
     if (cut) {
+      shortened = true;
       const target = Math.max(2000, Math.round(response.text.length * (repairs === 1 ? 0.6 : 0.4)));
       // the cut answer is not sent back: it is lost anyway, and it would only pull the next one as long
       const shorter = `Your previous answer was cut off at the output limit (${response.usage.outputTokens} tokens) before the JSON document ended, so it was lost. Write the whole document again, complete and valid, in at most about ${target} characters: keep every text field short (a sentence or two), list only the most important items, no long quotes or code. Return only the JSON document.`;

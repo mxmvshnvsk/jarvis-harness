@@ -44,7 +44,8 @@ steps:
   - id: spec
     kind: agentic
     agent: specification
-    onLimit: ask  # a half-done result costs more than a question: at its limit the run asks
+    # research and requirements read the code: the spec writes, and at its limit it finishes with what
+    # it has (marked incomplete) rather than stop the run for a person
     phase: spec
     inputs: [research, requirements, design, requirement-correction, related-work]
     outputs: [spec]
@@ -269,7 +270,6 @@ steps:
   - id: spec
     kind: agentic
     agent: specification
-    onLimit: ask
     phase: spec
     inputs: [research, requirements, design, requirement-correction, related-work]
     outputs: [spec]

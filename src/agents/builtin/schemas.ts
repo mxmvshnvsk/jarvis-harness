@@ -152,6 +152,20 @@ export const SpecResult = z.object({
     )
     .min(1),
   risks: z.array(z.string()).default([]),
+  /** What the requirements analysis had to assume, made explicit for the reviewer. */
+  assumptions: z.array(z.string()).default([]),
+  /** Work this spec builds on that is not merged yet (related-work): a dependency, not a fact. */
+  dependencies: z
+    .array(
+      z.object({
+        what: z.string().min(1).describe("what the spec relies on, e.g. the field OrderDto.discountAmount"),
+        issue: z.string().optional(),
+        branch: z.string().optional(),
+        commit: z.string().optional(),
+        pr: z.string().optional().describe("the PR's state, e.g. OPEN or MERGED"),
+      }),
+    )
+    .default([]),
   openQuestions: z.array(OpenQuestion).default([]),
   outcome: z.enum(["ok"]).default("ok"),
 });

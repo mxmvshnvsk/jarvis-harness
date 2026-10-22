@@ -705,7 +705,7 @@ export class AgentRuntimeRunner implements AgentRunner {
               ? "document"
               : "text";
     try {
-      let result: { value: unknown; repairs: number; calls: number };
+      let result: { value: unknown; repairs: number; calls: number; shortened?: boolean };
       if (early?.ok) {
         result = { value: early.value, repairs: 0, calls: 0 };
       } else {
@@ -748,7 +748,12 @@ export class AgentRuntimeRunner implements AgentRunner {
             ...(effort ? { reasoningEffort: effort } : {}),
           },
         });
-        result = { value: generated.value, repairs: generated.repairs, calls: 1 + generated.repairs };
+        result = {
+          value: generated.value,
+          repairs: generated.repairs,
+          calls: 1 + generated.repairs,
+          ...(generated.shortened ? { shortened: true } : {}),
+        };
       }
       const doc = result.value as AgentResultDoc;
       const outcome = doc.outcome ?? "ok";
@@ -772,6 +777,8 @@ export class AgentRuntimeRunner implements AgentRunner {
           agentId: def.id,
           ...callRefsOf(rt.events, ctx.run.id, ctx.step.id, ctx.iteration),
           ...(budgetExhausted ? { budgetExhausted } : {}),
+          // cut at the output limit and written again shorter: said, not silent (pilot: requirements lost)
+          ...(result.shortened ? { shortened: true } : {}),
         },
         // What the agent was told (ADR-0020 §4) joins what it read (ADR-0005).
         sourceRefs: [...(doc.sources ?? []), ...pkg.provenance],
@@ -788,6 +795,7 @@ export class AgentRuntimeRunner implements AgentRunner {
         modelCalls: modelCalls + result.calls,
         repairs: result.repairs,
         finalizedFromLoop: result.calls === 0,
+        ...(result.shortened ? { shortened: true } : {}),
         endedWith,
         artifact: `${artifact.artifactId}@${artifact.version}`,
         ...(budgetExhausted ? { budgetExhausted } : {}),
