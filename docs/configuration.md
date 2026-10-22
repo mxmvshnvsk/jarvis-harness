@@ -533,12 +533,14 @@ incomplete»), в итоге прогона и в `jarvis show` («⚠ incomplet
 Для шагов, где полусделанный результат дороже вопроса, — `onLimit: ask`: на лимите агент сохраняет разговор,
 прогон ждёт человека (`WAITING_HUMAN`, `waitingFor: budget`), а карточка `jarvis continue` или страница
 `jarvis ui` предлагает добавить вызовов (шаг продолжается с того же места) или закончить с тем, что есть
-(как без `ask`, с пометкой `INCOMPLETE`). Во встроенных workflow так у шагов `spec` и `implementation`.
-Где отвечать некому (`interactive: false`, профиль `ci`), `ask` ведёт себя как `finish`.
+(как без `ask`, с пометкой `INCOMPLETE`). Во встроенных workflow так у шагов `spec` и `implementation`, а у
+агентов анализа — `research`, `impact`, `plan` — по умолчанию: обрезанный анализ молча пропускает то, чего не
+увидел, и дальше это никто не заметит. Где отвечать некому (`interactive: false`, профиль `ci`), `ask` ведёт
+себя как `finish`.
 
 ```yaml
 agents:
-  research: { onLimit: ask }           # над шагом workflow; finish — как раньше, без вопроса
+  impact: { onLimit: finish }          # над шагом workflow и умолчанием агента: как раньше, без вопроса
 ```
 
 ```yaml

@@ -68,6 +68,8 @@ Stop when further reading would not change the findings. Then produce the result
   requires: { tools: true, structuredOutput: "json" },
   output: { type: "research", schema: ResearchResult, outcomes: ["ok"] },
   limits: DEFAULT_LIMITS,
+  // an analysis cut at its limit passes on what it missed silently: a person decides (pilot: impact)
+  onLimit: "ask",
   // where nothing is cached, every call re-sends the sources, the design and the knowledge
   uncached: { baseChars: 60_000, workingSet: 40_000 },
   reasoningEffort: "medium",
@@ -143,6 +145,7 @@ Produce the result document when the affected set is complete.`,
   // pilot: 120–130 tool calls a subtask, a second research — at night's ×5 of the default 40; then 60 of
   // 60 at 30 ×2, 47 of them reading files whole to confirm what a search hit had shown
   limits: { ...DEFAULT_LIMITS, maxToolCalls: 40, maxModelCalls: 20, maxScale: 2 },
+  onLimit: "ask",
   contextInputs: ["research", "spec"],
 };
 
@@ -186,6 +189,7 @@ Produce the result document.`,
   requires: { tools: true, structuredOutput: "json" },
   output: { type: "plan", schema: PlanResult, outcomes: ["ok", "spec_infeasible"] },
   limits: { ...DEFAULT_LIMITS, maxToolCalls: 15 },
+  onLimit: "ask",
   contextInputs: ["spec", "impact"],
 };
 

@@ -320,7 +320,7 @@ export class AgentRuntimeRunner implements AgentRunner {
     // a used-up limit: finish with what there is (marked incomplete), or — `onLimit: ask`, a person at
     // hand — the run waits for more calls or "finish"; never asks where nobody answers (CI)
     const ask =
-      (config.agents[def.id]?.onLimit ?? ctx.step.onLimit ?? "finish") === "ask" &&
+      (config.agents[def.id]?.onLimit ?? ctx.step.onLimit ?? def.onLimit ?? "finish") === "ask" &&
       config.interactive !== false &&
       !isAutonomous(ctx.run) &&
       !grants.finish;

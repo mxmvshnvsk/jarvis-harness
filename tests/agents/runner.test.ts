@@ -502,7 +502,11 @@ context: { maxContext: 8000 }
   });
 
   it("stops the tool loop at the limit, maps outcomes and fails on undeclared ones", async () => {
-    sb.write("project/.jarvis/project.yaml", "version: 1\nworkspace: { mode: cwd }\n");
+    // finishing at the limit (impact asks a person by default)
+    sb.write(
+      "project/.jarvis/project.yaml",
+      "version: 1\nworkspace: { mode: cwd }\nagents: { impact: { onLimit: finish }, research: { onLimit: finish } }\n",
+    );
     rt = await testRuntime(sb, { PATH: process.env.PATH ?? "" });
     const wf = workflowOf({
       name: "i",
@@ -598,7 +602,7 @@ context: { maxContext: 8000 }
   it("marks a result cut short by a limit (agents.<id>.limits) and tells the next agent it is incomplete (pilot)", async () => {
     sb.write(
       "project/.jarvis/project.yaml",
-      "version: 1\nworkspace: { mode: cwd }\nagents: { research: { limits: { maxToolCalls: 2 } } }\n",
+      "version: 1\nworkspace: { mode: cwd }\nagents: { research: { limits: { maxToolCalls: 2 }, onLimit: finish } }\n",
     );
     rt = await testRuntime(sb, { PATH: process.env.PATH ?? "" });
     const wf = workflowOf({
@@ -826,6 +830,53 @@ context: { maxContext: 8000 }
     const start = rt.events.list({ runId: run.id }).find((e) => e.kind === "agent.start");
     expect(start?.payload).toMatchObject({ maxToolCalls: 4, maxModelCalls: 8 });
     expect(rt.events.list({ runId: run.id }).filter((e) => e.kind === "tool.call")).toHaveLength(4);
+  });
+
+  it("research, impact and plan ask at their limit by default; agents.<id>.onLimit: finish keeps the old way", async () => {
+    for (const ask of [true, false]) {
+      sb.write(
+        "project/.jarvis/project.yaml",
+        `version: 1\nworkspace: { mode: cwd }\nagents: { impact: { limits: { maxToolCalls: 2 }${ask ? "" : ", onLimit: finish"} } }\n`,
+      );
+      rt = await testRuntime(sb, { PATH: process.env.PATH ?? "" });
+      const doc = {
+        summary: "s",
+        affected: [],
+        dependencies: [],
+        risks: [],
+        unknowns: [],
+        sources: [],
+        outcome: "ok",
+      };
+      server.respond((req) =>
+        req.body.tools ? toolCallCompletion("repo.list", {}) : completion(JSON.stringify(doc)),
+      );
+      const wf = workflowOf({
+        name: "im",
+        entry: "impact",
+        steps: [
+          {
+            id: "impact",
+            kind: "agentic",
+            agent: "impact",
+            outputs: ["impact"],
+            transitions: { onSuccess: "DONE" },
+          },
+        ],
+      });
+      const run = createRun(rt, "im");
+      const result = await engineWith(rt, wf).execute(run.id, { owner: "cli:t" });
+      if (ask) {
+        expect(result.run.state).toBe("WAITING_HUMAN");
+        expect(result.run.waitingFor).toMatchObject({ kind: "budget", detail: "agent toolCalls" });
+        await rt.close();
+      } else expect(result.run.state).toBe("COMPLETED");
+    }
+    expect(BUILTIN_AGENTS.filter((a) => a.onLimit === "ask").map((a) => a.id)).toEqual([
+      "research",
+      "impact",
+      "plan",
+    ]);
   });
 
   it("onLimit: ask — the run waits at the limit with the conversation kept; more goes on, finish ends it", async () => {

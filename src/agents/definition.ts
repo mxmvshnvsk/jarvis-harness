@@ -64,6 +64,12 @@ export interface AgentDefinition<T = unknown> {
   readonly outcomeOf?: (doc: Record<string, unknown>) => string | undefined;
   /** `reasoning_effort` of the agent's calls (agents.<id>.reasoningEffort overrides it). */
   readonly reasoningEffort?: "none" | "low" | "medium" | "high";
+  /**
+   * At a used-up limit, by default: `ask` — a person grants more or lets it finish (where one can
+   * answer); `finish` (none) — the result from what it has, marked incomplete. `agents.<id>.onLimit`
+   * and the step's own come first.
+   */
+  readonly onLimit?: "finish" | "ask";
 }
 
 export const DEFAULT_LIMITS: AgentLimits = { maxToolCalls: 40, maxModelCalls: 60, checkpointEvery: 5 };
