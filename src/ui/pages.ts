@@ -612,12 +612,6 @@ ${
     : html`<div class="panel empty">${t("Nothing waits for you.")}</div>`
 }
 </section>
-${((w) =>
-  w
-    ? dockHtml(
-        html`<span class="pill wait">${plural(waits, "waits", "wait")}</span><div class="what"><b>${firstLine(w.run.task, 120)}</b><span>${w.run.workflow} · ${w.run.currentStep ?? ""} · ${t("waiting {ago}", { ago: ago(w.run.updatedAt, now) })}</span></div><span class="grow"></span>${start && actions ? html`<span class="hint">${t("New task")} <kbd class="key">N</kbd></span>` : ""}${actions && w.card.kind === "loop" ? form(actions, `${runHref(w.run)}/open`, html`<button type="submit" class="btn">${t("Open in editor")}</button>`) : ""}<a class="btn primary" href="${runHref(w.run)}">${t("Open the run")}</a>`,
-      )
-    : dockHtml(""))(page.waiting[0])}
 <section class="group" aria-labelledby="running" data-live="running">
 <h2 id="running">${t("Running")}</h2>
 ${launches.map((l) => launchHtml(l, now, start?.homeDir ?? ""))}
@@ -646,7 +640,13 @@ ${evalsGroupHtml(page)}
 <input type="hidden" name="repo" value="${page.repo ?? ""}"><button type="submit" class="btn sr">${t("Search")}</button>
 </form></div>
 ${recentHtml(page)}
-</section>`;
+</section>
+${((w) =>
+  w
+    ? dockHtml(
+        html`<span class="pill wait">${plural(waits, "waits", "wait")}</span><div class="what"><b>${firstLine(w.run.task, 120)}</b><span>${w.run.workflow} · ${w.run.currentStep ?? ""} · ${t("waiting {ago}", { ago: ago(w.run.updatedAt, now) })}</span></div><span class="grow"></span>${start && actions ? html`<span class="hint">${t("New task")} <kbd class="key">N</kbd></span>` : ""}${actions && w.card.kind === "loop" ? form(actions, `${runHref(w.run)}/open`, html`<button type="submit" class="btn">${t("Open in editor")}</button>`) : ""}<a class="btn primary" href="${runHref(w.run)}">${t("Open the run")}</a>`,
+      )
+    : dockHtml(""))(page.waiting[0])}`;
 }
 
 /** A scheduled eval suite whose last run regressed against its baseline or did not run (src/evals/schedule.ts). */
