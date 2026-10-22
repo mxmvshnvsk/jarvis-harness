@@ -69,6 +69,7 @@ import {
 import { type McpProbe, mcpHealthOf } from "../app/mcpHealth.ts";
 import { modelsHealthOf } from "../app/modelHealth.ts";
 import { pauseRequested, requestPause } from "../app/pause.ts";
+import { checkPr, followsPr, prCheckDue, prReviewOf } from "../app/prReview.ts";
 import { requestRedo } from "../app/redo.ts";
 import { restartPlanOf } from "../app/restart.ts";
 import { resumableOf } from "../app/resumable.ts";
@@ -180,6 +181,7 @@ import {
   runsContent,
   startFromHtml,
 } from "./pages.ts";
+import { prPanelHtml, prReviewPageHtml } from "./prPanel.ts";
 import { reportContent } from "./report.ts";
 import { type ServicesPage, serviceContent, servicesContent } from "./services.ts";
 
@@ -213,6 +215,8 @@ export interface UiServerOptions {
   readonly launcher?: Launcher;
   /** How often each MCP server is checked for an answer (ms); 0 — only on "Check now". */
   readonly mcpCheckEveryMs?: number;
+  /** How often the open PRs are looked at for a read due (`delivery.flow.pollMinutes`); 0 — never. */
+  readonly prPollEveryMs?: number;
 }
 
 export interface UiServer {
@@ -427,6 +431,36 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
     : undefined;
   tender?.unref?.();
 
+  // the PR flow: the comments of the runs' open PRs, read every `delivery.flow.pollMinutes` while the
+  // page is open (the session); one at a time, a failure said in the feed and tried at the next tick
+  let prBusy = false;
+  const prPoll = async () => {
+    if (prBusy) return;
+    prBusy = true;
+    try {
+      const since = new Date(Date.now() - 30 * 24 * 3600_000).toISOString();
+      for (const run of runtime.runs.list({ state: "COMPLETED", includeTerminal: true, limit: 200 })) {
+        if (run.updatedAt < since || !prCheckDue(runtime, run)) continue;
+        try {
+          await checkPr(runtime, run, "poll");
+        } catch (error) {
+          runtime.events.emit({
+            kind: "pr.checkFailed",
+            runId: run.id,
+            payload: { reason: (error instanceof Error ? error.message : String(error)).slice(0, 300) },
+          });
+        }
+      }
+    } catch {
+      // a busy database: the next tick tries again
+    } finally {
+      prBusy = false;
+    }
+  };
+  const prEvery = options.prPollEveryMs ?? 60_000;
+  const prPoller = prEvery > 0 ? setInterval(() => void prPoll(), prEvery) : undefined;
+  prPoller?.unref?.();
+
   /* ---- answers ---- */
   const send = (r: Request, status: number, body: string, type = "text/html; charset=utf-8", extra = {}) => {
     r.res.writeHead(status, { ...SECURITY_HEADERS, "Content-Type": type, ...extra });
@@ -539,6 +573,10 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
       "no-request": html`<div class="banner bad">${t("No such contract change request, or it is decided already")}</div>`,
       "apply-failed": html`<div class="banner bad">${t("Not applied:")} ${r.url.searchParams.get("why") ?? t("see jarvis logs")}</div>`,
       "pr-created": html`<div class="banner ok">${t("Pushed the run's branch and opened the PR")}</div>`,
+      "pr-checked": html`<div class="banner info">${t("The PR is read: what changed is below")}</div>`,
+      "pr-ready": html`<div class="banner ok">${t("The PR is ready for merge: merge it in Bitbucket")}</div>`,
+      "pr-check-failed": html`<div class="banner bad">${t("The PR could not be read:")} ${r.url.searchParams.get("why") ?? t("see jarvis logs")}</div>`,
+      "no-pr": html`<div class="banner info">${t("The run has no PR")}</div>`,
       "pr-check": html`<div class="banner info">${t("The PR is prepared: check it below, change what is needed and create it")}</div>`,
       "pr-approve": html`<div class="banner info">${t("The project wants the PR approved first: check it below and approve it")}</div>`,
       "pr-failed": html`<div class="banner bad">${t("No PR:")} ${r.url.searchParams.get("why") ?? t("see jarvis logs")}</div>`,
@@ -811,6 +849,22 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
    * An ended run's checkout and branch, and a way to remove them (as `jarvis gc` for this one run): a
    * cancelled, failed or finished run leaves a folder and a branch behind until someone cleans up.
    */
+  /** The PR flow's panel: where the run's PR stands, «Check comments», the code review page. */
+  const prPanelOn = (run: Run, from?: "review"): Html | undefined => {
+    const pr = prOf(runtime, run);
+    if (!pr) return undefined;
+    const last = runtime.events.list({ runId: run.id, kind: "pr.checked", latest: true, limit: 1 })[0];
+    const flow = runtime.loaded.config.delivery.flow;
+    const panel = prPanelHtml(run, pr, prReviewOf(runtime, run), {
+      ...(actions ? { token: actions.token } : {}),
+      approvals: flow.ready.approvals,
+      pollMinutes: flow.pollMinutes,
+      ...(last ? { lastCheck: last.ts } : {}),
+      following: followsPr(runtime, run),
+      ...(from ? { back: from } : {}),
+    });
+    return panel;
+  };
   const checkoutOn = async (run: Run): Promise<Html | undefined> => {
     const ws = run.workspace;
     if (ws.mode !== "worktree" || !isTerminal(run.state)) return undefined;
@@ -1903,7 +1957,7 @@ ${candidateReviewHtml(c, run, run.workspace.repoRoot, actions, { back: `/runs/${
       });
     }
     const m =
-      /^\/runs\/([^/]+)\/(decide|rerun|open|budget|resume|cancel|continue|restart|redo|clarify|eval|note|pause|cleanup|apply|pr|restore-branch|subtask|contract|scope|tests|steer|effect|conflict)$/.exec(
+      /^\/runs\/([^/]+)\/(decide|rerun|open|budget|resume|cancel|continue|restart|redo|clarify|eval|note|pause|cleanup|apply|pr|pr-check|restore-branch|subtask|contract|scope|tests|steer|effect|conflict)$/.exec(
         r.url.pathname,
       );
     const run = m ? resolveRun(m[1] as string) : undefined;
@@ -2203,6 +2257,20 @@ ${candidateReviewHtml(c, run, run.workspace.repoRoot, actions, { back: `/runs/${
         return redirect(
           r,
           `/runs/${short}?notice=apply-failed&why=${encodeURIComponent(error.message.slice(0, 600))}`,
+        );
+      }
+    }
+    if (m[2] === "pr-check") {
+      // «Check comments»: the PR read now, not at the next poll
+      if (!prOf(runtime, run)) return redirect(r, `/runs/${short}?notice=no-pr`);
+      try {
+        const doc = await checkPr(runtime, run, "ui");
+        const back = form.get("back") === "review" ? `/runs/${short}/pr` : `/runs/${short}`;
+        return redirect(r, `${back}?notice=${doc.ready ? "pr-ready" : "pr-checked"}`);
+      } catch (error) {
+        return redirect(
+          r,
+          `/runs/${short}?notice=pr-check-failed&why=${encodeURIComponent((error instanceof Error ? error.message : String(error)).slice(0, 600))}`,
         );
       }
     }
@@ -2576,7 +2644,9 @@ ${candidateReviewHtml(c, run, run.workspace.repoRoot, actions, { back: `/runs/${
         driven: options.launcher?.drives(run.id) === true,
       };
       // a module research: its candidate is decided right here, not only on the Modules page
-      const review = await candidateOnRun(run);
+      const candidate = await candidateOnRun(run);
+      const prPanel = prPanelOn(run);
+      const review = candidate || prPanel ? html`${candidate ?? ""}${prPanel ?? ""}` : undefined;
       const checkout = await checkoutOn(run);
       const ticking =
         run.state === "RUNNING" ||
@@ -2593,6 +2663,26 @@ ${candidateReviewHtml(c, run, run.workspace.repoRoot, actions, { back: `/runs/${
           ...(ticking ? { tick: 3000 } : {}),
         },
         runContent(model, now, actions, noticeOf(r) ?? knowledgeNotice(r), review, checkout),
+      );
+    }
+    const prMatch = /^\/runs\/([^/]+)\/pr$/.exec(path);
+    if (prMatch) {
+      // the code review page: the PR's open threads as read from the server
+      const run = resolveRun(prMatch[1] as string);
+      if (!run) return notFound(r, `No run "${prMatch[1]}".`);
+      const pr = prOf(runtime, run);
+      const panel = prPanelOn(run, "review");
+      if (!pr || !panel) return notFound(r, `Run ${shortRunId(run.id)} has no PR.`);
+      return page(
+        r,
+        200,
+        {
+          title: `PR · run ${shortRunId(run.id)}`,
+          page: "run",
+          runId: run.id,
+          back: { href: `/runs/${encodeURIComponent(shortRunId(run.id))}`, label: "Run" },
+        },
+        html`${noticeOf(r) ?? ""}${prReviewPageHtml(run, pr, prReviewOf(runtime, run), panel)}`,
       );
     }
     const artMatch = /^\/runs\/([^/]+)\/artifacts\/([^/]+)\/([^/]+)$/.exec(path);
@@ -2843,6 +2933,7 @@ ${candidateReviewHtml(c, run, run.workspace.repoRoot, actions, { back: `/runs/${
       new Promise<void>((resolve) => {
         if (poller) clearInterval(poller);
         if (tender) clearInterval(tender);
+        if (prPoller) clearInterval(prPoller);
         clearInterval(healthTimer);
         clearInterval(mcpTimer);
         if (mcpChecker) clearInterval(mcpChecker);

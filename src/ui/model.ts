@@ -1211,6 +1211,29 @@ export function feedItem(e: StoredEvent): FeedItem | undefined {
       return at(`${t("PR opened")}${str(p.url) ? `: ${str(p.url)}` : ""}${by}`, "ok");
     case "delivery.failed":
       return at(`${t("No PR:")} ${str(p.reason) ?? ""}`.trim(), "warn");
+    case "pr.checked": {
+      // a read every few minutes: in the feed only when it brought something
+      if (p.state !== undefined && p.state !== "OPEN")
+        return at(
+          p.state === "MERGED" ? t("the PR is merged") : t("the PR is {state}", { state: String(p.state) }),
+          "ok",
+        );
+      if (p.ready === true && p.readyChanged === true)
+        return at(t("the PR is ready for merge: merge it in Bitbucket"), "ok");
+      const fresh = Number(p.fresh) || 0;
+      if (fresh > 0)
+        return at(
+          t("PR: {comments} new, {open} open threads, approvals {approvals}", {
+            comments: plural(fresh, "comment"),
+            open: Number(p.open) || 0,
+            approvals: Number(p.approvals) || 0,
+          }),
+        );
+      if (p.readyChanged === true) return at(t("the PR is not ready for merge any more"), "warn");
+      return undefined;
+    }
+    case "pr.checkFailed":
+      return at(t("the PR could not be read: {why}", { why: str(p.reason) ?? "?" }), "warn");
     case "delivery.skipped":
       return at(
         p.code === "empty"

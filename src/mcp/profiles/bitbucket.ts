@@ -4,6 +4,11 @@ import { type McpProfile, type ProfileCapability, params } from "../types.ts";
  * Bitbucket profile (ADR-0017 §4): pull requests. Candidates cover the common community servers; on
  * Bitbucket Server/Data Center `workspace` is the project key.
  */
+/** A PR's number as the server wants it: a number (`--arg id=312` may come as text). */
+function prNumber(v: unknown): unknown {
+  return typeof v === "string" && /^\d+$/.test(v) ? Number(v) : v;
+}
+
 const prGet: ProfileCapability = {
   tools: ["get_pull_request", "bitbucket_get_pull_request", "getPullRequest"],
   description: "Read a pull request: title, description, state, reviewers, comments.",
@@ -18,9 +23,32 @@ const prGet: ProfileCapability = {
     workspace: a.workspace,
     repo_slug: a.repo,
     repository: a.repo,
-    pull_request_id: a.id,
+    pull_request_id: prNumber(a.id),
     prId: a.id,
     id: a.id,
+    // the PR flow reads every open thread and the tasks (Bitbucket Server), not the first 20
+    include_tasks: true,
+    comment_limit: 100,
+  }),
+};
+
+const prCommits: ProfileCapability = {
+  tools: ["list_pr_commits", "bitbucket_list_pr_commits", "listPullRequestCommits"],
+  description: "List the commits of a pull request, the latest first, with their build status.",
+  access: "read",
+  effect: false,
+  parameters: params({ workspace: "workspace slug", repo: "repository slug", id: "pull request id" }, [
+    "workspace",
+    "repo",
+    "id",
+  ]),
+  args: (a) => ({
+    workspace: a.workspace,
+    repo_slug: a.repo,
+    repository: a.repo,
+    pull_request_id: prNumber(a.id),
+    include_build_status: true,
+    limit: 5,
   }),
 };
 
@@ -50,7 +78,7 @@ const prDiff: ProfileCapability = {
     workspace: a.workspace,
     repo_slug: a.repo,
     repository: a.repo,
-    pull_request_id: a.id,
+    pull_request_id: prNumber(a.id),
     prId: a.id,
     id: a.id,
   }),
@@ -107,7 +135,7 @@ const prComment: ProfileCapability = {
     workspace: a.workspace,
     repo_slug: a.repo,
     repository: a.repo,
-    pull_request_id: a.id,
+    pull_request_id: prNumber(a.id),
     prId: a.id,
     id: a.id,
     content: a.content ?? a.body,
@@ -209,6 +237,7 @@ export const bitbucketProfile: McpProfile = {
     "bitbucket.pr.get": prGet,
     "bitbucket.pr.list": prList,
     "bitbucket.pr.diff": prDiff,
+    "bitbucket.pr.commits": prCommits,
     "bitbucket.pr.create": prCreate,
     "bitbucket.pr.comment": prComment,
     "bitbucket.branch.list": branchList,

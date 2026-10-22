@@ -627,6 +627,12 @@ describe("the run page: «Create PR» next to Apply", () => {
     expect(after).toContain("https://bitbucket.example/acme/orders-api/pull-requests/1");
     expect(after).not.toContain(">Create PR<");
     expect(after).not.toContain(">Prepare PR<");
+    // the PR flow's panel and the code review page; the read fails here: no server reads PRs
+    expect(after).toContain("PR_REVIEW");
+    expect(after).toContain("Check comments");
+    expect(await page(`/runs/${short}/pr`)).toContain("Code review");
+    const check = await post(`/runs/${short}/pr-check`, { t: ui.token });
+    expect(check.location).toContain("notice=pr-check-failed");
     expect(prs).toHaveLength(1);
   });
 

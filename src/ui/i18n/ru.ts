@@ -1652,6 +1652,45 @@ export const RU: Readonly<Record<string, string>> = {
   "no PR: the run changed no code": "PR не нужен: прогон не менял код",
   "no PR: the run worked in your checkout, there is no branch to push":
     "PR не выставлен: прогон работал в вашем checkout, ветки для push нет",
+  // ---- the PR flow: reading the PR
+  unknown: "неизвестно",
+  "build failed": "упала",
+  "build running": "идёт",
+  "build passed": "прошла",
+  Build: "Сборка",
+  Approvals: "Аппрувы",
+  "Open threads": "Открытые треды",
+  "Open tasks": "Открытые задачи",
+  "{n} of {of}": "{n} из {of}",
+  "Ready for merge: merge it in Bitbucket — Jarvis does not merge.":
+    "Готово к merge: мержите в Bitbucket — Jarvis этого не делает.",
+  "Before the merge:": "До merge:",
+  "Not read yet: the comments are read once the PR is up.":
+    "Ещё не прочитан: комментарии читаются после выставления PR.",
+  "Check comments": "Check comments",
+  "Code review": "Код-ревью",
+  "read every {n} min while jarvis ui is open{last}": "читается раз в {n} мин, пока открыт jarvis ui{last}",
+  "last at {time}": "последний раз в {time}",
+  "last read at {time}": "прочитан в {time}",
+  "the PR as a whole": "PR целиком",
+  task: "задача",
+  comment: "комментарий",
+  "The PR has not been read yet: «Check comments» reads it now.":
+    "PR ещё не прочитан: «Check comments» прочитает его сейчас.",
+  "No open threads.": "Открытых тредов нет.",
+  "Jarvis's own comments": "Комментарии Jarvis",
+  "Open in Bitbucket": "Открыть в Bitbucket",
+  "The PR is read: what changed is below": "PR прочитан: что изменилось — ниже",
+  "The PR is ready for merge: merge it in Bitbucket": "PR готов к merge: мержите в Bitbucket",
+  "The PR could not be read:": "PR не прочитан:",
+  "The run has no PR": "У прогона нет PR",
+  "the PR is merged": "PR влит",
+  "the PR is {state}": "PR: {state}",
+  "the PR is ready for merge: merge it in Bitbucket": "PR готов к merge: мержите в Bitbucket",
+  "PR: {comments} new, {open} open threads, approvals {approvals}":
+    "PR: новых — {comments}, открытых тредов {open}, аппрувов {approvals}",
+  "the PR is not ready for merge any more": "PR больше не готов к merge",
+  "the PR could not be read: {why}": "PR не прочитан: {why}",
   "Put up the PR after the review and follow its comments": "Выставить PR после ревью и вести комментарии",
   "once you approve the work Jarvis pushes the branch and opens the PR, then reads its comments; the merge stays yours":
     "после вашего аппрува Jarvis пушит ветку и открывает PR, затем читает комментарии; merge остаётся за вами",
@@ -1676,6 +1715,7 @@ export const RU: Readonly<Record<string, string>> = {
  */
 export const RU_PLURALS: Readonly<Record<string, readonly [string, string, string]>> = {
   run: ["прогон", "прогона", "прогонов"],
+  comment: ["комментарий", "комментария", "комментариев"],
   research: ["исследование", "исследования", "исследований"],
   "related task": ["смежная задача", "смежные задачи", "смежных задач"],
   call: ["вызов", "вызова", "вызовов"],
