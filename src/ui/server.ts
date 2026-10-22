@@ -94,7 +94,7 @@ import { knowledgeConfigOf } from "../core/config/meta.ts";
 import type { Actor } from "../core/domain/actor.ts";
 import type { ArtifactVersion } from "../core/domain/artifact.ts";
 import { isTerminal, type Run, TaskKindSchema } from "../core/domain/run.ts";
-import { layoutOf, metaConfigFile, rootRelative } from "../core/paths.ts";
+import { layoutOf, mainCheckoutOf, metaConfigFile, rootRelative } from "../core/paths.ts";
 import { caseOfRun, casesRootOf, runToCase } from "../evals/runToCase.ts";
 import {
   answersText,
@@ -1124,11 +1124,23 @@ ${candidateReviewHtml(c, run, run.workspace.repoRoot, actions, { back: `/runs/${
 
   /* ---- Knowledge: overview, documents, standards, skills, glossary (read-only, a glossary term added) ---- */
   /** Candidates other than module maps (those are decided on Modules): the Candidates page. */
+  /**
+   * This page's runs: of its repository (any checkout of it), or on a knowledge repository's page of
+   * its services too — the Candidates page listed every project's and wrote them into this one.
+   */
+  const runHere = (run: Run): boolean => {
+    if (!root) return false;
+    const at = resolvePath(mainCheckoutOf(run.workspace.repoRoot));
+    if (at === resolvePath(mainCheckoutOf(root))) return true;
+    return metaRoot() !== undefined && servicesOfMap().some((x) => resolvePath(x.repo) === at);
+  };
   const otherCandidates = (): Candidate[] =>
-    candidatesOf(runtime, (run) => run.workflow !== "onboard-module");
+    candidatesOf(runtime, (run) => run.workflow !== "onboard-module" && runHere(run));
   /** What the Candidates page shows of one: what it proposes and what accepting it writes. */
   const candidateView = (c: Candidate): CandidateView => {
-    const dir = root as string;
+    // where accepting it writes: the repository its run worked in (a service's folder of the knowledge
+    // repository for a service's run), not the page's
+    const dir = rootOfCandidate(c);
     const run = runtime.runs.get(c.artifact.runId);
     const prov = c.artifact.provenance;
     const by =
@@ -1154,7 +1166,9 @@ ${candidateReviewHtml(c, run, run.workspace.repoRoot, actions, { back: `/runs/${
         const before = existingAt(file);
         extra = {
           target: {
-            path: relative(dir, file).split(sep).join("/"),
+            path: relative(layoutOf(dir).meta?.root ?? dir, file)
+              .split(sep)
+              .join("/"),
             id: file.replace(/^.*[\\/]/, "").replace(/\.md$/, ""),
             ...(before ? { taken: before.generated ? ("generated" as const) : ("person" as const) } : {}),
           },
@@ -1479,7 +1493,7 @@ ${candidateReviewHtml(c, run, run.workspace.repoRoot, actions, { back: `/runs/${
     const fileId = (form.get("id") ?? "").trim();
     try {
       const done = promoteCandidate(runtime, {
-        root: root as string,
+        root: rootOfCandidate(c),
         candidate: c,
         actor: who,
         ...(/^[a-z0-9][a-z0-9._-]{0,59}$/.test(fileId) ? { id: fileId } : {}),

@@ -2,6 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { layoutOf, rootRelative } from "../core/paths.ts";
 import { globMatches, parseFrontMatter } from "../knowledge/frontmatter.ts";
+import { knowledgeFilesIn } from "../knowledge/resolver.ts";
 import { loadSourceDocuments } from "../knowledge/sources.ts";
 import type { KnowledgeRoots } from "../knowledge/standards.ts";
 import { git } from "../tools/local/exec.ts";
@@ -104,13 +105,9 @@ export function docScopes(roots: KnowledgeRoots): DocScope[] {
   const root = roots.projectRoot;
   if (!root) return out;
   const dir = layoutOf(root).knowledgeDir;
-  let names: string[] = [];
-  try {
-    names = readdirSync(dir).filter((n) => n.endsWith(".md"));
-  } catch {
-    names = [];
-  }
-  for (const name of names.sort()) {
+  const layout = layoutOf(root);
+  const names = knowledgeFilesIn(dir, { skipServices: dir === layout.meta?.knowledgeRoot });
+  for (const name of names) {
     let text: string;
     try {
       text = readFileSync(join(dir, name), "utf8");

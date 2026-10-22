@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSy
 import { dirname, join, relative } from "node:path";
 import { layoutOf, rootRelative, versionedAt } from "../core/paths.ts";
 import { parseFrontMatter } from "../knowledge/frontmatter.ts";
-import { SHARED_KNOWLEDGE_PREFIX } from "../knowledge/resolver.ts";
+import { knowledgeFilesIn, SHARED_KNOWLEDGE_PREFIX } from "../knowledge/resolver.ts";
 import { type GlossaryEntry, parseGlossary } from "../knowledge/retrieval/glossary.ts";
 import { splitSections } from "../knowledge/retrieval/index.ts";
 import { BUILTIN_SKILLS, loadSkills, type Skill } from "../knowledge/skills.ts";
@@ -150,10 +150,10 @@ export async function docsOf(roots: KnowledgeRoots, usage?: ReadonlyMap<string, 
   if (layout.meta?.service) dirs.push([layout.meta.knowledgeRoot, SHARED_KNOWLEDGE_PREFIX]);
   const files = dirs.flatMap(([dir, prefix]) =>
     existsSync(dir)
-      ? readdirSync(dir)
-          .filter((f) => f.endsWith(".md") && f !== "README.md" && f !== "glossary.md")
-          .sort()
-          .map((f) => ({ file: join(dir, f), name: `${prefix}${f}` }))
+      ? knowledgeFilesIn(dir, { skipServices: dir === layout.meta?.knowledgeRoot }).map((f) => ({
+          file: join(dir, f),
+          name: `${prefix}${f}`,
+        }))
       : [],
   );
   for (const { file, name } of files) {

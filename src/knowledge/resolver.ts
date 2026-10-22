@@ -37,6 +37,39 @@ export interface KnowledgeDoc {
 /** Name prefix of a knowledge repository's shared documents (`landscape.md` → `common/landscape.md`). */
 export const SHARED_KNOWLEDGE_PREFIX = "common/";
 
+/**
+ * The documents of a knowledge folder, its subfolders too (`architecture/payments.md`), by their path
+ * in it: only the top level was read, and a team's folders of documents never reached an agent. The
+ * glossary and the READMEs are not documents; a knowledge repository's root does not take its
+ * services' folders (each service has its own).
+ */
+export function knowledgeFilesIn(dir: string, options: { skipServices?: boolean } = {}): string[] {
+  const out: string[] = [];
+  const walk = (at: string, rel: string, depth: number) => {
+    let entries: import("node:fs").Dirent[];
+    try {
+      entries = readdirSync(at, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+      const path = rel ? `${rel}/${e.name}` : e.name;
+      if (e.isDirectory()) {
+        if (depth >= 4 || e.name.startsWith(".")) continue;
+        if (options.skipServices && !rel && e.name === "services") continue;
+        walk(join(at, e.name), path, depth + 1);
+      } else if (
+        /\.md$/i.test(e.name) &&
+        !/^readme\.md$/i.test(e.name) &&
+        !(!rel && e.name === "glossary.md")
+      )
+        out.push(path);
+    }
+  };
+  walk(dir, "", 0);
+  return out;
+}
+
 export function loadKnowledgeDocs(roots: KnowledgeRoots): KnowledgeDoc[] {
   const layout = roots.projectRoot ? layoutOf(roots.projectRoot) : undefined;
   // the project's documents, and a knowledge repository's shared ones beside its services' (ADR-0025 §4)
@@ -46,9 +79,7 @@ export function loadKnowledgeDocs(roots: KnowledgeRoots): KnowledgeDoc[] {
   for (const [dir, prefix] of dirs) {
     if (!existsSync(dir)) continue;
     // glossary.md is a lookup table for query expansion (ADR-0015 §3), not a document for agents
-    for (const f of readdirSync(dir)
-      .filter((x) => x.endsWith(".md") && x !== "README.md" && x !== "glossary.md")
-      .sort()) {
+    for (const f of knowledgeFilesIn(dir, { skipServices: dir === layout?.meta?.knowledgeRoot })) {
       const raw = readFileSync(join(dir, f), "utf8");
       const { data, body, error } = parseFrontMatter(raw);
       if (error) reportProblem(join(dir, f), `front matter is not valid YAML: ${error}`);

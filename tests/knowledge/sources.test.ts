@@ -149,3 +149,17 @@ describe("knowledge.sources", () => {
     expect(loadSourceDocuments({ projectRoot: sb.project })).toEqual([]);
   });
 });
+
+describe("knowledge in subfolders", () => {
+  it("a team's folders of documents reach the agents by their path; the glossary and READMEs do not", () => {
+    sb.write("project/.jarvis/knowledge/architecture/payments.md", "# Payments\nRefunds go once.\n");
+    sb.write("project/.jarvis/knowledge/architecture/README.md", "# index\n");
+    sb.write("project/.jarvis/knowledge/glossary.md", "| term | code |\n");
+    sb.write("project/.jarvis/knowledge/Top.MD", "# Top\nupper case extension\n");
+    const names = loadKnowledgeDocs({ projectRoot: sb.project }).map((d) => d.name);
+    expect(names).toContain("architecture/payments.md");
+    expect(names).toContain("Top.MD");
+    expect(names).not.toContain("glossary.md");
+    expect(names.some((n) => /readme/i.test(n))).toBe(false);
+  });
+});
