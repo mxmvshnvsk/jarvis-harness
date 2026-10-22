@@ -967,6 +967,8 @@ ${candidateReviewHtml(c, run, run.workspace.repoRoot, actions, { back: `/runs/${
     const form = await formOf(r.req);
     const sent = form.get("t");
     if (!sent || !same(sent, token)) return send(r, 403, forbiddenPage());
+    // a decision changes the candidates: the page after it reads them anew
+    candidatesMemo = undefined;
     const pathOf = () => (form.get("path") ?? "").trim().replace(/\/+$/, "");
     const at = r.url.pathname;
     // where a commit or an "open" goes back to: a Knowledge page of this server, nothing else
@@ -1134,8 +1136,14 @@ ${candidateReviewHtml(c, run, run.workspace.repoRoot, actions, { back: `/runs/${
     if (at === resolvePath(mainCheckoutOf(root))) return true;
     return metaRoot() !== undefined && servicesOfMap().some((x) => resolvePath(x.repo) === at);
   };
-  const otherCandidates = (): Candidate[] =>
-    candidatesOf(runtime, (run) => run.workflow !== "onboard-module" && runHere(run));
+  // read every candidate of every run: kept for the request, one page asked for them three times (pilot)
+  let candidatesMemo: { at: number; list: Candidate[] } | undefined;
+  const otherCandidates = (): Candidate[] => {
+    if (candidatesMemo) return candidatesMemo.list;
+    const list = candidatesOf(runtime, (run) => run.workflow !== "onboard-module" && runHere(run));
+    candidatesMemo = { at: Date.now(), list };
+    return list;
+  };
   /** What the Candidates page shows of one: what it proposes and what accepting it writes. */
   const candidateView = (c: Candidate): CandidateView => {
     // where accepting it writes: the repository its run worked in (a service's folder of the knowledge
@@ -2725,6 +2733,8 @@ ${candidateReviewHtml(c, run, run.workspace.repoRoot, actions, { back: `/runs/${
   const server: Server = createServer((req, res) => {
     const url = new URL(req.url ?? "/", `http://${HOST}:${port}`);
     const r: Request = { req, res, url };
+    // the candidates are read once per request, not once per part of its page
+    candidatesMemo = undefined;
     if (!hostOk(req)) return send(r, 403, "403 — unexpected host", "text/plain; charset=utf-8");
     // style and script carry nothing of the runs: no token needed, so the first page loads them
     if (req.method === "GET" && url.pathname === "/assets/app.css")

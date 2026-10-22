@@ -192,16 +192,33 @@ export async function docsOf(roots: KnowledgeRoots, usage?: ReadonlyMap<string, 
       ...(u ? { usage: u } : {}),
     });
   }
-  return Promise.all(
-    out.map(async (d) => {
-      const at = versionedAt(layout, d.path);
-      const last = await lastCommit(at.cwd, at.path);
-      if (!last) return d;
-      const since = at.cwd === root ? { hash: last.hash } : { date: last.date };
-      const stale = d.source ? undefined : await commitsSince(root, since, d.paths);
-      return { ...d, edited: last.date, ...(stale ? { staleCommits: stale } : {}) };
-    }),
-  );
+  // two git calls a document: kept per document and HEAD, at most 8 at once (a page of 2000
+  // documents started 4000 git processes on every request)
+  const head = (await git(["rev-parse", "HEAD"], root)).stdout.trim();
+  return inBatches(out, 8, async (d) => {
+    const at = versionedAt(layout, d.path);
+    let mtime = 0;
+    try {
+      mtime = statSync(join(root, d.path)).mtimeMs;
+    } catch {
+      mtime = 0;
+    }
+    const key = `${root}\0${d.path}\0${head}\0${mtime}\0${d.paths.join(",")}`;
+    let facts = gitFacts.get(key);
+    if (!facts) {
+      facts = (async () => {
+        const last = await lastCommit(at.cwd, at.path);
+        if (!last) return undefined;
+        const since = at.cwd === root ? { hash: last.hash } : { date: last.date };
+        const stale = d.source ? undefined : await commitsSince(root, since, d.paths);
+        return { edited: last.date, ...(stale ? { staleCommits: stale } : {}) };
+      })();
+      if (gitFacts.size > 5000) gitFacts.clear();
+      gitFacts.set(key, facts);
+    }
+    const f = await facts;
+    return f ? { ...d, ...f } : d;
+  });
 }
 
 /* ---- standards ---- */
@@ -575,4 +592,21 @@ export function extendGlossaryTerm(
   lines[at] = `| ${cells.join(" | ")} |`;
   writeFileSync(file, lines.join("\n"));
   return { line: at + 1 };
+}
+
+/** A document's last edit and the commits since under its paths, by its file's state and HEAD. */
+const gitFacts = new Map<string, Promise<{ edited: string; staleCommits?: number } | undefined>>();
+
+async function inBatches<T, R>(items: readonly T[], limit: number, work: (t: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let next = 0;
+  const lane = async () => {
+    while (next < items.length) {
+      const i = next;
+      next += 1;
+      out[i] = await work(items[i] as T);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, lane));
+  return out;
 }

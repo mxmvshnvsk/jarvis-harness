@@ -190,7 +190,10 @@ export function buildBaseMessages(input: BuildInput): Message[] {
     .join("\n\n");
 
   const knowledgeBudget = Math.floor(input.budget.chars * 0.3);
-  const inputBudget = input.budget.chars - knowledgeBudget;
+  // the knowledge takes what it renders to, at most its 30%: the rest of it goes to the inputs (an
+  // empty L4 still held 30% back, and the research the step builds on was cut for nothing)
+  const l4 = renderPackage(input.pkg, knowledgeBudget, input.knowledgeConfig);
+  const inputBudget = input.budget.chars - Math.min(knowledgeBudget, l4.length);
   const fullTypes = new Set(def.contextInputs ?? []);
   const full = input.inputs.filter((i) => fullTypes.size === 0 || fullTypes.has(i.artifact.type));
   const perInput = full.length > 0 ? Math.floor(inputBudget / full.length) : 0;
@@ -224,8 +227,6 @@ export function buildBaseMessages(input: BuildInput): Message[] {
     );
   // the version the human sent back comes first: the agent revises it rather than starting over
   if (review) l3.unshift(review.previous(perInput > 0 ? perInput : inputBudget));
-
-  const l4 = renderPackage(input.pkg, knowledgeBudget, input.knowledgeConfig);
 
   const user = [l1, l2, l3.length > 0 ? `# Inputs\n${l3.join("\n\n")}` : "# Inputs\n(none)", l4]
     .filter((s) => s.length > 0)
