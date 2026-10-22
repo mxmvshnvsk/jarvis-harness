@@ -27,6 +27,7 @@ import {
   acceptContractChange,
   pendingContractRequests,
   rejectContractChange,
+  resumeLibraryWaiters,
 } from "../app/contractChange.ts";
 import { crossContinuationOf, crossStartOf, goCross, goSingle } from "../app/crossScope.ts";
 import {
@@ -2059,6 +2060,8 @@ ${candidateReviewHtml(c, run, run.workspace.repoRoot, actions, { back: `/runs/${
           payload: { key, service: view.subtask.service, channel: "ui" },
         });
         const current = runtime.runs.get(run.id) ?? run;
+        // a subtask that waited for this library goes on without it
+        resumeLibraryWaiters(runtime, current);
         if (subtasksOf(runtime, current).every(isDone) && current.waitingFor?.kind === "children")
           resumeMaster(runtime, current);
         return redirect(r, `/runs/${short}?notice=subtask-dropped`);

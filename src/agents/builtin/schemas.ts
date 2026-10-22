@@ -198,6 +198,13 @@ export const ImpactResult = z.object({
       kind: z.enum(["endpoint", "topic", "dto"]).optional().describe("for a new item"),
       change: z.string().min(1).describe("the contract as it should be: what changes"),
       why: z.string().min(1).describe("why the agreed contract cannot work here, from the code"),
+      owner: z
+        .string()
+        .min(1)
+        .optional()
+        .describe(
+          "the service or library of the map whose code must change for it, when not this one (e.g. the shared library that declares the DTO), as the catalog names it",
+        ),
     })
     .optional()
     .describe(

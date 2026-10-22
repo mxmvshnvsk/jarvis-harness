@@ -589,6 +589,122 @@ steps:
   });
 });
 
+describe("a contract change whose code is in a library the split has no subtask for", () => {
+  const ASKS_LIB = `name: sdd
+entry: impact
+steps:
+  - id: impact
+    kind: deterministic
+    tool: artifact.write
+    args: { type: impact, name: impact.json, content: '{"affected":[],"contractChange":{"item":"OrderDto","kind":"dto","change":"+ deliverySlotId","why":"OrderDto is declared in common-lib","owner":"common-lib"}}' }
+    outputs: [impact]
+    transitions: { onSuccess: DONE }
+`;
+
+  it("accepted: the library gets a subtask and changes first; the asking one goes on once it is published", async () => {
+    sb.write("repos/jarvis-knowledge/.jarvis/workflows/sdd.yaml", ASKS_LIB);
+    sb.write(
+      "repos/jarvis-knowledge/.jarvis/project.yaml",
+      [
+        "version: 1",
+        "workspace: { mode: cwd }",
+        "crossRepos: { maxParallel: 2 }",
+        "services:",
+        "  common-lib:",
+        "    kind: library",
+        "    publishes: [com.example:common-lib]",
+        '    tools: { local: { publish-local: "echo published > published.txt" } }',
+        "  orders-api:",
+        "    uses: [common-lib]",
+        "  notify-api: {}",
+        "",
+      ].join("\n"),
+    );
+    repo("common-lib");
+    sb.write("repos/common-lib/gradle.properties", "version=2.16.0\n");
+    await jarvis(meta, ["work", "ABC-63 delivery slot", "--workflow", "sdd-cross"]);
+    const masterId = launches[0]?.args[2] as string;
+    const short = masterId.slice(4, 12);
+    // orders-api and notify-api start; orders-api asks for a change of common-lib's DTO
+    expect(launches.map((l) => l.args[3])).toEqual(["1", "2"]);
+    const first = await next();
+    expect(first.result.out).toContain("WAITING_HUMAN");
+    launches.length = 0;
+    let rt = await knowledgeRuntime();
+    let subId: string;
+    try {
+      subId = subtasksOf(rt, rt.runs.get(masterId) as never)[0]?.run?.id as string;
+      const body = runContent(
+        await runPage(rt, createEngine(rt), rt.runs.get(masterId) as never, { homeDir: sb.home }),
+        Date.now(),
+      ).value;
+      expect(body).toContain("which has no subtask: accepting adds one. It changes first;");
+    } finally {
+      rt.close();
+    }
+
+    const accepted = await jarvis(meta, ["subtask", "contract", short, "1", "--accept"]);
+    expect(accepted.code).toBe(0);
+    expect(accepted.out).toContain("the library common-lib got subtask 3, started first");
+    // the library starts in its repository; the asking subtask is not resumed yet
+    expect(launches.map((l) => [l.args.join(" "), l.cwd])).toEqual([
+      [`subtask run ${masterId} 3`, join(repos, "common-lib")],
+    ]);
+    rt = await knowledgeRuntime();
+    try {
+      const split = JSON.parse(rt.artifacts.text(rt.artifacts.listLatest(masterId, "split")[0] as never)) as {
+        subtasks: Array<{ key: string; service: string; deliverAfter?: string[] }>;
+        contract: Array<{ id: string; producer: string; consumers: string[] }>;
+      };
+      expect(split.subtasks.find((s) => s.key === "3")?.service).toBe("common-lib");
+      expect(split.subtasks.find((s) => s.key === "1")?.deliverAfter).toEqual(["3"]);
+      expect(split.contract.find((c) => c.id === "OrderDto")).toMatchObject({
+        producer: "common-lib",
+        consumers: ["orders-api"],
+      });
+      // the asking subtask's page: it waits for the library, nothing to decide
+      const subBody = runContent(
+        await runPage(rt, createEngine(rt), rt.runs.get(subId) as never, { homeDir: sb.home }),
+        Date.now(),
+      ).value;
+      expect(subBody).toContain("The contract change is the library&#39;s: it changes first");
+      expect(subBody).not.toContain("This subtask asks to change the contract");
+    } finally {
+      rt.close();
+    }
+
+    // the library's own run: its impact asks too (the same fixed artifact) — kept as agreed, it completes
+    const lib = await next();
+    expect(lib.result.out).toContain("WAITING_HUMAN");
+    expect((await jarvis(meta, ["subtask", "contract", short, "3", "--reject"])).code).toBe(0);
+    expect(launches.map((l) => l.cwd)).toEqual([join(repos, "common-lib")]);
+    const libDone = await next();
+    expect(libDone.result.code).toBe(0);
+    // accepted and published: the asking subtask goes on, against the new version
+    expect(readFileSync(join(repos, "common-lib", "published.txt"), "utf8")).toBe("published\n");
+    expect(launches.map((l) => [l.args.join(" "), l.cwd])).toEqual([
+      [`resume ${subId}`, join(repos, "orders-api")],
+    ]);
+    const again = await next();
+    // its impact again with the new contract (and, fixed, it asks once more — the library has a subtask now)
+    expect(again.result.out).toContain("WAITING_HUMAN");
+    rt = await knowledgeRuntime();
+    try {
+      const pending = (await import("../../src/app/contractChange.ts")).pendingContractRequests(
+        rt,
+        rt.runs.get(masterId) as never,
+      );
+      expect(pending.map((p) => [p.key, p.adds])).toEqual([["1", undefined]]);
+      const { notesOf } = await import("../../src/interaction/notes.ts");
+      expect(notesOf(rt, subId)[0]?.text).toContain(
+        "It is a change of the library common-lib: its subtask 3 changes it first",
+      );
+    } finally {
+      rt.close();
+    }
+  });
+});
+
 describe("the master's budget", () => {
   it("is the sum of its subtasks'; spent, a subtask's model call is refused with a budget stop", async () => {
     sb.write(

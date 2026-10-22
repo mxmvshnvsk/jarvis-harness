@@ -2,6 +2,7 @@ import {
   acceptContractChange,
   pendingContractRequests,
   rejectContractChange,
+  resumeLibraryWaiters,
 } from "../../app/contractChange.ts";
 import { createEngine } from "../../app/engine.ts";
 import { handOff } from "../../app/handoff.ts";
@@ -92,7 +93,7 @@ export function subtaskTask(
       : []),
     ...(contract.length > 0
       ? [
-          "The contract between the services (the task's: keep it as written; if it cannot hold, write the impact's contractChange — the item, the contract as it should be, why — and this run stops for the master to decide; never change it on your own):",
+          "The contract between the services (the task's: keep it as written; if it cannot hold, write the impact's contractChange — the item, the contract as it should be, why, and as owner the service or library of the map whose code must change when it is not this one, e.g. the shared library that declares the DTO — and this run stops for the master to decide; never change it on your own):",
           ...contract.map(line),
         ]
       : []),
@@ -341,6 +342,8 @@ export async function runSubtaskDrop(ctx: CliContext, masterRef: string, which: 
       actor: `${actor.kind}:${actor.id}`,
       payload: { key: sub.key, service: sub.service },
     });
+    // a subtask that waited for this library goes on without it
+    resumeLibraryWaiters(runtime, master);
     const views = subtasksOf(runtime, master);
     const all = views.every(isDone);
     const current = runtime.runs.get(master.id) ?? master;
@@ -442,7 +445,9 @@ export async function runSubtaskContract(
       const done = acceptContractChange(runtime, master, request, actor, "cli", options.change);
       ctx.out.result({ request: request.id, choice: "accept", ...done }, () => {
         ctx.out.line(
-          `contract changed: split v${done.version}; subtask ${request.key} (${request.service}) analyses its impact again with it${done.told.length > 0 ? `; told ${done.told.join(", ")}` : ""}`,
+          done.added?.library
+            ? `contract changed: split v${done.version}; the library ${done.added.service} got subtask ${done.added.key}, started first — subtask ${request.key} (${request.service}) goes on once it is accepted and published${done.told.length > 0 ? `; told ${done.told.join(", ")}` : ""}`
+            : `contract changed: split v${done.version}; subtask ${request.key} (${request.service}) analyses its impact again with it${done.added ? `; ${done.added.service} got subtask ${done.added.key}, delivered before it` : ""}${done.told.length > 0 ? `; told ${done.told.join(", ")}` : ""}`,
         );
         if (done.done.length > 0)
           ctx.out.line(`already completed, without this change: ${done.done.join(", ")}`);

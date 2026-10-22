@@ -6,7 +6,11 @@ import { type BudgetGrant, type BudgetStop, budgetGranted, budgetStopOf } from "
 import { type BudgetWait, budgetWaitOf } from "../app/budgetWait.ts";
 import { candidatesOf } from "../app/candidates.ts";
 import { type Continuation, continuationOf, continuedFromOf, contradictionsOf } from "../app/continuation.ts";
-import { type ContractChangeRequest, pendingContractRequests } from "../app/contractChange.ts";
+import {
+  type ContractChangeRequest,
+  libraryAwaited,
+  pendingContractRequests,
+} from "../app/contractChange.ts";
 import type { DtoCheck } from "../app/contractFields.ts";
 import { crossContinuationOf, type ScopeReport, scopeOf } from "../app/crossScope.ts";
 import {
@@ -270,6 +274,8 @@ export interface ContractCard {
   readonly kind: "contract";
   readonly master: Run;
   readonly request?: ContractChangeRequest;
+  /** Accepted as a library's change: the library subtask this run waits for. */
+  readonly library?: { readonly key: string; readonly service: string };
 }
 
 /**
@@ -535,7 +541,8 @@ export async function waitCardOf(runtime: Runtime, run: Run, homeDir: string): P
     const master = masterOf(runtime, run)?.master;
     if (master) {
       const request = pendingContractRequests(runtime, master).find((r) => r.run === run.id);
-      return { kind: "contract", master, ...(request ? { request } : {}) };
+      const library = request ? undefined : libraryAwaited(runtime, master, run);
+      return { kind: "contract", master, ...(request ? { request } : {}), ...(library ? { library } : {}) };
     }
   }
   if (kind === "effect") {

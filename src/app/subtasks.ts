@@ -7,6 +7,7 @@ import { isTerminal, type Run, type RunState } from "../core/domain/run.ts";
 import { libraryVersionOf } from "../onboarding/library.ts";
 import { shortRunId } from "../storage/runStore.ts";
 import { runShell } from "../tools/local/exec.ts";
+import { resumeLibraryWaiters } from "./contractChange.ts";
 import type { Runtime } from "./runtime.ts";
 
 /**
@@ -406,6 +407,8 @@ export async function afterRunStops(runtime: Runtime, run: Run): Promise<void> {
     if (run.state === "COMPLETED" && of.subtask && libraryMapOf(runtime).libraries.has(of.subtask.service))
       await publishLibrary(runtime, master, of.subtask, run);
     scheduleSubtasks(runtime, master);
+    // a subtask whose contract change was the library's goes on against its new version
+    resumeLibraryWaiters(runtime, master);
     const views = subtasksOf(runtime, master);
     if (views.length > 0 && views.every(isDone) && master.waitingFor?.kind === "children")
       resumeMaster(runtime, master);

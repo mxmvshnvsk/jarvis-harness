@@ -389,7 +389,7 @@ ${card.proposal ? html`<p class="ok">${t("Jarvis proposes a rule — accept it o
     return html`<article class="panel card">
 <div class="row"><span class="pill wait">⏸ ${t("contract change")}${card.request ? html` · <code>${card.request.item}</code>` : ""}</span>${meta}</div>
 <h3>${firstLine(run.task)}</h3>
-<p>${t("The subtask asks its master to change the contract; decide on the master's page")}</p>
+<p>${card.library ? t("Waits for the library {service} to change first (subtask {key}); goes on by itself once it is published", { service: card.library.service, key: card.library.key }) : t("The subtask asks its master to change the contract; decide on the master's page")}</p>
 <div class="actions"><a class="btn primary" href="/runs/${shortRunId(card.master.id)}#contract-requests">${t("Open the master")}</a></div>
 </article>`;
   return html`<article class="panel card">
@@ -1723,6 +1723,7 @@ ${requests.map((q) => {
 ${was ? html`<p class="muted">${t("Agreed: {change}", { change: was.change })}</p>` : html`<p class="muted">${t("Not in the contract yet: accepting adds it")}</p>`}
 <p><b>${t("Asks for: {change}", { change: q.change })}</b></p>
 ${q.why ? html`<p class="hint">${t("Why: {why}", { why: q.why })}</p>` : ""}
+${q.adds ? html`<p class="banner info">${q.adds.library ? th("The change is in the library {service}, which has no subtask: accepting adds one. It changes first; {asking} waits for its change to be accepted and published, then builds against the new version.", { service: html`<b>${q.adds.service}</b>`, asking: html`<b>${q.service}</b>` }) : th("The change is in {service}, which has no subtask: accepting adds one, delivered before {asking}.", { service: html`<b>${q.adds.service}</b>`, asking: html`<b>${q.service}</b>` })}</p>` : ""}
 ${decide(q)}
 </div>`;
 })}
@@ -1733,6 +1734,13 @@ ${decide(q)}
 function contractWaitHtml(card: ContractCard): Html {
   const q = card.request;
   const master = shortRunId(card.master.id);
+  if (card.library)
+    return html`<section class="panel decision" aria-labelledby="decision" data-live="card">
+<span class="warn" style="font-size:13px;font-weight:500">${t("Waits for a library")}</span>
+<h2 id="decision">${t("The contract change is the library's: it changes first")}</h2>
+<p>${th("The master accepted the change as a change of {service} (subtask {key}). This run goes on by itself once that change is accepted and published, and builds against the new version.", { service: html`<b>${card.library.service}</b>`, key: html`<code>${card.library.key}</code>` })}</p>
+<div class="actions"><a class="btn primary" href="/runs/${master}#subtasks">${t("Open the master")}</a></div>
+</section>`;
   return html`<section class="panel decision" aria-labelledby="decision" data-live="card">
 <span class="warn" style="font-size:13px;font-weight:500">${t("Waits for the master")}</span>
 <h2 id="decision">${t("This subtask asks to change the contract")}</h2>

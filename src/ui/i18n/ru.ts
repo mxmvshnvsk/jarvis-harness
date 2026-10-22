@@ -1307,6 +1307,17 @@ export const RU: Readonly<Record<string, string>> = {
   "The subtask asks its master to change the contract; decide on the master's page":
     "Сабтаск просит мастер поменять контракт — решение на странице мастера",
   "Open the master": "Открыть мастер",
+  "Waits for the library {service} to change first (subtask {key}); goes on by itself once it is published":
+    "Ждёт, пока сначала поменяется библиотека {service} (сабтаск {key}); продолжит сам, когда её опубликуют",
+  "The change is in the library {service}, which has no subtask: accepting adds one. It changes first; {asking} waits for its change to be accepted and published, then builds against the new version.":
+    "Изменение — в библиотеке {service}, у которой нет сабтаска: принятие добавит его. Она меняется первой; {asking} ждёт, пока её изменение примут и опубликуют, и собирается уже с новой версией.",
+  "The change is in {service}, which has no subtask: accepting adds one, delivered before {asking}.":
+    "Изменение — в {service}, у которого нет сабтаска: принятие добавит его, поставка — раньше {asking}.",
+  "Waits for a library": "Ждёт библиотеку",
+  "The contract change is the library's: it changes first":
+    "Смена контракта — это изменение библиотеки: она меняется первой",
+  "The master accepted the change as a change of {service} (subtask {key}). This run goes on by itself once that change is accepted and published, and builds against the new version.":
+    "Мастер принял изменение как изменение {service} (сабтаск {key}). Этот прогон продолжится сам, когда то изменение примут и опубликуют, и соберётся с новой версией.",
   "{used} {unit}": "{used} {unit}",
   "{used} of {cap} {unit}": "{used} из {cap} {unit}",
   "Budget, the sum of the subtasks':": "Бюджет — сумма бюджетов сабтасков:",

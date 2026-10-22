@@ -5,6 +5,7 @@ import {
   CONTRACT_CHANGED,
   contractChangeAsked,
   contractDecisionOf,
+  libraryAwaited,
   recordContractRequest,
 } from "../../app/contractChange.ts";
 import {
@@ -311,6 +312,14 @@ async function contractStep(ctx: StepContext): Promise<StepOutcome> {
       waitingFor: { kind: "contract", detail: asked.ask.item },
     });
   }
+  // accepted as a library's change: the library changes first, this run builds against its new version
+  const library = decided.choice === "accept" ? libraryAwaited(ctx.runtime, master, ctx.run) : undefined;
+  if (library)
+    throw new SuspendRun(
+      "WAITING_HUMAN",
+      `waits for the library ${library.service} (subtask ${library.key}): its change accepted and published`,
+      { waitingFor: { kind: "contract", detail: `library ${library.service}` } },
+    );
   return decided.choice === "accept" && ctx.step.transitions.onOutcome[CONTRACT_CHANGED]
     ? { status: "success", outcome: CONTRACT_CHANGED }
     : { status: "success" };

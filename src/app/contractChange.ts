@@ -3,7 +3,16 @@ import { isTerminal, type Run } from "../core/domain/run.ts";
 import { addNote } from "../interaction/notes.ts";
 import type { DecisionChannel } from "./decide.ts";
 import type { Runtime } from "./runtime.ts";
-import { type ContractItem, childrenOf, resumeSubtask, SPLIT_TYPE, splitOf } from "./subtasks.ts";
+import {
+  type ContractItem,
+  childrenOf,
+  libraryMapOf,
+  resumeSubtask,
+  SPLIT_TYPE,
+  scheduleSubtasks,
+  splitOf,
+  subtasksOf,
+} from "./subtasks.ts";
 
 /**
  * A subtask asks for a contract change (ADR-0025 §6): only the master changes the contract. A subtask
@@ -18,6 +27,11 @@ export interface ContractChangeAsk {
   readonly kind?: ContractItem["kind"];
   readonly change: string;
   readonly why: string;
+  /**
+   * The service or library of the map whose code changes for it, when not the asking one (the shared
+   * library that declares the DTO). Accepted while it has no subtask: the split gets one for it.
+   */
+  readonly owner?: string;
 }
 
 export interface ContractChangeRequest extends ContractChangeAsk {
@@ -27,6 +41,8 @@ export interface ContractChangeRequest extends ContractChangeAsk {
   readonly service: string;
   readonly run: string;
   readonly at: string;
+  /** Pending: the owner accepting it adds as a subtask (the split has none for it). */
+  readonly adds?: { readonly service: string; readonly library: boolean };
 }
 
 export interface ContractChangeDecision {
@@ -38,6 +54,8 @@ export interface ContractChangeDecision {
   readonly by?: string;
   /** Accepted: the split's new version. */
   readonly version?: number;
+  /** Accepted: the subtask the split got for the owner, when it had none. */
+  readonly added?: { readonly key: string; readonly service: string; readonly library: boolean };
 }
 
 export const CONTRACT_REQUESTED = "contract.changeRequested";
@@ -66,9 +84,10 @@ export function contractChangeAsked(
   const change = str(c?.change);
   if (!c || !item || !change) return undefined;
   const kind = KINDS.includes(String(c.kind)) ? (c.kind as ContractItem["kind"]) : undefined;
+  const owner = str(c.owner);
   return {
     id: `${a.artifactId}@${a.version}`,
-    ask: { item, ...(kind ? { kind } : {}), change, why: str(c.why) ?? "" },
+    ask: { item, ...(kind ? { kind } : {}), change, why: str(c.why) ?? "", ...(owner ? { owner } : {}) },
   };
 }
 
@@ -89,6 +108,7 @@ export function contractRequestsOf(runtime: Runtime, masterId: string): Contract
       ...(kind ? { kind } : {}),
       change,
       why: str(p.why) ?? "",
+      ...(str(p.owner) ? { owner: str(p.owner) as string } : {}),
       at: e.ts,
     });
   }
@@ -114,16 +134,53 @@ export function contractDecisionOf(
     ...(str(p.why) ? { why: str(p.why) as string } : {}),
     ...(e.actor ? { by: e.actor.replace(/^(user|service|ci):/, "") } : {}),
     ...(typeof p.version === "number" ? { version: p.version } : {}),
+    ...(isAdded(p.added) ? { added: p.added } : {}),
   };
+}
+
+function isAdded(v: unknown): v is NonNullable<ContractChangeDecision["added"]> {
+  const o = v as Record<string, unknown> | undefined;
+  return !!o && typeof o.key === "string" && typeof o.service === "string" && typeof o.library === "boolean";
+}
+
+/**
+ * The owner of a request that the split has no subtask for: a service of the knowledge repository's map
+ * other than the asking one. Undefined when it names nothing, the asking service, an unknown name, or a
+ * service the split already has (dropped or not: a person decided on it).
+ */
+export function ownerToAdd(
+  runtime: Runtime,
+  master: Run,
+  request: ContractChangeAsk & { service: string },
+): string | undefined {
+  const owner = request.owner;
+  if (!owner || owner === request.service) return undefined;
+  if (!runtime.loaded.meta?.repos[owner]) return undefined;
+  return splitOf(runtime, master)?.subtasks.some((s) => s.service === owner) ? undefined : owner;
+}
+
+/** A key for a new subtask in the split's own style: S1, S2 → S3; anything else → the next free number. */
+export function nextKey(keys: readonly string[]): string {
+  const m = keys.map((k) => /^(\D*)(\d+)$/.exec(k)).filter((x) => x !== null);
+  const prefix = m[0]?.[1] ?? "S";
+  let n = Math.max(0, ...m.map((x) => Number(x[2]))) + 1;
+  while (keys.includes(`${prefix}${n}`)) n++;
+  return `${prefix}${n}`;
 }
 
 /** The requests that wait for a person: not decided, their subtask's run still waiting for it. */
 export function pendingContractRequests(runtime: Runtime, master: Run): ContractChangeRequest[] {
-  return contractRequestsOf(runtime, master.id).filter((r) => {
-    if (contractDecisionOf(runtime, master.id, r.id)) return false;
-    const run = runtime.runs.get(r.run);
-    return run !== undefined && !isTerminal(run.state);
-  });
+  const libraries = libraryMapOf(runtime).libraries;
+  return contractRequestsOf(runtime, master.id)
+    .filter((r) => {
+      if (contractDecisionOf(runtime, master.id, r.id)) return false;
+      const run = runtime.runs.get(r.run);
+      return run !== undefined && !isTerminal(run.state);
+    })
+    .map((r) => {
+      const owner = ownerToAdd(runtime, master, r);
+      return owner ? { ...r, adds: { service: owner, library: libraries.has(owner) } } : r;
+    });
 }
 
 /** The subtask's request on its master, once per analysis. */
@@ -157,13 +214,14 @@ export function acceptContractChange(
   actor: Actor,
   channel: DecisionChannel,
   edited?: string,
-): { version: number; told: string[]; done: string[] } {
+): { version: number; told: string[]; done: string[]; added?: ContractChangeDecision["added"] } {
   const split = runtime.artifacts.listLatest(master.id, SPLIT_TYPE)[0];
   const current = splitOf(runtime, master);
   if (!split || !current) throw new Error("the master has no split: nothing to change");
   const change = edited?.trim() || request.change;
   const doc = JSON.parse(runtime.artifacts.text(split)) as Record<string, unknown>;
   const contract = (Array.isArray(doc.contract) ? doc.contract : []) as Array<Record<string, unknown>>;
+  const owner = ownerToAdd(runtime, master, request);
   let item = contract.find((c) => c.id === request.item);
   if (item) item.change = change;
   else {
@@ -171,17 +229,37 @@ export function acceptContractChange(
       kind: request.kind ?? "dto",
       id: request.item,
       change,
-      producer: request.service,
-      consumers: [],
+      producer: owner ?? request.service,
+      consumers: owner ? [request.service] : [],
     };
     contract.push(item);
+  }
+  // the change is the owner's code: the split gets a subtask for it, delivered before the asking one
+  const subtasks = (Array.isArray(doc.subtasks) ? doc.subtasks : []) as Array<Record<string, unknown>>;
+  let added: ContractChangeDecision["added"];
+  if (owner) {
+    const key = nextKey(subtasks.map((x) => String(x.key)));
+    const library = libraryMapOf(runtime).libraries.has(owner);
+    subtasks.push({
+      key,
+      service: owner,
+      task: `${change} (the contract change ${request.item} asked by subtask ${request.key}, ${request.service}: ${request.why})`,
+      requirements: [],
+      deliverAfter: [],
+    });
+    const asking = subtasks.find((x) => x.key === request.key);
+    if (asking) {
+      const after = Array.isArray(asking.deliverAfter) ? (asking.deliverAfter as string[]) : [];
+      asking.deliverAfter = [...new Set([...after, key])];
+    }
+    added = { key, service: owner, library };
   }
   const by = `${actor.kind}:${actor.id}`;
   const next = runtime.artifacts.put({
     runId: master.id,
     type: SPLIT_TYPE,
     name: split.name,
-    content: JSON.stringify({ ...doc, contract }, null, 2),
+    content: JSON.stringify({ ...doc, contract, ...(added ? { subtasks } : {}) }, null, 2),
     mediaType: "application/json",
     provenance: { kind: "human", actor: { kind: "user", id: actor.id, verified: false } },
     sourceRefs: [request.id],
@@ -198,6 +276,7 @@ export function acceptContractChange(
       choice: "accept",
       change,
       version: next.version,
+      ...(added ? { added } : {}),
       channel,
     },
   });
@@ -221,16 +300,20 @@ export function acceptContractChange(
     told.push(key);
   }
   const asking = runtime.runs.get(request.run);
+  if (added) scheduleSubtasks(runtime, runtime.runs.get(master.id) ?? master);
   if (asking && !isTerminal(asking.state)) {
     addNote(
       runtime,
       asking,
-      `The master accepted the contract change: ${line}. Keep it as now written; the impact is analysed again with it.`,
+      added?.library
+        ? `The master accepted the contract change: ${line}. It is a change of the library ${added.service}: its subtask ${added.key} changes it first; this run goes on once that change is accepted and published, and builds against the new version.`
+        : `The master accepted the contract change: ${line}. Keep it as now written; the impact is analysed again with it.${added ? ` ${added.service} makes its side as subtask ${added.key}, delivered before this one.` : ""}`,
       actor.id,
     );
-    resumeSubtask(runtime, asking);
+    // a library's change comes first: the asking run waits for its publication (afterRunStops resumes it)
+    if (!added?.library) resumeSubtask(runtime, asking);
   }
-  return { version: next.version, told, done };
+  return { version: next.version, told, done, ...(added ? { added } : {}) };
 }
 
 /** Rejected: the asking subtask goes on with the contract as agreed. */
@@ -264,4 +347,40 @@ export function rejectContractChange(
     actor.id,
   );
   resumeSubtask(runtime, asking);
+}
+
+/**
+ * The library a subtask waits for after its contract change was accepted as that library's change: its
+ * subtask not yet accepted and published (nor dropped). Undefined once it is — the run goes on.
+ */
+export function libraryAwaited(
+  runtime: Runtime,
+  master: Run,
+  run: Run,
+): { readonly key: string; readonly service: string } | undefined {
+  const asked = contractChangeAsked(runtime, run);
+  if (!asked) return undefined;
+  const added = contractDecisionOf(runtime, master.id, asked.id)?.added;
+  if (!added?.library) return undefined;
+  const view = subtasksOf(runtime, master).find((v) => v.subtask.key === added.key);
+  const ready =
+    !view || view.state === "dropped" || (view.state === "COMPLETED" && view.published?.ok === true);
+  return ready ? undefined : { key: added.key, service: added.service };
+}
+
+/**
+ * Subtasks parked for a library's change go on once it is accepted and published (or dropped): each
+ * asks again in its scope step, which lets it through to the impact with the new version.
+ */
+export function resumeLibraryWaiters(runtime: Runtime, master: Run): string[] {
+  const resumed: string[] = [];
+  for (const [key, run] of childrenOf(runtime, master.id)) {
+    if (run.state !== "WAITING_HUMAN" || run.waitingFor?.kind !== "contract") continue;
+    const asked = contractChangeAsked(runtime, run);
+    const added = asked ? contractDecisionOf(runtime, master.id, asked.id)?.added : undefined;
+    if (!added?.library || libraryAwaited(runtime, master, run)) continue;
+    resumeSubtask(runtime, run);
+    resumed.push(key);
+  }
+  return resumed;
 }
