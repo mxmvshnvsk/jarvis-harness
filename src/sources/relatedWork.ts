@@ -50,6 +50,8 @@ export interface RelatedWorkDoc {
   readonly notFound: readonly string[];
   /** Why nothing was looked for: no epic, parent or links in the issue (said, not silent). */
   readonly note?: string;
+  /** Related issues not read: past `relatedWork.maxIssues`. */
+  readonly notRead?: readonly string[];
   readonly checkedAt: string;
 }
 
@@ -99,6 +101,8 @@ export interface IssueFacts {
   readonly keyFields?: readonly string[];
   /** Keys of the issues it links to. */
   readonly links: readonly string[];
+  /** Issue keys the issue's description names: the task's author pointed at them. */
+  readonly mentions?: readonly string[];
 }
 
 /** An issue as `jira.get` returned it: its type, status, parent or epic and the issues it links. */
@@ -175,6 +179,9 @@ export function issueFacts(text: string): IssueFacts {
   const links = [...new Set(linkText.match(KEY) ?? [])].filter(
     (k) => k !== key && k !== parent && k !== epic,
   );
+  const mentions = [...new Set(str(pick("description"))?.match(KEY) ?? [])].filter(
+    (k) => k !== key && k !== parent && k !== epic && !links.includes(k),
+  );
   const type = named(pick("issue_type", "issuetype", "issueType", "type"));
   const status = named(pick("status"));
   const summary = str(pick("summary"));
@@ -187,6 +194,7 @@ export function issueFacts(text: string): IssueFacts {
     ...(epic ? { epic } : {}),
     ...(keyFields.length > 0 ? { keyFields } : {}),
     links,
+    ...(mentions.length > 0 ? { mentions } : {}),
   };
 }
 
@@ -270,16 +278,22 @@ export function devInfoOf(text: string): { branches: DevBranch[]; prs: DevPr[] }
   return { branches, prs };
 }
 
-/** The issues worth reading first: the other side's (a front task reads the back ones), then the rest. */
+/**
+ * The issues worth reading first: the ones the task links or names, then the other side's (a front
+ * task reads the back ones), then the rest; at most `max`.
+ */
 export function pickRelated(
   self: string,
   mySide: string | undefined,
   candidates: readonly IssueFacts[],
   sides: Readonly<Record<string, string>>,
   max: number,
+  first: ReadonlySet<string> = new Set(),
 ): IssueFacts[] {
   const sideOf = (t?: string) => (t ? sides[t] : undefined);
+  // the issues the task links or names come first: a person pointed at them
   const rank = (c: IssueFacts) => {
+    if (c.key && first.has(c.key)) return -1;
     const side = sideOf(c.type);
     if (mySide && side && side !== mySide) return 0;
     if (!side) return 1;

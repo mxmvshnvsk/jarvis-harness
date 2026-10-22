@@ -590,12 +590,12 @@ export type DeliveryConfig = z.infer<typeof DeliveryConfigSchema>;
  */
 export const RelatedWorkConfigSchema = z.strictObject({
   enabled: z.boolean().default(true),
-  /** How many related tasks are read, at most. */
-  maxIssues: z.int().positive().max(20).default(5),
-  /** The Jira issue type → the side of the work, to read the other side first ("Back Task": back). */
+  /** How many related tasks are read, at most (an epic of a dozen tasks is the usual case). */
+  maxIssues: z.int().positive().max(30).default(12),
+  /** The Jira issue type → the side of the work, to read the other side first ("Back Task" and "Middle Task": back). */
   sides: z
     .record(z.string().min(1), z.string().min(1))
-    .default({ "Back Task": "back", "Front Task": "front" }),
+    .default({ "Back Task": "back", "Middle Task": "back", "Front Task": "front" }),
   /** What a branch is compared with; default — the repository's default branch. */
   base: z.string().min(1).optional(),
 });

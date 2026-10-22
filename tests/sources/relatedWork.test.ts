@@ -342,6 +342,84 @@ describe("the related-work step", () => {
     expect(doc.items[0]).toMatchObject({ issue: "ABC-41", branch: "feature/ABC-41-discount" });
   });
 
+  /** The test's ctx with some answers of its own over the shared ones. */
+  function withAnswers(
+    ctx: StepContext,
+    over: (name: string, args: Record<string, unknown>) => unknown | undefined,
+  ): StepContext {
+    const base = ctx.tools.invoke;
+    (ctx.tools as unknown as { invoke: (n: string, a: Record<string, unknown>) => unknown }).invoke = async (
+      name: string,
+      args: Record<string, unknown>,
+    ) => {
+      const mine = over(name, args);
+      return mine === undefined
+        ? base(name, args)
+        : { ok: true, text: `[${name}] ok\n${JSON.stringify(mine)}` };
+    };
+    return ctx;
+  }
+  const docOf = (ctx: StepContext) =>
+    JSON.parse(
+      rt.artifacts.text(rt.artifacts.listLatest(ctx.run.id, "related-work")[0] as never),
+    ) as RelatedWorkDoc;
+
+  it("the issues the task names come first; the ones past the limit are listed as not read", async () => {
+    rt.loaded.config.relatedWork.maxIssues = 1;
+    const ctx = withAnswers(ctxFor("ABC-42 discount, see ABC-45"), (name, a) =>
+      name === "jira.get" && a.key === "ABC-42"
+        ? { key: "ABC-42", issue_type: { name: "Front Task" }, parent: { key: "ABC-40" } }
+        : undefined,
+    );
+    await collectRelated(ctx, {});
+    const doc = docOf(ctx);
+    expect(doc.notFound).toEqual(["ABC-45"]);
+    expect(doc.notRead).toEqual(["ABC-41"]);
+  });
+
+  it("an issue's work in two repositories: an item each; a merged one says its contract is the base's", async () => {
+    const ctx = withAnswers(ctxFor("ABC-42 discount"), (name, a) =>
+      name === "jira.devInfo" && a.key === "ABC-41"
+        ? {
+            branches: [
+              { name: "dev", url: "https://git.example.com/projects/SHOP/repos/orders-api/browse" },
+              {
+                name: "feature/ABC-41",
+                url: "https://git.example.com/projects/SHOP/repos/orders-api/browse",
+              },
+              {
+                name: "feature/ABC-41-int",
+                url: "https://git.example.com/projects/SHOP/repos/orders-api/browse",
+              },
+              {
+                name: "feature/ABC-41",
+                url: "https://git.example.com/projects/SHOP/repos/common-lib/browse",
+              },
+            ],
+            pullRequests: [
+              {
+                id: "#5",
+                status: "MERGED",
+                source: "feature/ABC-41",
+                url: "https://git.example.com/projects/SHOP/repos/common-lib/pull-requests/5",
+              },
+            ],
+          }
+        : name === "bitbucket.file.get" && a.repo === "common-lib"
+          ? { content: ORDER_V2 }
+          : undefined,
+    );
+    await collectRelated(ctx, {});
+    const items = docOf(ctx).items.filter((i) => i.issue === "ABC-41");
+    expect(items.map((i) => [i.repo, i.branch])).toEqual([
+      ["orders-api", "feature/ABC-41"],
+      ["common-lib", "feature/ABC-41"],
+    ]);
+    const lib = items[1];
+    expect(lib?.note).toContain("merged");
+    expect(lib?.contract[0]?.fields?.some((f) => f.name === "discountAmount")).toBe(true);
+  });
+
   it("before implementation: a branch that moved on with its contract changed is said", async () => {
     const ctx = ctxFor("ABC-42 discount on the order screen");
     await collectRelated(ctx, {});

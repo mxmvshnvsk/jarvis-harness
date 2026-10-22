@@ -31,8 +31,8 @@ daemon:
   actAsOwner: true             # daemon пушит и открывает PR вашими credentials; false — прогон ждёт вас (ADR-0006 §4)
 relatedWork:                   # ADR-0026: ветки и PR смежных задач до спеки (обычно в .jarvis/project.yaml)
   enabled: true                # по умолчанию для прогонов; на прогон — --related / --no-related, галочка в New task
-  maxIssues: 5
-  sides: { "Back Task": back, "Front Task": front }   # тип задачи Jira → сторона: сначала читается другая
+  maxIssues: 12               # сначала связанные с задачей и названные в её описании; кто не влез — в notRead
+  sides: { "Back Task": back, "Middle Task": back, "Front Task": front }   # тип задачи Jira → сторона: сначала читается другая
   # base: dev                  # с чем сравнивать ветку; по умолчанию — ветка по умолчанию репозитория
   # Нужны capability jira.devInfo (Atlassian) и, если репозитория нет на машине, bitbucket.branch.commits,
   # bitbucket.commit.get, bitbucket.file.get — с allow у сервера их надо добавить туда.

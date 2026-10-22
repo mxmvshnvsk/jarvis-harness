@@ -5,6 +5,8 @@ import {
   bitbucketReader,
   type ContractChange,
   contractChanges,
+  type DevBranch,
+  type DevPr,
   devInfoOf,
   type Git,
   type IssueFacts,
@@ -61,7 +63,10 @@ async function call(ctx: StepContext, name: string, args: Record<string, unknown
 }
 
 /** The related issues: the issue's links, its epic's (or parent's) other issues; the other side first. */
-async function relatedIssues(ctx: StepContext, self: IssueFacts & { key: string }): Promise<IssueFacts[]> {
+async function relatedIssues(
+  ctx: StepContext,
+  self: IssueFacts & { key: string },
+): Promise<{ picked: IssueFacts[]; notRead: string[] }> {
   const cfg = ctx.runtime.loaded.config.relatedWork;
   const available = new Set(ctx.tools.list().map((d) => d.name));
   const candidates: IssueFacts[] = [];
@@ -79,20 +84,33 @@ async function relatedIssues(ctx: StepContext, self: IssueFacts & { key: string 
       }
     }
   }
-  for (const key of self.links)
-    if (!candidates.some((c) => c.key === key)) candidates.push({ key, links: [] });
-  return pickRelated(
+  // linked, named in the issue's description or in the task's own text: read first
+  const inTask = ctx.run.task.match(/\b[A-Z][A-Z0-9]+-\d+\b/g) ?? [];
+  const first = new Set([...self.links, ...(self.mentions ?? []), ...inTask]);
+  first.delete(self.key);
+  for (const key of first) if (!candidates.some((c) => c.key === key)) candidates.push({ key, links: [] });
+  const all = pickRelated(
     self.key,
     self.type ? cfg.sides[self.type] : undefined,
     candidates,
     cfg.sides,
-    cfg.maxIssues,
+    Number.POSITIVE_INFINITY,
+    first,
   );
+  return {
+    picked: all.slice(0, cfg.maxIssues),
+    notRead: all.slice(cfg.maxIssues).flatMap((c) => (c.key ? [c.key] : [])),
+  };
 }
 
-/** One related issue's work: its branch and PR from Jira, read where it can be. */
-async function itemOf(ctx: StepContext, issue: IssueFacts & { key: string }): Promise<RelatedItem> {
-  const cfg = ctx.runtime.loaded.config.relatedWork;
+/** Repositories of one issue read, at most: a task's work is in one to three services. */
+const MAX_REPOS = 3;
+
+/**
+ * One related issue's work, an item per repository: its branch and PR from Jira's Development panel,
+ * read where it can be (pilot: a back task changed a shared library and a service at once).
+ */
+async function itemsOf(ctx: StepContext, issue: IssueFacts & { key: string }): Promise<RelatedItem[]> {
   const available = new Set(ctx.tools.list().map((d) => d.name));
   const head = {
     issue: issue.key,
@@ -101,23 +119,65 @@ async function itemOf(ctx: StepContext, issue: IssueFacts & { key: string }): Pr
     ...(issue.summary ? { summary: issue.summary } : {}),
   };
   if (!available.has("jira.devInfo"))
-    return {
-      ...head,
-      found: "none",
-      contract: [],
-      note: "jira.devInfo is not available: allow it on the Atlassian MCP server",
-    };
+    return [
+      {
+        ...head,
+        found: "none",
+        contract: [],
+        note: "jira.devInfo is not available: allow it on the Atlassian MCP server",
+      },
+    ];
   const dev = await call(ctx, "jira.devInfo", { key: issue.key });
   if (!dev.ok)
-    return { ...head, found: "none", contract: [], note: `jira.devInfo failed: ${dev.text.slice(0, 160)}` };
+    return [{ ...head, found: "none", contract: [], note: `jira.devInfo failed: ${dev.text.slice(0, 160)}` }];
   const info = devInfoOf(dev.text);
   // the issue's own branches and PRs: the panel also lists the repository's dev, master and the like
   const own = (name?: string) => !!name && name.toUpperCase().includes(issue.key.toUpperCase());
   const branches = info.branches.filter((b) => own(b.name));
   const prs = info.prs.filter((p) => !p.branch || own(p.branch));
-  const pr = prs.find((p) => /open/i.test(p.state ?? "")) ?? prs[0];
-  const branch = branches.find((b) => b.name === pr?.branch) ?? branches[0];
-  const name = branch?.name ?? pr?.branch;
+  const repos = [
+    ...new Set([...branches.map((b) => b.repo?.slug), ...prs.map((p) => p.repo?.slug)].map((r) => r ?? "")),
+  ].slice(0, MAX_REPOS);
+  if (repos.length === 0) return [{ ...head, found: "none", contract: [] }];
+  const items: RelatedItem[] = [];
+  for (const slug of repos)
+    items.push(
+      await repoItem(
+        ctx,
+        issue.key,
+        head,
+        branches.filter((b) => (b.repo?.slug ?? "") === slug),
+        prs.filter((p) => (p.repo?.slug ?? "") === slug),
+      ),
+    );
+  return items;
+}
+
+/** The feature branch of a repository: the PR's open one, else the plainest name (not its -int, -master copies). */
+function mainBranch(branches: readonly DevBranch[], prs: readonly DevPr[]) {
+  const pr = prs.find((p) => /open/i.test(p.state ?? "")) ?? prs.find((p) => p.branch) ?? prs[0];
+  const names = [
+    ...new Set([...branches.map((b) => b.name), ...prs.flatMap((p) => (p.branch ? [p.branch] : []))]),
+  ];
+  const plain = names.sort((a, b) => a.length - b.length)[0];
+  const name = pr && /open/i.test(pr.state ?? "") && pr.branch ? pr.branch : (plain ?? pr?.branch);
+  const prOf =
+    prs.find((p) => p.branch === name && /open/i.test(p.state ?? "")) ??
+    prs.find((p) => p.branch === name) ??
+    pr;
+  return { name, pr: prOf, branch: branches.find((b) => b.name === name) };
+}
+
+async function repoItem(
+  ctx: StepContext,
+  key: string,
+  head: Pick<RelatedItem, "issue" | "type" | "status" | "summary">,
+  branches: readonly DevBranch[],
+  prs: readonly DevPr[],
+): Promise<RelatedItem> {
+  const cfg = ctx.runtime.loaded.config.relatedWork;
+  const available = new Set(ctx.tools.list().map((d) => d.name));
+  const { name, pr, branch } = mainBranch(branches, prs);
   if (!name) return { ...head, found: "none", contract: [] };
   const repo = branch?.repo ?? pr?.repo;
   const local = repo ? localRepos(ctx.runtime, ctx.run).get(repo.slug.toLowerCase()) : undefined;
@@ -126,6 +186,7 @@ async function itemOf(ctx: StepContext, issue: IssueFacts & { key: string }): Pr
     : repo && available.has("bitbucket.branch.commits")
       ? bitbucketReader((n, a) => call(ctx, n, a), repo, cfg.base)
       : undefined;
+  const merged = /merged/i.test(pr?.state ?? "") && !prs.some((p) => /open/i.test(p.state ?? ""));
   const base = {
     ...head,
     ...(local?.service ? { service: local.service } : {}),
@@ -150,9 +211,8 @@ async function itemOf(ctx: StepContext, issue: IssueFacts & { key: string }): Pr
     };
   let work: Awaited<ReturnType<WorkReader["read"]>>;
   try {
-    work = await reader.read(name, issue.key);
+    work = await reader.read(name, key);
   } catch (error) {
-    work = undefined;
     return {
       ...base,
       found: "jira-dev-info",
@@ -161,7 +221,12 @@ async function itemOf(ctx: StepContext, issue: IssueFacts & { key: string }): Pr
     };
   }
   if (!work) return { ...base, found: "jira-dev-info", contract: [], note: "the branch could not be read" };
-  const contract: ContractChange[] = work.read.flatMap((f) => contractChanges(f.file, f.before, f.after));
+  // merged: the base has the branch's files already, a comparison shows nothing — the contract is
+  // said as it is now in the base (what the other side builds on), not as a change
+  const same = work.read.length > 0 && work.read.every((f) => f.before === f.after);
+  const contract: ContractChange[] = work.read.flatMap((f) =>
+    contractChanges(f.file, merged && same ? "" : f.before, f.after),
+  );
   return {
     ...base,
     ...(work.commit ? { commit: work.commit.slice(0, 12) } : {}),
@@ -169,6 +234,11 @@ async function itemOf(ctx: StepContext, issue: IssueFacts & { key: string }): Pr
     found: reader.found,
     contract,
     files: { contract: work.read.length, other: Math.max(0, work.files.length - work.read.length) },
+    ...(merged
+      ? {
+          note: `merged into ${work.base ?? "the base"}: the contract is what is there now (its fields shown as added), not a pending change`,
+        }
+      : {}),
   };
 }
 
@@ -202,14 +272,16 @@ export const collectRelated: DeterministicTool = async (ctx) => {
   if (!got.ok) return say(`jira.get ${key} failed`);
   const facts = issueFacts(got.text);
   const self = { ...facts, key, ...(facts.epic ? {} : await epicAmong(ctx, facts.keyFields ?? [])) };
-  const issues = (await relatedIssues(ctx, self)).filter((i): i is IssueFacts & { key: string } => !!i.key);
+  const related = await relatedIssues(ctx, self);
+  const issues = related.picked.filter((i): i is IssueFacts & { key: string } => !!i.key);
   const items: RelatedItem[] = [];
-  for (const issue of issues) items.push(await itemOf(ctx, issue));
+  for (const issue of issues) items.push(...(await itemsOf(ctx, issue)));
   const doc: RelatedWorkDoc = {
     about: RELATED_ABOUT,
     from: key,
     items: items.filter((i) => i.found !== "none" || i.note),
     notFound: items.filter((i) => i.found === "none" && !i.note).map((i) => i.issue),
+    ...(related.notRead.length > 0 ? { notRead: related.notRead } : {}),
     ...(issues.length === 0
       ? {
           note:
@@ -268,17 +340,20 @@ export const checkRelated: DeterministicTool = async (ctx) => {
     contractChanged: boolean;
     merged: boolean;
   }> = [];
+  const byIssue = new Map<string, RelatedItem[]>();
   for (const item of doc.items) {
     if (!item.branch || !item.commit) {
       now.push(item);
       continue;
     }
-    const fresh = await itemOf(ctx, {
-      key: item.issue,
-      links: [],
-      ...(item.type ? { type: item.type } : {}),
-    });
-    const merged = /merged/i.test(fresh.pr?.state ?? "");
+    let read = byIssue.get(item.issue);
+    if (!read) {
+      read = await itemsOf(ctx, { key: item.issue, links: [], ...(item.type ? { type: item.type } : {}) });
+      byIssue.set(item.issue, read);
+    }
+    const fresh = read.find((r) => r.repo === item.repo) ?? (read[0] as RelatedItem);
+    // merged since the spec read it: a merge the spec already knew of is no news
+    const merged = /merged/i.test(fresh.pr?.state ?? "") && !/merged/i.test(item.pr?.state ?? "");
     const same = !fresh.commit || fresh.commit === item.commit;
     const contractChanged = JSON.stringify(fresh.contract) !== JSON.stringify(item.contract);
     if (!same || merged)

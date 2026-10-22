@@ -170,7 +170,7 @@ security:
 ```yaml
 relatedWork:
   enabled: true            # по умолчанию; на задачу — галочка в «Новой задаче» или --no-related
-  sides: { "Back Task": back, "Front Task": front }
+  sides: { "Back Task": back, "Middle Task": back, "Front Task": front }
 ```
 
 Перед спекой Jarvis читает ветки и PR других задач эпика и что они меняют в контракте. Для этого у MCP-сервера
