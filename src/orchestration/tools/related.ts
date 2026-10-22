@@ -65,7 +65,11 @@ async function relatedIssues(ctx: StepContext, self: IssueFacts & { key: string 
   const group = self.epic ?? self.parent;
   if (group && available.has("jira.search")) {
     for (const jql of [`"Epic Link" = ${group} OR parent = ${group}`, `parent = ${group}`]) {
-      const r = await call(ctx, "jira.search", { jql: `${jql} ORDER BY updated DESC`, limit: 30 });
+      const r = await call(ctx, "jira.search", {
+        jql: `${jql} ORDER BY updated DESC`,
+        limit: 30,
+        fields: "summary,status,issuetype,parent",
+      });
       if (r.ok) {
         candidates.push(...searchHits(r.text));
         break;
@@ -177,7 +181,8 @@ export const collectRelated: DeterministicTool = async (ctx) => {
   };
   if (!key) return say("the task names no issue");
   if (!available.has("jira.get")) return say("jira.get is not available");
-  const got = await call(ctx, "jira.get", { key });
+  // all fields: the community server's default set has no issue links, no parent and no Epic Link
+  const got = await call(ctx, "jira.get", { key, fields: "*all" });
   if (!got.ok) return say(`jira.get ${key} failed`);
   const self = { ...issueFacts(got.text), key };
   const issues = (await relatedIssues(ctx, self)).filter((i): i is IssueFacts & { key: string } => !!i.key);
@@ -188,6 +193,14 @@ export const collectRelated: DeterministicTool = async (ctx) => {
     from: key,
     items: items.filter((i) => i.found !== "none" || i.note),
     notFound: items.filter((i) => i.found === "none" && !i.note).map((i) => i.issue),
+    ...(issues.length === 0
+      ? {
+          note:
+            self.epic || self.parent
+              ? `no other issues found under ${self.epic ?? self.parent} (jira.search)`
+              : `${key} has no epic, parent or issue links in jira.get's answer`,
+        }
+      : {}),
     checkedAt: new Date().toISOString(),
   };
   const a = ctx.runtime.artifacts.put({

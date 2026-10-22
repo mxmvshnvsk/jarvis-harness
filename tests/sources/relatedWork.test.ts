@@ -344,3 +344,21 @@ describe("the related-work step", () => {
     });
   });
 });
+
+describe("issueFacts: Epic Link as a custom field", () => {
+  it("reads it from the field's name", () => {
+    const text = JSON.stringify({
+      key: "ABC-42",
+      fields: { summary: "s", customfield_10008: { name: "Epic Link", value: "ABC-1" } },
+    });
+    expect(issueFacts(text).epic).toBe("ABC-1");
+  });
+  it("reads it from the answer's names", () => {
+    const text = JSON.stringify({
+      key: "ABC-42",
+      names: { customfield_10008: "Epic Link" },
+      fields: { customfield_10008: "ABC-1" },
+    });
+    expect(issueFacts(text).epic).toBe("ABC-1");
+  });
+});

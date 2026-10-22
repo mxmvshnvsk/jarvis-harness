@@ -48,6 +48,8 @@ export interface RelatedWorkDoc {
   readonly items: readonly RelatedItem[];
   /** Related tasks with no branch or PR found. */
   readonly notFound: readonly string[];
+  /** Why nothing was looked for: no epic, parent or links in the issue (said, not silent). */
+  readonly note?: string;
   readonly checkedAt: string;
 }
 
@@ -95,6 +97,36 @@ export interface IssueFacts {
 }
 
 /** An issue as `jira.get` returned it: its type, status, parent or epic and the issues it links. */
+const ISSUE_KEY = /^[A-Z][A-Z0-9]+-\d+$/;
+
+/**
+ * Epic Link on Jira Server/DC is a custom field: `customfield_NNNNN` holding the epic's key, named
+ * "Epic Link" in the answer's `names` (expand=names) or in the field itself (`{name, value}` as the
+ * community MCP server renders custom fields). The Jira UI shows the epic's name, the API its key.
+ */
+function epicField(doc: unknown, fields: Record<string, unknown>): string | undefined {
+  const names =
+    doc && typeof doc === "object" && (doc as Record<string, unknown>).names
+      ? ((doc as Record<string, unknown>).names as Record<string, unknown>)
+      : {};
+  for (const [id, label] of Object.entries(names))
+    if (typeof label === "string" && /^epic link$/i.test(label)) {
+      const v = fields[id];
+      const k =
+        str(v) ?? (v && typeof v === "object" ? str((v as Record<string, unknown>).value) : undefined);
+      if (k && ISSUE_KEY.test(k)) return k;
+    }
+  for (const { o } of walk(fields)) {
+    const label = str(o.name) ?? str(o.fieldName) ?? str(o.field);
+    if (!label || !/^epic link$/i.test(label)) continue;
+    const k =
+      str(o.value) ??
+      (o.value && typeof o.value === "object" ? str((o.value as Record<string, unknown>).key) : undefined);
+    if (k && ISSUE_KEY.test(k)) return k;
+  }
+  return undefined;
+}
+
 export function issueFacts(text: string): IssueFacts {
   const doc = json(text);
   const raw = body(text);
@@ -108,8 +140,11 @@ export function issueFacts(text: string): IssueFacts {
     str(v) ?? (v && typeof v === "object" ? str((v as Record<string, unknown>).key) : undefined);
   const key = str(root.key);
   const epic =
-    parentOf(pick("epic", "epic_link", "epicLink", "epic_key")) ??
-    /"epic[_ ]?(?:link|key)?"\s*:\s*"([A-Z][A-Z0-9]+-\d+)"/i.exec(raw)?.[1];
+    parentOf(pick("epic", "epic_link", "epicLink", "epic_key", "Epic Link")) ??
+    epicField(doc, fields) ??
+    /"epic[_ ]?(?:link|key)?"\s*:\s*"([A-Z][A-Z0-9]+-\d+)"/i.exec(raw)?.[1] ??
+    /"name"\s*:\s*"Epic Link"[^{}]{0,200}?"([A-Z][A-Z0-9]+-\d+)"/i.exec(raw)?.[1] ??
+    /"([A-Z][A-Z0-9]+-\d+)"[^{}]{0,200}?"name"\s*:\s*"Epic Link"/i.exec(raw)?.[1];
   const parent = parentOf(pick("parent"));
   const linkText = JSON.stringify(pick("issuelinks", "issue_links", "links") ?? "");
   const links = [...new Set(linkText.match(KEY) ?? [])].filter(

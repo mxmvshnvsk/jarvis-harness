@@ -12,8 +12,15 @@ const jiraGet: ProfileCapability = {
   description: "Read one Jira issue by key: summary, description, status, links, comments.",
   access: "read",
   effect: false,
-  parameters: params({ key: "issue key, e.g. ABC-42" }, ["key"]),
-  args: (a) => ({ issueKey: a.key ?? a.issueKey, issue_key: a.key ?? a.issueKey }),
+  parameters: params(
+    { key: "issue key, e.g. ABC-42", fields: "fields to return: a comma-separated list or *all" },
+    ["key"],
+  ),
+  args: (a) => ({
+    issueKey: a.key ?? a.issueKey,
+    issue_key: a.key ?? a.issueKey,
+    ...(a.fields ? { fields: a.fields } : {}),
+  }),
 };
 
 const jiraSearch: ProfileCapability = {
@@ -21,8 +28,16 @@ const jiraSearch: ProfileCapability = {
   description: "Search Jira issues with JQL.",
   access: "read",
   effect: false,
-  parameters: params({ jql: "JQL query", limit: "max results (default 20)" }, ["jql"]),
-  args: (a) => ({ jql: a.jql, maxResults: a.limit ?? 20, limit: a.limit ?? 20 }),
+  parameters: params(
+    { jql: "JQL query", limit: "max results (default 20)", fields: "fields to return, comma-separated" },
+    ["jql"],
+  ),
+  args: (a) => ({
+    jql: a.jql,
+    maxResults: a.limit ?? 20,
+    limit: a.limit ?? 20,
+    ...(a.fields ? { fields: a.fields } : {}),
+  }),
 };
 
 /** ADR-0026: the issue's Development panel — its branches, commits and pull requests. */
