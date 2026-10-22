@@ -243,5 +243,13 @@ export const JS_TEST_REPORTER: TestReporter = {
   runnerOf: (command, workspace) => jsRunnerOf(command, workspace),
   reporterArgs: (runner, file) => reporterArgs(runner as JsRunner, file),
   unknownOption: UNKNOWN_OPTION,
+  // jest finds the tests of changed files itself; vitest takes test files as filters; none related
+  // is not a failure (pilot: jest exited 1 on «0 matches»)
+  selection: (runner) =>
+    runner === "jest"
+      ? { by: "changed", args: (files) => `--passWithNoTests --findRelatedTests ${files}` }
+      : runner === "vitest"
+        ? { by: "tests", args: (files) => `--passWithNoTests ${files}` }
+        : undefined,
   failures: (runner, file, output, workspace) => jsReportOf(runner as JsRunner, file, output, workspace),
 };

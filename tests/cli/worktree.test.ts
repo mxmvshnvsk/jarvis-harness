@@ -476,7 +476,8 @@ steps:
     const [app, old] = checks.results;
     expect(app).toMatchObject({
       check: "test-app",
-      command: "cd app && npm test",
+      // jest behind the npm script: on the tests related to the change, its arguments after `--`
+      command: "cd app && npm test -- --passWithNoTests --findRelatedTests src/a.js",
       ok: false,
       tests: { failed: 1, total: 2 },
     });

@@ -82,3 +82,19 @@ export function classSelection(
   if (classes.length > MAX_CLASSES) return undefined;
   return { args: testClassArgs(runner, classes) };
 }
+
+/** Test files given to a runner as filters, at most: past it the whole suite is about as fast. */
+export const MAX_TEST_FILES = 60;
+
+/**
+ * The selection for a runner that takes test files as filters (vitest): the files, a reason to skip,
+ * or nothing (run it as it is: no graph to tell, or too many files).
+ */
+export function fileSelection(
+  tests: readonly string[] | undefined,
+): { files: string[] } | { skip: string } | undefined {
+  if (tests === undefined) return undefined;
+  if (tests.length === 0) return { skip: "no test covers the changed code (project graph)" };
+  if (tests.length > MAX_TEST_FILES) return undefined;
+  return { files: [...tests] };
+}

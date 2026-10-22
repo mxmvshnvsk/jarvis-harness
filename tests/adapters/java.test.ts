@@ -559,3 +559,15 @@ describe("Java syntax (tree-sitter)", () => {
     );
   });
 });
+
+describe("fileSelection: vitest's filters", () => {
+  it("the covering test files; none — skip; too many — the whole suite", async () => {
+    const { fileSelection, MAX_TEST_FILES } = await import("../../src/orchestration/tools/relatedTests.ts");
+    expect(fileSelection(undefined)).toBeUndefined();
+    expect(fileSelection([])).toEqual({ skip: "no test covers the changed code (project graph)" });
+    expect(fileSelection(["src/a.test.ts"])).toEqual({ files: ["src/a.test.ts"] });
+    expect(
+      fileSelection(Array.from({ length: MAX_TEST_FILES + 1 }, (_, i) => `t${i}.test.ts`)),
+    ).toBeUndefined();
+  });
+});

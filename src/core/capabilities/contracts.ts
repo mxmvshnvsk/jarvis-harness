@@ -203,6 +203,12 @@ export interface TestReporter {
   reporterArgs(runner: string, file: string): string;
   /** An option the runner does not know: the command runs once more as configured. */
   readonly unknownOption: RegExp;
+  /**
+   * How the runner runs only the tests of a change: given the changed source files (it finds their
+   * tests itself) or the test files that cover them (from the project graph), as one quoted list.
+   * Undefined: it cannot.
+   */
+  selection?(runner: string): { readonly by: "changed" | "tests"; args(files: string): string } | undefined;
   /** The failures: from the report when it was written, else from the printed output. */
   failures(
     runner: string,

@@ -15,7 +15,7 @@ import { CROSS_TOOLS } from "./cross.ts";
 import { excerptText } from "./excerpt.ts";
 import { rebuildsFor } from "./rebuild.ts";
 import { RELATED_TOOLS } from "./related.ts";
-import { classSelection, coveringTests, testRunnerOf } from "./relatedTests.ts";
+import { classSelection, coveringTests, fileSelection, testRunnerOf } from "./relatedTests.ts";
 import {
   changedLinesOf,
   failureReasons,
@@ -519,7 +519,20 @@ export const BUILTIN_TOOLS: Record<string, DeterministicTool> = {
         continue;
       }
       const present = code.filter((f) => existsSync(join(workspace, f)));
+      // a JavaScript runner writes a JSON report besides its usual output: why the tests failed
+      const js = name.startsWith("test") ? reportingRunnerOf(command) : undefined;
       const runner = name.startsWith("test") ? testRunnerOf(command) : undefined;
+      // a runner the stack's adapter can narrow (behind a package script too): the changed files, or
+      // the test files that cover them (project graph) as its filters
+      const narrow = runner ? undefined : js?.reporter.selection?.(js.runner);
+      const byTests =
+        narrow?.by === "tests"
+          ? fileSelection((await covering())?.filter((t) => !dir || t.startsWith(`${dir}/`)))
+          : undefined;
+      if (byTests && "skip" in byTests) {
+        results.push({ check: name, command, ok: true, skipped: byTests.skip });
+        continue;
+      }
       // a class-taking runner: the test classes that cover the change, from the project graph
       const selection =
         runner === "gradle" || runner === "maven"
@@ -535,14 +548,18 @@ export const BUILTIN_TOOLS: Record<string, DeterministicTool> = {
       const related =
         selection && "args" in selection
           ? ` ${selection.args}`
-          : runner === "jest"
-            ? // no test relates to the changed files: not a failure (pilot: jest exited 1 on «0 matches»)
-              ` --passWithNoTests --findRelatedTests ${filesFor(command, code)}`
-            : // the linter on the changed files only: errors elsewhere in the repo are not this run's
-              // (pilot: `yarn lint` failed on a package the run never touched, and agents could not tell)
-              name.startsWith("lint") && present.length > 0
-              ? ` ${filesFor(command, present)}`
-              : "";
+          : byTests && "files" in byTests && narrow
+            ? ` ${narrow.args(filesFor(command, byTests.files))}`
+            : narrow?.by === "changed"
+              ? ` ${narrow.args(filesFor(command, code))}`
+              : runner === "jest"
+                ? // no test relates to the changed files: not a failure (pilot: jest exited 1 on «0 matches»)
+                  ` --passWithNoTests --findRelatedTests ${filesFor(command, code)}`
+                : // the linter on the changed files only: errors elsewhere in the repo are not this run's
+                  // (pilot: `yarn lint` failed on a package the run never touched, and agents could not tell)
+                  name.startsWith("lint") && present.length > 0
+                  ? ` ${filesFor(command, present)}`
+                  : "";
       if (name.startsWith("lint") && present.length === 0) {
         results.push({
           check: name,
@@ -553,8 +570,6 @@ export const BUILTIN_TOOLS: Record<string, DeterministicTool> = {
         continue;
       }
       const started = Date.now() - 1000;
-      // a JavaScript runner writes a JSON report besides its usual output: why the tests failed
-      const js = name.startsWith("test") ? reportingRunnerOf(command) : undefined;
       const reportFile = js
         ? join(tmpdir(), `jarvis-${ctx.run.id}-${name.replace(/[^\w.-]+/g, "-")}-${Date.now()}.json`)
         : undefined;
@@ -601,7 +616,8 @@ export const BUILTIN_TOOLS: Record<string, DeterministicTool> = {
           (js !== undefined && reportFile !== undefined && !wroteReport));
       results.push({
         check: name,
-        command: `${command}${related}`,
+        // as it ran: an npm script gets its runner's arguments after `--`
+        command: ((a) => (a ? `${command} ${a}` : command))(argsWith("")),
         ok: r.ok || preexisting?.excused === true,
         ...(r.ok || preexisting?.excused ? {} : { tail: tail(r), ...logOf(name, r) }),
         ...(notStarted ? { notStarted: true } : {}),
