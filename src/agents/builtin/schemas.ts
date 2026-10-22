@@ -264,6 +264,12 @@ export const ImplementationResult = z.object({
   ...Base,
   changedFiles: z.array(z.string()).default([]),
   notes: z.array(z.string()).default([]).describe("decisions, deviations from the plan, follow-ups"),
+  scope: z
+    .string()
+    .optional()
+    .describe(
+      "the context of the change in one lower-case word, for the commit's scope: what part of the product or code it is about (tests, metrics, render, validation, auth) — not the repository's or the service's name",
+    ),
   clarification: z
     .object({
       question: z.string().min(1).describe("the one question only a person can answer"),

@@ -5,6 +5,7 @@ import { removeMarkers } from "../interaction/review/collector.ts";
 import { WorktreeWorkspace } from "../orchestration/worktree.ts";
 import { shortRunId } from "../storage/runStore.ts";
 import { git } from "../tools/local/exec.ts";
+import { scopeNamed } from "./deliver.ts";
 import { commitMessageOf, FormatError } from "./deliveryFormat.ts";
 import type { Runtime } from "./runtime.ts";
 
@@ -62,7 +63,7 @@ async function teamMessage(runtime: Runtime, run: Run): Promise<string | undefin
       title: (run.task.split("\n")[0] ?? run.task).trim(),
       ...(run.options?.kind ? { kind: run.options.kind } : {}),
       files: diff?.code === 0 ? diff.stdout.split("\n").filter(Boolean) : [],
-      ...(runtime.loaded.meta?.service ? { service: runtime.loaded.meta.service } : {}),
+      ...((s) => (s ? { scope: s } : {}))(scopeNamed(runtime, run.id)),
       runId: run.id,
     });
   } catch (error) {

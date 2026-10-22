@@ -1,4 +1,4 @@
-import { PR_REQUEST, prOf, requestOf } from "../../app/deliver.ts";
+import { PR_REQUEST, prOf, requestOf, scopeNamed } from "../../app/deliver.ts";
 import { FormatError, headerOf, trailersOf } from "../../app/deliveryFormat.ts";
 import { prReviewOf } from "../../app/prReview.ts";
 import { commentText, markThreads, threadsToFix, triageOf } from "../../app/prTriage.ts";
@@ -110,7 +110,7 @@ const pushFix: DeterministicTool = async (ctx) => {
       title: "address review comments",
       ...(parent.options?.kind ? { kind: parent.options.kind } : {}),
       files,
-      ...(ctx.runtime.loaded.meta?.service ? { service: ctx.runtime.loaded.meta.service } : {}),
+      ...((s) => (s ? { scope: s } : {}))(scopeNamed(ctx.runtime, ctx.run.id)),
       runId: ctx.run.id,
     };
     message = `${headerOf(cfg, input, cfg.commit.fix)}\n\n${trailersOf(cfg, ctx.run.id)}`;

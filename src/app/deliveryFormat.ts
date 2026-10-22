@@ -15,10 +15,10 @@ export interface FormatInput {
   readonly title: string;
   /** The run's kind of task (`--kind`): `{type}`. */
   readonly kind?: string;
-  /** The files changed: `{scope}` when `auto`. */
+  /** The files changed: `{scope}` when `auto` and the agent named none. */
   readonly files: readonly string[];
-  /** The service the run changes in a map of services: `{scope}` when `auto`. */
-  readonly service?: string;
+  /** The context of the change in a word, as the implementation named it (`tests`, `render`). */
+  readonly scope?: string;
   readonly runId: string;
 }
 
@@ -38,7 +38,7 @@ export function issueKeyOf(text: string): string | undefined {
   return KEY.exec(text)?.[0];
 }
 
-/** Folders that say where in a repository code is, not what part of the product it is. */
+/** Folders that say where code is, not what the change is about. */
 const PLAIN = new Set([
   "src",
   "main",
@@ -50,29 +50,39 @@ const PLAIN = new Set([
   "groovy",
   "resources",
   "app",
+  "ru",
+  "com",
+  "org",
+  "impl",
 ]);
-const GROUPS = new Set(["packages", "apps", "services", "modules", "libs"]);
+
+const TEST = /(^|\/)(tests?|__tests__|spec)\/|[._-](test|spec)\.[a-z]+$|Tests?\.(java|kt|groovy)$/i;
+
+/** A scope as the team writes it: one lower-case word (`render`, `metrics`), else none. */
+export function cleanScope(word: string | undefined): string {
+  const w = (word ?? "").trim().toLowerCase();
+  return /^[a-z][a-z0-9-]{0,23}$/.test(w) ? w : "";
+}
 
 /**
- * `{scope}` when `auto`: the service of the map; else the module most of the change is in
- * (`packages/<name>`, `apps/<name>`, or a top folder that is not `src`); else none.
+ * `{scope}` when `auto` and the agent named none: what the change is about by its files — `tests` when
+ * it changed only tests, `docs` only documents, else the folder most of it is in (`render`, `metrics`);
+ * none when it is spread.
  */
-export function scopeOf(files: readonly string[], service: string | undefined): string {
-  if (service) return service;
+export function scopeOf(files: readonly string[]): string {
+  if (files.length === 0) return "";
+  if (files.every((f) => TEST.test(f))) return "tests";
+  if (files.every((f) => /\.(md|adoc|txt)$/i.test(f))) return "docs";
   const count = new Map<string, number>();
-  for (const f of files) {
-    const parts = f.split("/");
-    const name =
-      parts.length > 2 && GROUPS.has(parts[0] as string)
-        ? parts[1]
-        : parts.length > 1 && !PLAIN.has(parts[0] as string)
-          ? parts[0]
-          : undefined;
-    if (name) count.set(name, (count.get(name) ?? 0) + 1);
+  for (const f of files.filter((x) => !TEST.test(x))) {
+    const dirs = f.split("/").slice(0, -1).reverse();
+    const name = dirs.find((d) => !PLAIN.has(d.toLowerCase()) && /^[A-Za-z][A-Za-z0-9-]*$/.test(d));
+    if (name) count.set(name.toLowerCase(), (count.get(name.toLowerCase()) ?? 0) + 1);
   }
   const [best] = [...count.entries()].sort((a, b) => b[1] - a[1]);
-  // a module that has most of the change, not one of many
-  return best && best[1] * 2 > files.length ? best[0] : "";
+  const code = files.filter((x) => !TEST.test(x)).length;
+  // a folder that has most of the change, not one of many
+  return best && best[1] * 2 > code ? cleanScope(best[0]) : "";
 }
 
 /** The subject: the title without the issue key at its start and a full stop at its end. */
@@ -98,7 +108,7 @@ function valuesOf(cfg: DeliveryConfig, input: FormatInput, template: string) {
     );
   const scope =
     cfg.commit.scope === "auto"
-      ? scopeOf(input.files, input.service)
+      ? cleanScope(input.scope) || scopeOf(input.files)
       : cfg.commit.scope === "none"
         ? ""
         : cfg.commit.scope;

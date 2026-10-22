@@ -35,8 +35,11 @@ describe("delivery formats", () => {
     expect(headerOf(none, input, none.commit.format)).toBe(
       "feat: ABC-42 Discount by promo code in the order",
     );
-    // the service of a map is the scope
-    expect(headerOf(c, { ...input, service: "billing" }, c.commit.format)).toMatch(/^feat\(billing\):/);
+    // the context the implementation named, in a word: not the repository's name
+    expect(headerOf(c, { ...input, scope: "Metrics" }, c.commit.format)).toMatch(/^feat\(metrics\):/);
+    expect(headerOf(c, { ...input, scope: "orders api client" }, c.commit.format)).toMatch(
+      /^feat\(orders\):/,
+    );
   });
 
   it("a long subject is cut at a word: the header stays within 72", () => {
@@ -67,9 +70,16 @@ describe("delivery formats", () => {
     expect(commitMessageOf(cfg({ assistedBy: false }), input)).not.toContain("Assisted-By");
   });
 
-  it("scope: a module that has most of the change, packages by their name, none for src", () => {
-    expect(scopeOf(["packages/ui/a.ts", "packages/ui/b.ts", "packages/core/c.ts"], undefined)).toBe("ui");
-    expect(scopeOf(["src/main/java/A.java", "src/main/java/B.java"], undefined)).toBe("");
-    expect(scopeOf(["a/x.ts", "b/y.ts"], undefined)).toBe("");
+  it("scope by the files when the agent named none: tests, docs, the folder most of it is in, none when spread", () => {
+    expect(scopeOf(["src/test/java/shop/OrderServiceTest.java", "src/app/form.spec.ts"])).toBe("tests");
+    expect(scopeOf(["docs/a.md", "README.md"])).toBe("docs");
+    expect(
+      scopeOf([
+        "src/main/java/com/example/shop/render/Page.java",
+        "src/main/java/com/example/shop/render/Block.java",
+        "src/test/java/com/example/shop/render/PageTest.java",
+      ]),
+    ).toBe("render");
+    expect(scopeOf(["src/metrics/a.ts", "src/auth/b.ts"])).toBe("");
   });
 });

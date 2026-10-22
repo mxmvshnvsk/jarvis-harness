@@ -560,7 +560,7 @@ delivery:
   commit:                      # сообщение коммита PR (и Apply, если формат задан)
     format: "{type}({scope}): {key} {subject}"   # по умолчанию "{subject}" — заголовок спеки как есть
     types: { feature: feat, change: feat, fix: fix, refactor: refactor, test: test, docs: docs }   # вид задачи → {type}
-    scope: auto                # auto — модуль/сервис, где больше всего изменений; none — без scope; иначе этот текст
+    scope: auto                # auto — контекст изменения одним словом (tests, metrics, render): его называет агент реализации, иначе по файлам; none — без scope; иначе этот текст
   prTitle: "{type}({scope}): {key} {subject}"
   assistedBy: "Jarvis {version}"   # trailer Assisted-By; false — только Jarvis-Run
   flow:                        # PR-флоу: прогон сам выставляет PR после аппрува и ведёт комментарии

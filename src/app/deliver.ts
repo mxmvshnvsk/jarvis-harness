@@ -135,6 +135,18 @@ export function prFlowOn(runtime: Runtime, run: Run): boolean {
   );
 }
 
+/** The context of the change in a word, as the run's implementation named it (`{scope}`). */
+export function scopeNamed(runtime: Runtime, runId: string): string | undefined {
+  const a = runtime.artifacts.listLatest(runId, "implementation")[0];
+  if (!a) return undefined;
+  try {
+    const scope = (JSON.parse(runtime.artifacts.text(a)) as { scope?: unknown }).scope;
+    return typeof scope === "string" && scope.trim() ? scope.trim() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** The PR a run was delivered as, if it was. */
 export function prOf(runtime: Runtime, run: Run): Delivered | undefined {
   const artifact = runtime.artifacts.listLatest(run.id, PR_ARTIFACT)[0];
@@ -247,7 +259,7 @@ export async function preparePr(
     ...(run.options?.kind ? { kind: run.options.kind } : {}),
     files,
     // a service of a map of services: its name is the scope
-    ...(runtime.loaded.meta?.service ? { service: runtime.loaded.meta.service } : {}),
+    ...((s) => (s ? { scope: s } : {}))(scopeNamed(runtime, run.id)),
     runId: run.id,
   };
   let title: string;
