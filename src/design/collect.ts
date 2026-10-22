@@ -9,6 +9,29 @@ import { figmaLinksIn } from "./figma.ts";
 /** How far the step goes without a model: issues named by the task, their pages, the frames found. */
 export const DESIGN_LIMITS = { issues: 3, pages: 6, frames: 8 } as const;
 
+/** Issues, pages and code searches read at once; Figma frames at once (its API limits the rate). */
+const READS_AT_ONCE = 4;
+const FRAMES_AT_ONCE = 3;
+
+/** `work` on each item, `limit` at a time; the answers in the items' order. */
+async function inTurns<T, R>(
+  items: readonly T[],
+  limit: number,
+  work: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let next = 0;
+  const lane = async () => {
+    while (next < items.length) {
+      const i = next;
+      next += 1;
+      out[i] = await work(items[i] as T);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, lane));
+  return out;
+}
+
 const num = (v: unknown, fallback: number) => (typeof v === "number" && v > 0 ? Math.floor(v) : fallback);
 
 /** The issue and page texts handed to the agents as they were read, at most this much. */
@@ -36,11 +59,12 @@ export const collectSources: DeterministicTool = async (ctx, args) => {
 
   const sources: Array<{ from: string; text: string }> = [{ from: "the task", text: ctx.run.task }];
   const keys = [...new Set(ctx.run.task.match(/\b[A-Z][A-Z0-9]+-\d+\b/g) ?? [])].slice(0, limits.issues);
+  // reads side by side (a few at a time), kept in the order asked
   if (available.has("jira.get"))
-    for (const key of keys) {
-      const r = await ctx.tools.invoke("jira.get", { key });
-      if (r.ok) sources.push({ from: `issue ${key}`, text: withoutHead(r.text) });
-    }
+    for (const [i, r] of (
+      await inTurns(keys, READS_AT_ONCE, (key) => ctx.tools.invoke("jira.get", { key }))
+    ).entries())
+      if (r.ok) sources.push({ from: `issue ${keys[i]}`, text: withoutHead(r.text) });
   const pages = [
     ...new Set(
       sources.flatMap((s) =>
@@ -49,11 +73,15 @@ export const collectSources: DeterministicTool = async (ctx, args) => {
     ),
   ].slice(0, limits.pages);
   if (available.has("confluence.get"))
-    for (const id of pages) {
-      const r = await ctx.tools.invoke("confluence.get", { id });
+    for (const [i, r] of (
+      await inTurns(pages, READS_AT_ONCE, (id) => ctx.tools.invoke("confluence.get", { id }))
+    ).entries()) {
       if (!r.ok) continue;
       const title = /"title":\s*"([^"]+)"/.exec(r.text)?.[1];
-      sources.push({ from: `Confluence ${title ? `«${title}» ` : ""}(${id})`, text: withoutHead(r.text) });
+      sources.push({
+        from: `Confluence ${title ? `«${title}» ` : ""}(${pages[i]})`,
+        text: withoutHead(r.text),
+      });
     }
   const outputs: string[] = [];
   const read = sources.slice(1);
@@ -82,15 +110,17 @@ export const collectSources: DeterministicTool = async (ctx, args) => {
     });
   // the code names and interface texts they mention, found in the code: where the agents start
   const anchors: AnchorHit[] = [];
-  if (available.has("repo.search"))
-    for (const anchor of anchorsIn(sources.map((s) => s.text))) {
-      const r = await ctx.tools.invoke("repo.search", {
-        pattern: anchor.value,
-        literal: true,
-        maxResults: 200,
-      });
-      if (r.ok) anchors.push(hitOf(anchor, withoutHead(r.text).split("\n").filter(Boolean)));
-    }
+  if (available.has("repo.search")) {
+    const asked = anchorsIn(sources.map((s) => s.text));
+    const found = await inTurns(asked, READS_AT_ONCE, (anchor) =>
+      ctx.tools.invoke("repo.search", { pattern: anchor.value, literal: true, maxResults: 200 }),
+    );
+    for (const [i, r] of found.entries())
+      if (r.ok)
+        anchors.push(
+          hitOf(asked[i] as (typeof asked)[number], withoutHead(r.text).split("\n").filter(Boolean)),
+        );
+  }
   if (anchors.length > 0)
     ctx.runtime.events.emit({
       kind: "sources.anchors",
@@ -137,26 +167,25 @@ export const collectSources: DeterministicTool = async (ctx, args) => {
   const frames: Array<{ link: string; from: string; text: string }> = [];
   const missed: Array<{ link: string; from: string; why: string }> = [];
   let limited: string | undefined;
-  for (const f of found.slice(0, limits.frames)) {
+  // a few frames at a time (one by one took minutes on a task of eight); kept in the order found
+  const tried = await inTurns(found.slice(0, limits.frames), FRAMES_AT_ONCE, async (f) => {
     // the API said "not before": the frames left are not asked for (each ask would be refused too)
-    if (limited) {
-      missed.push({ ...f, why: limited });
-      continue;
-    }
+    if (limited) return { f, why: limited };
     let r = await readFrame({ url: f.link });
     // a whole screen may not fit the time: its upper levels still tell the structure and the texts
     if (!r.ok && /time(d)? ?out/i.test(r.error ?? r.text)) r = await readFrame({ url: f.link, depth: 4 });
-    if (r.ok) {
-      frames.push({ ...f, text: withoutHead(r.text) });
-      continue;
-    }
+    if (r.ok) return { f, text: withoutHead(r.text) };
     const message = r.error ?? r.text;
     if (/rate limit/i.test(message)) {
       const until = /before (\d{4}-\d\d-\d\dT[\d:.]+Z)/.exec(message)?.[1];
       limited = `the Figma API's rate limit${until ? ` until ${until}` : ""}`;
-      missed.push({ ...f, why: limited });
-    } else missed.push({ ...f, why: (r.denied ?? message ?? "failed").split("\n")[0] ?? "failed" });
-  }
+      return { f, why: limited };
+    }
+    return { f, why: (r.denied ?? message ?? "failed").split("\n")[0] ?? "failed" };
+  });
+  for (const t of tried)
+    if ("text" in t && t.text !== undefined) frames.push({ ...t.f, text: t.text });
+    else missed.push({ ...t.f, why: t.why ?? "failed" });
   for (const f of found.slice(limits.frames))
     missed.push({ ...f, why: `over the limit of ${limits.frames} frames` });
 

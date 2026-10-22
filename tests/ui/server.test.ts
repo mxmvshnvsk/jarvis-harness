@@ -329,9 +329,8 @@ describe("jarvis ui: pages", () => {
       "Untrusted content from the internet came in: <code>figma.get</code> (server design) in design.",
     );
     expect(banner).toContain(
-      "effects — a PR, a comment, a push — wait for a person to approve the run&#39;s artifact.",
+      "Held until you approve the run&#39;s document: <code>bitbucket.pr.create</code>.",
     );
-    expect(banner).toContain("Held so far: <code>bitbucket.pr.create</code>.");
     const feed = page.slice(page.indexOf('data-live="feed"'));
     expect(feed).toContain(
       "effect bitbucket.pr.create held: the run read untrusted content (figma.get in design)",

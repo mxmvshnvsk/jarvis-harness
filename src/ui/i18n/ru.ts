@@ -1192,11 +1192,13 @@ export const RU: Readonly<Record<string, string>> = {
   "It is not there — do it again": "Нет — сделать ещё раз",
   "In the terminal: {cmd}": "В терминале: {cmd}",
   // ---- untrusted content (ADR-0016)
-  "Held so far: {list}.": "Уже задержано: {list}.",
+  "Held until you approve the run's document: {list}.": "Ждёт, пока вы утвердите документ прогона: {list}.",
+  "Nothing waits for you now: a PR, a comment or a push will go out only after you approve the run's document at its gate.":
+    "Сейчас от вас ничего не нужно: PR, комментарий или push уйдут только после того, как вы утвердите документ прогона на его гейте.",
   "server {name}": "сервер {name}",
   "in {step}": "в {step}",
-  "Untrusted content from the internet came in: {where}. Its text went to the agents as data, not instructions; effects — a PR, a comment, a push — wait for a person to approve the run's artifact.":
-    "Пришли недоверенные данные из интернета: {where}. Агенты получили этот текст как данные, а не как инструкции; эффекты — PR, комментарий, push — ждут, пока человек одобрит артефакт прогона.",
+  "Untrusted content from the internet came in: {where}. Its text went to the agents as data, not instructions.":
+    "Пришли недоверенные данные из интернета: {where}. Агенты получили этот текст как данные, а не как инструкции.",
   // ---- a person edits a document as a file (ADR-0005)
   "made from {model}, {tools}": "сделано за {model}, {tools}",
   "edited by a person, {who}": "правка человека, {who}",

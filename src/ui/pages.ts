@@ -1798,17 +1798,21 @@ function contractCheckHtml(check: NonNullable<RunPage["contractCheck"]>): Html {
  */
 function untrustedHtml(u: UntrustedView): Html {
   const s = u.source;
-  const held =
+  const where = html`<code>${s.capability}</code>${s.server ? ` (${t("server {name}", { name: s.server })})` : ""}${s.stepId ? ` ${t("in {step}", { step: s.stepId })}` : ""}`;
+  // what the person has to do, if anything: held effects wait for an approval, else nothing does yet
+  // t("Nothing waits for you now: a PR, a comment or a push will go out only after you approve the run's document at its gate.")
+  const now =
     u.held.length > 0
-      ? html` ${th("Held so far: {list}.", {
+      ? th("Held until you approve the run's document: {list}.", {
           list: join(
             u.held.map((c) => html`<code>${c}</code>`),
             ", ",
           ),
-        })}`
-      : "";
-  const where = html`<code>${s.capability}</code>${s.server ? ` (${t("server {name}", { name: s.server })})` : ""}${s.stepId ? ` ${t("in {step}", { step: s.stepId })}` : ""}`;
-  return html`<div class="banner warn" data-live="untrusted" role="note">⚠ ${th("Untrusted content from the internet came in: {where}. Its text went to the agents as data, not instructions; effects — a PR, a comment, a push — wait for a person to approve the run's artifact.", { where })}${held}</div>`;
+        })
+      : th(
+          "Nothing waits for you now: a PR, a comment or a push will go out only after you approve the run's document at its gate.",
+        );
+  return html`<div class="banner warn" data-live="untrusted" role="note">⚠ ${th("Untrusted content from the internet came in: {where}. Its text went to the agents as data, not instructions.", { where })} ${now}</div>`;
 }
 
 /** The new run's line: where it came from and what it brought. */
