@@ -66,7 +66,7 @@ export async function readStoryTasks(
 export function storyTasksText(doc: StoryTasksDoc): string {
   return [
     `## Jira tasks of the Story ${doc.story}`,
-    "Each subtask is one of these tasks: set its `issue` to the key of the task of its service's side (a backend service — the back/middle task, a frontend — the front task). A service with no task of its side here: leave `issue` empty.",
+    "Their texts and the pages they link are in the sources input, already read: do not read them again. Each subtask is one of these tasks: set its `issue` to the key of the task of its service's side (a backend service — the back/middle task, a frontend — the front task). A service with no task of its side here: leave `issue` empty.",
     ...doc.tasks.map(
       (t) =>
         `- ${t.key}${t.type ? ` (${t.type})` : ""}${t.side ? ` — ${t.side}` : ""}${t.summary ? `: ${t.summary}` : ""}`,

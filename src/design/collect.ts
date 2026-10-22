@@ -1,3 +1,4 @@
+import { readStoryTasks } from "../app/storyTasks.ts";
 import type { GraphNode } from "../core/capabilities/contracts.ts";
 import { repoIdOf } from "../knowledge/graph/update.ts";
 import type { DeterministicTool } from "../orchestration/executors.ts";
@@ -8,6 +9,9 @@ import { figmaLinksIn } from "./figma.ts";
 
 /** How far the step goes without a model: issues named by the task, their pages, the frames found. */
 export const DESIGN_LIMITS = { issues: 3, pages: 6, frames: 8 } as const;
+/** A Story's own issues read besides the task's, and pages more for what they link. */
+const STORY_ISSUES = 8;
+const STORY_PAGES = 8;
 
 /** Issues, pages and code searches read at once; Figma frames at once (its API limits the rate). */
 const READS_AT_ONCE = 4;
@@ -58,13 +62,31 @@ export const collectSources: DeterministicTool = async (ctx, args) => {
   const available = new Set(ctx.tools.list().map((d) => d.name));
 
   const sources: Array<{ from: string; text: string }> = [{ from: "the task", text: ctx.run.task }];
-  const keys = [...new Set(ctx.run.task.match(/\b[A-Z][A-Z0-9]+-\d+\b/g) ?? [])].slice(0, limits.issues);
+  const named = [...new Set(ctx.run.task.match(/\b[A-Z][A-Z0-9]+-\d+\b/g) ?? [])].slice(0, limits.issues);
+  // a task that is a Story (or in one): the Story and its tasks read here too, with the pages they link —
+  // by code, side by side; the agent gets them as read (pilot: the research read them itself, one tool
+  // call after another — 17 of its steps, and the step took 14 minutes instead of 6)
+  const story = available.has("jira.get")
+    ? await readStoryTasks(ctx.runtime, ctx.run.task, async (name, a) => {
+        const r = await ctx.tools.invoke(name, a);
+        return { ok: r.ok, text: r.truncated && r.fullRef ? ctx.runtime.blobs.getText(r.fullRef) : r.text };
+      }).catch(() => undefined)
+    : undefined;
+  const ofStory = story
+    ? [story.story, ...story.tasks.map((t) => t.key)].filter((k) => !named.includes(k)).slice(0, STORY_ISSUES)
+    : [];
+  const keys = [...named, ...ofStory];
+  if (ofStory.length > 0) limits.pages += STORY_PAGES;
   // reads side by side (a few at a time), kept in the order asked
   if (available.has("jira.get"))
     for (const [i, r] of (
       await inTurns(keys, READS_AT_ONCE, (key) => ctx.tools.invoke("jira.get", { key }))
     ).entries())
-      if (r.ok) sources.push({ from: `issue ${keys[i]}`, text: withoutHead(r.text) });
+      if (r.ok)
+        sources.push({
+          from: `issue ${keys[i]}${story && ofStory.includes(keys[i] as string) ? (keys[i] === story.story ? " (the Story)" : ` (a task of the Story ${story.story})`) : ""}`,
+          text: withoutHead(r.text),
+        });
   const pages = [
     ...new Set(
       sources.flatMap((s) =>

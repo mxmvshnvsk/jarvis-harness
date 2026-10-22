@@ -149,3 +149,61 @@ describe("the Story's Jira tasks for a task across services", () => {
     ).toBeUndefined();
   });
 });
+
+describe("the sources of a Story's task across services", () => {
+  it("the Story's tasks read with the task, and the pages they link: the agent gets them as read", async () => {
+    const { testRuntime, createRun } = await import("../helpers/engine.ts");
+    const { BUILTIN_TOOLS } = await import("../../src/orchestration/tools/builtin.ts");
+    sb.write("home/.jarvis/config.yaml", "version: 1\nactor: { id: me@corp }\n");
+    sb.write(
+      "project/.jarvis/project.yaml",
+      'version: 1\nrelatedWork:\n  story:\n    types: [Story, User Story]\n    includes: ["is parent task of"]\n    includedIn: ["is subtask of"]\n',
+    );
+    const rt = await testRuntime(sb);
+    try {
+      const run = createRun(rt, "sdd-cross", "ABC-21 Remove the gift");
+      const asked: string[] = [];
+      const issues: Record<string, unknown> = {
+        "ABC-21": STORY,
+        "ABC-19": {
+          key: "ABC-19",
+          fields: {
+            summary: "Remove the fields",
+            description: "the API: https://wiki.example.com/pages/viewpage.action?pageId=55550001",
+          },
+        },
+        "ABC-17": { key: "ABC-17", fields: { summary: "Remove the banner", description: "the layout" } },
+      };
+      const out = await (
+        BUILTIN_TOOLS["sources.collect"] as never as (c: unknown, a: unknown) => Promise<{ status: string }>
+      )(
+        {
+          run,
+          runtime: rt,
+          step: { id: "sources" },
+          iteration: 1,
+          workspace: { ref: run.workspace },
+          tools: {
+            list: () => [{ name: "jira.get" }, { name: "confluence.get" }],
+            invoke: async (name: string, a: Record<string, unknown>) => {
+              asked.push(`${name} ${String(a.key ?? a.id)}`);
+              return name === "jira.get"
+                ? { ok: true, text: `[jira.get] ok\n${JSON.stringify(issues[String(a.key)] ?? {})}` }
+                : { ok: true, text: `[confluence.get] ok\n{"title":"Orders API","body":"POST /orders"}` };
+            },
+          },
+        },
+        {},
+      );
+      expect(out.status).toBe("success");
+      expect(asked).toContain("jira.get ABC-19");
+      expect(asked).toContain("jira.get ABC-17");
+      expect(asked).toContain("confluence.get 55550001");
+      const text = rt.artifacts.text(rt.artifacts.listLatest(run.id, "sources")[0] as never);
+      expect(text).toContain("ABC-19 (a task of the Story ABC-21)");
+      expect(text).toContain("Orders API");
+    } finally {
+      await rt.close();
+    }
+  });
+});

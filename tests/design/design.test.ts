@@ -248,7 +248,8 @@ ${extra.yaml ?? ""}
     const calls = runtime.events
       .list({ runId: run.run.id, kind: "tool.call" })
       .map((e) => e.payload?.capability);
-    expect(calls).toEqual(["jira.get", "confluence.get", "figma.get", "figma.get"]);
+    // the first read asks whether the task is in a Story (its links); then the issue as the agents get it
+    expect(calls).toEqual(["jira.get", "jira.get", "confluence.get", "figma.get", "figma.get"]);
     // the issue and its page as read: an input of the agents, so they do not read them again
     const sources = runtime.artifacts.listLatest(run.run.id, "sources")[0];
     expect(sources?.provenance).toMatchObject({ kind: "tool", capability: "sources.collect" });
@@ -257,7 +258,7 @@ ${extra.yaml ?? ""}
     expect(read).toContain("(77770077)");
     expect(read).not.toContain("[jira.get] ok");
     // the egress exception is on the record of the frame calls
-    expect(runtime.events.list({ runId: run.run.id, kind: "tool.call" })[2]?.payload).toMatchObject({
+    expect(runtime.events.list({ runId: run.run.id, kind: "tool.call" })[3]?.payload).toMatchObject({
       egressException: "frames of the team's designs",
     });
   });
@@ -393,6 +394,6 @@ ${extra.yaml ?? ""}
     expect(runtime.artifacts.listLatest(run.run.id, "sources")).toHaveLength(1);
     expect(
       runtime.events.list({ runId: run.run.id, kind: "tool.call" }).map((e) => e.payload?.capability),
-    ).toEqual(["jira.get", "confluence.get"]);
+    ).toEqual(["jira.get", "jira.get", "confluence.get"]);
   });
 });
