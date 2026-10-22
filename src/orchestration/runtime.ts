@@ -665,7 +665,8 @@ export class LocalWorkflowEngine {
   private roundUnaffordable(run: Run, from: string, to: string): SuspendRun | undefined {
     const models = this.rt.loaded.config.models;
     const cost = roundCostOf(
-      this.rt.events.list({ runId: run.id, limit: 100_000 }),
+      // the step starts and model calls only: on every back edge, every event of the run was read
+      this.rt.events.list({ runId: run.id, kinds: ["step.start", "model.call"], limit: 1_000_000 }),
       this.workflow(run.workflow),
       { from, to },
       (modelId) => models[modelId]?.quotaPool ?? `model:${modelId}`,

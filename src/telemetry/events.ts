@@ -101,6 +101,14 @@ export class SqliteEventStore implements EventSink {
     return row.seq ?? 0;
   }
 
+  /** How many events of a run (of a kind) there are: a count, not the rows read and parsed. */
+  count(options: { runId: string; kind?: string }): number {
+    const row = this.db
+      .prepare(`SELECT COUNT(*) AS n FROM events WHERE run_id = ?${options.kind ? " AND kind = ?" : ""}`)
+      .get(...(options.kind ? [options.runId, options.kind] : [options.runId])) as { n: number };
+    return row.n;
+  }
+
   /**
    * Events after `afterSeq`, oldest first (used by `status --watch` and the TUI). `latest`: the last
    * `limit` of them rather than the first — still returned oldest first.
@@ -110,6 +118,8 @@ export class SqliteEventStore implements EventSink {
       runId?: string;
       afterSeq?: number;
       kind?: string;
+      /** Several kinds at once (a run's step starts and model calls, not its every event). */
+      kinds?: readonly string[];
       since?: string;
       limit?: number;
       latest?: boolean;
@@ -124,6 +134,10 @@ export class SqliteEventStore implements EventSink {
     if (options.kind) {
       clauses.push("kind = ?");
       params.push(options.kind);
+    }
+    if (options.kinds && options.kinds.length > 0) {
+      clauses.push(`kind IN (${options.kinds.map(() => "?").join(", ")})`);
+      params.push(...options.kinds);
     }
     if (options.since) {
       clauses.push("ts >= ?");

@@ -642,7 +642,7 @@ export async function runsPage(
     // the model calls of the rows shown only: counting them is a query per run
     runs: matching.slice((pageNo - 1) * size, pageNo * size).map((run) => ({
       run,
-      modelCalls: runtime.events.list({ runId: run.id, kind: "model.call", limit: 1_000_000 }).length,
+      modelCalls: runtime.events.count({ runId: run.id, kind: "model.call" }),
       tookMs: Math.max(0, Date.parse(run.updatedAt) - Date.parse(run.createdAt)),
     })),
     query,

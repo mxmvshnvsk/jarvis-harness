@@ -1211,6 +1211,15 @@ export const SCRIPT = `
     }
   }
 
+  // a busy run writes events many times a second: the page follows at most every 2 s (each render
+  // reads the whole run on the server, and a click waits behind them there)
+  let lastRefresh = 0;
+  let soonTimer;
+  const soon = () => {
+    if (soonTimer) return;
+    const wait = Math.max(0, lastRefresh + 2000 - Date.now());
+    soonTimer = setTimeout(() => { soonTimer = undefined; lastRefresh = Date.now(); refresh(); }, wait);
+  };
   if (window.EventSource) {
     const runId = body.dataset.run;
     const source = new EventSource('/live' + (runId ? '?run=' + encodeURIComponent(runId) : ''));
@@ -1220,7 +1229,7 @@ export const SCRIPT = `
     source.addEventListener('journal', (e) => {
       let data = {};
       try { data = JSON.parse(e.data); } catch {}
-      if (!runId || (data.runs || []).includes(runId)) refresh();
+      if (!runId || (data.runs || []).includes(runId)) soon();
       clearTimeout(modelsSoon);
       modelsSoon = setTimeout(() => { refreshModels(); checkWaiting(); }, 1000);
     });

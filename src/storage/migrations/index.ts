@@ -290,6 +290,17 @@ CREATE TABLE mcp_calls (
 CREATE INDEX mcp_calls_server_ts ON mcp_calls(server, ts);
 `,
   },
+  {
+    version: 9,
+    name: "events_run_kind_seq",
+    sql: `
+-- A run's events of a kind in order (events.list: seq > ? ORDER BY seq): the planner kept taking
+-- events_kind(kind, seq) over events_run_kind and scanned that kind for every run (pilot UI: 2.6 s a
+-- page at 300 runs). With seq in the index it serves both the order and the run.
+DROP INDEX events_run_kind;
+CREATE INDEX events_run_kind_seq ON events(run_id, kind, seq);
+`,
+  },
 ];
 
 export const LATEST_SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]?.version ?? 0;

@@ -30,7 +30,16 @@ const MARKER =
 const SKIP = /(^|\/)(node_modules|\.git|\.jarvis|dist|coverage|\.pnpm-store)(\/|$)/;
 const MAX_BYTES = 2 * 1024 * 1024;
 
+/**
+ * The files that may hold a marker: those git finds the word in, tracked or not (ignored ones aside).
+ * Reading every file of the repository took ~0.4 s on 30k files, on every apply and every PR (pilot).
+ */
 async function listFiles(workspace: string): Promise<string[]> {
+  const found = await git(["grep", "-l", "-z", "-I", "--untracked", "-F", "REVIEW"], workspace);
+  // 1: nothing found; another code (not a repository, an old git): every file, as before
+  if (found.code === 1) return [];
+  if (found.code === 0)
+    return [...new Set(found.stdout.split("\0").filter((f) => f && !SKIP.test(f)))].sort();
   const tracked = await git(["ls-files", "-z"], workspace);
   const untracked = await git(["ls-files", "-z", "--others", "--exclude-standard"], workspace);
   const all = new Set<string>();

@@ -68,18 +68,33 @@ export function findingKey(issue: string): string | undefined {
   return createHash("sha256").update(normalized).digest("hex").slice(0, 12);
 }
 
+/**
+ * A review version's findings as read once: a version never changes, and every review of a run read
+ * every version of every run of the repository again (pilot: 0.7 s before the gate at 300 runs).
+ */
+const readFindings = new Map<string, Finding[] | null>();
+const READ_FINDINGS_MAX = 20_000;
+
 /** Every finding of every review version of a run (a review that went round has a version per round). */
 function occurrencesOf(runtime: Runtime, run: Run): Occurrence[] {
   const out: Occurrence[] = [];
   for (const latest of runtime.artifacts.listLatest(run.id, "review")) {
     for (const review of runtime.artifacts.versions(latest.artifactId)) {
-      let findings: Finding[] = [];
-      try {
-        const doc = JSON.parse(runtime.artifacts.text(review)) as { findings?: unknown };
-        findings = Array.isArray(doc.findings) ? (doc.findings as Finding[]) : [];
-      } catch {
-        continue; // not a review document
+      const id = `${review.artifactId}@${review.version}`;
+      let known = readFindings.get(id);
+      if (known === undefined) {
+        try {
+          const doc = JSON.parse(runtime.artifacts.text(review)) as { findings?: unknown };
+          known = Array.isArray(doc.findings) ? (doc.findings as Finding[]) : [];
+        } catch {
+          known = null; // not a review document
+        }
+        if (readFindings.size >= READ_FINDINGS_MAX) readFindings.clear();
+        readFindings.set(id, known);
       }
+      if (known === null) continue;
+      const findings = known;
+      if (findings.length === 0) continue;
       for (const f of findings) {
         if (typeof f?.issue !== "string" || !f.issue.trim()) continue;
         out.push({
