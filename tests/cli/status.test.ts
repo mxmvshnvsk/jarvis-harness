@@ -146,6 +146,26 @@ describe("jarvis status", () => {
     expect(all.out).toContain("CANCELLED");
   });
 
+  it("a gateway that reports no cache: Jarvis's estimate, marked as one", async () => {
+    const loaded = await loadConfig({ cwd: sb.project, homeDir: sb.home, env: {} });
+    const rt = createRuntime(loaded, { env: {} });
+    rt.events.emit({
+      kind: "model.call",
+      runId,
+      stepId: "spec",
+      payload: {
+        modelId: "flash",
+        promptTokens: 1000,
+        cachedTokens: 0,
+        cachedEstimated: 900,
+        outputTokens: 10,
+      },
+    });
+    rt.close();
+    const r = await jarvis(["status", runId.slice(4, 12)]);
+    expect(r.out).toContain("2 calls, 1100 prompt (≈ 920 cached, estimated: the gateway reports none)");
+  });
+
   it("shows a RUNNING run whose process is gone as such, and cancels it at once (pilot: Ctrl-C)", async () => {
     const loaded = await loadConfig({ cwd: sb.project, homeDir: sb.home, env: {} });
     const rt = createRuntime(loaded, { env: {} });

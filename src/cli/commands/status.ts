@@ -227,7 +227,7 @@ export function renderDetail(ctx: CliContext, d: RunDetail, now: Date, eventLimi
 
   out.line();
   out.line(
-    `${st.heading("tokens")}     ${d.tokens.calls} calls, ${d.tokens.promptTokens} prompt ${st.muted(`(${d.tokens.cachedTokens} cached)`)}, ${d.tokens.outputTokens} output, ${d.tokens.retries > 0 ? st.warn(`${d.tokens.retries} retries`) : `${d.tokens.retries} retries`}`,
+    `${st.heading("tokens")}     ${d.tokens.calls} calls, ${d.tokens.promptTokens} prompt ${st.muted(`(${d.tokens.cachedEstimated ? "≈ " : ""}${d.tokens.cachedTokens} cached${d.tokens.cachedEstimated ? ", estimated: the gateway reports none" : ""})`)}, ${d.tokens.outputTokens} output, ${d.tokens.retries > 0 ? st.warn(`${d.tokens.retries} retries`) : `${d.tokens.retries} retries`}`,
   );
 
   if (d.steps.length > 0) {
@@ -445,7 +445,7 @@ export function renderSummary(
   const t = d.tokens;
   if (t.calls > 0)
     out.line(
-      `${f("model")}${t.calls} calls ${st.muted("·")} in ${kilo(t.promptTokens)} ${st.muted(`(${kilo(t.cachedTokens)} cached)`)} ${st.muted("·")} out ${kilo(t.outputTokens)}${t.retries > 0 ? ` ${st.muted("·")} ${st.warn(`${t.retries} retries`)}` : ""}`,
+      `${f("model")}${t.calls} calls ${st.muted("·")} in ${kilo(t.promptTokens)} ${st.muted(`(${t.cachedEstimated ? "≈ " : ""}${kilo(t.cachedTokens)} cached)`)} ${st.muted("·")} out ${kilo(t.outputTokens)}${t.retries > 0 ? ` ${st.muted("·")} ${st.warn(`${t.retries} retries`)}` : ""}`,
     );
   d.artifacts
     .filter((a) => a.type !== "project-capabilities")

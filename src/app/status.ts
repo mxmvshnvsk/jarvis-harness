@@ -142,12 +142,15 @@ export function runDetail(runtime: Runtime, run: Run, now: Date = new Date()): R
     .reduce<RunTokens>(
       (acc, e) => {
         const p = (e.payload ?? {}) as Record<string, number>;
+        // a gateway that reports no cache: Jarvis's estimate from the prompt shared with the call before
+        const estimated = !p.cachedTokens && (p.cachedEstimated ?? 0) > 0;
         return {
           calls: acc.calls + 1,
           promptTokens: acc.promptTokens + (p.promptTokens ?? 0),
-          cachedTokens: acc.cachedTokens + (p.cachedTokens ?? 0),
+          cachedTokens: acc.cachedTokens + (p.cachedTokens || p.cachedEstimated || 0),
           outputTokens: acc.outputTokens + (p.outputTokens ?? 0),
           retries: acc.retries + (p.retries ?? 0),
+          ...(acc.cachedEstimated || estimated ? { cachedEstimated: true } : {}),
         };
       },
       { calls: 0, promptTokens: 0, cachedTokens: 0, outputTokens: 0, retries: 0 },
