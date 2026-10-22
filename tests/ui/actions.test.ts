@@ -161,6 +161,53 @@ async function parked() {
   return { run, spec, short: run.id.slice(4, 12) };
 }
 
+describe("the steps as they went", () => {
+  it("a gate that sent the work back is not a pass; a step the run left unfinished is stopped, not done", async () => {
+    const { run } = await parked();
+    // the person sent the spec back: the gate's round ends with request_changes, the work goes to write#2
+    rt.events.emit({
+      kind: "step.finish",
+      runId: run.id,
+      stepId: "approve",
+      payload: { stepId: "approve", status: "success", outcome: "request_changes" },
+    });
+    rt.events.emit({
+      kind: "workflow.loop",
+      runId: run.id,
+      payload: { edge: "approve->write#request_changes", iteration: 1, max: 2 },
+    });
+    rt.events.emit({
+      kind: "step.start",
+      runId: run.id,
+      stepId: "write",
+      iteration: 2,
+      payload: { stepId: "write", iteration: 2 },
+    });
+    rt.runs.transition(run.id, "RUNNING");
+    rt.runs.update(run.id, { currentStep: "write", currentIteration: 2 });
+    rt.runs.acquireLease(run.id, "cli:host:1", 60_000);
+    const { runPage } = await import("../../src/ui/model.ts");
+    const { runContent } = await import("../../src/ui/pages.ts");
+    const status = async () =>
+      Object.fromEntries(
+        (await runPage(rt, createEngine(rt), rt.runs.get(run.id) as never, { homeDir: sb.home })).steps.map(
+          (s) => [s.id, s.status],
+        ),
+      );
+    expect(await status()).toEqual({ write: "running", approve: "returned" });
+    const body = runContent(
+      await runPage(rt, createEngine(rt), rt.runs.get(run.id) as never, { homeDir: sb.home }),
+      Date.now(),
+    ).value;
+    expect(body).toMatch(/<li class="step returned">\n<span class="ic warn" aria-hidden="true">↺<\/span>/);
+    expect(body).toContain("sent the work back to write 1/2 — request_changes");
+    // Ctrl-C in write#2: the process is gone, the step did not finish — not «done» by its first round
+    rt.runs.acquireLease(run.id, "cli:host:1", -1000);
+    rt.runs.transition(run.id, "SUSPENDED");
+    expect((await status()).write).toBe("stopped");
+  });
+});
+
 describe("deciding on the page", () => {
   it("Accept records the decision with the CLI's actor and channel ui; the run waits for `jarvis continue`", async () => {
     const { run, spec, short } = await parked();

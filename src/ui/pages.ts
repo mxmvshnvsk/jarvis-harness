@@ -830,10 +830,12 @@ function stepSkillsHtml(k: StepSkills): Html {
 function stepRow(s: StepRow, now: number, plan?: PlanProgress): Html {
   const icon = {
     done: ["✓", "ok"],
+    returned: ["↺", "warn"],
     failed: ["✗", "bad"],
     skipped: ["–", "muted"],
     running: ["◌", "info"],
     waiting: ["⏸", "warn"],
+    stopped: ["⏸", "muted"],
     pending: ["·", "muted"],
   }[s.status];
   const r = s.last;
@@ -882,6 +884,7 @@ function stepRow(s: StepRow, now: number, plan?: PlanProgress): Html {
     notes.push(s.paused ? t("paused · waits for the quota window") : t("waits for you"));
   if (s.status === "running")
     notes.push(plan ? `${t("running now")} · ${t("plan {at}", { at: planAt(plan) })}` : t("running now"));
+  if (s.status === "stopped") notes.push(t("stopped before it finished"));
   const took =
     s.status === "running" && s.startedAt
       ? ticking(now - Date.parse(s.startedAt))

@@ -143,6 +143,7 @@ export const RU: Readonly<Record<string, string>> = {
   "paused · waits for the quota window": "пауза · ждёт окно квоты",
   "waits for you": "ждёт вас",
   "running now": "идёт сейчас",
+  "stopped before it finished": "остановлен, не закончив",
   Steps: "Шаги",
 
   // ---- a used-up loop

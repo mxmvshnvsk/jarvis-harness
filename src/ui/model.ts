@@ -696,7 +696,11 @@ export interface StepRow {
   readonly id: string;
   /** A child of a composite step (verify's tests, standards…). */
   readonly child: boolean;
-  readonly status: "done" | "failed" | "skipped" | "running" | "waiting" | "pending";
+  /**
+   * `returned` — its last round sent the work back (a gate's Send back, a review's defects): done, but
+   * not a pass; `stopped` — started and not finished, the run no longer working (Ctrl-C, a pause, a cancel).
+   */
+  readonly status: "done" | "returned" | "failed" | "skipped" | "running" | "waiting" | "stopped" | "pending";
   /** Waiting for a quota window or a model, not for a person. */
   readonly paused?: boolean;
   /** The last finished round of the step. */
@@ -1479,18 +1483,27 @@ export async function runPage(
     const all = reports.get(id) ?? [];
     const last = all.at(-1);
     const inFlight = started.has(id) && !finished.has(id);
+    // the last round's outcome took a back edge: it sent the work back, it did not pass
+    const sentBack = (() => {
+      const l = loops.get(id)?.at(-1);
+      return !!last?.outcome && l?.outcome === last.outcome;
+    })();
     const status: StepRow["status"] =
       run.currentStep === id && (run.state === "WAITING_HUMAN" || run.state === "WAITING_BUDGET")
         ? "waiting"
         : inFlight && run.state === "RUNNING"
           ? "running"
-          : !last
-            ? "pending"
-            : last.status === "skipped"
-              ? "skipped"
-              : last.status === "success"
-                ? "done"
-                : "failed";
+          : inFlight
+            ? "stopped"
+            : !last
+              ? "pending"
+              : last.status === "skipped"
+                ? "skipped"
+                : last.status === "success"
+                  ? sentBack
+                    ? "returned"
+                    : "done"
+                  : "failed";
     const at = started.get(id);
     return {
       id,
