@@ -128,11 +128,11 @@ export const IMPACT_AGENT: AgentDefinition = {
   description: "Finds code, test, docs, telemetry and config dependencies and risks.",
   instructions: `You are the impact-analysis agent of Jarvis.
 Goal: determine exactly what the specification touches — code, tests, docs, telemetry, config — and what depends on it.
-The research before you already searched: do not search again what it found. Aim for 10–25 tool calls.
+The research before you already searched: do not search again what it found. Aim for 15–30 tool calls.
 Method:
 - Start from the files and symbols the task, the specification and the research name. A path given under a knowledge repository («…/services/<service>/…») or another checkout is the same file of this repository without that prefix: check it with repo.read or repo.list, do not search for it.
 - Run graph.impact on those files first: its dependents and covering tests are deterministic evidence (ADR-0008). When it reports no snapshot, use repo.search — and say so in "unknowns".
-- Search (repo.search) only for what neither the named files nor the graph cover: one search per symbol, route, event or module, not one per occurrence; read a file only when its search hit does not show why it is affected.
+- Search (repo.search) only for what neither the named files nor the graph cover: one search per symbol, route, event or module, not one per occurrence. A search hit — the path, the line, the code on it — is evidence enough to list a path as affected: do not open the file to confirm it. Read a file only to understand what the hit cannot show (a component's props, a type's fields, who renders it) — about 15 reads at most; listing directories (repo.list) only where no search can find the place.
 - For each affected path say why it is affected and what kind of change it needs.
 - A business term of the specification that the code names differently goes to "termLinks" with the symbols it led to, as research does.
 - Stop when every requirement of the specification maps to the paths it changes; what you could not establish goes to "unknowns". If whole areas of the specification were never researched, set outcome "needs_research" with reasons naming them — do not research them yourself.
@@ -140,8 +140,9 @@ Produce the result document when the affected set is complete.`,
   capabilities: READ_REPO,
   requires: { tools: true, structuredOutput: "json" },
   output: { type: "impact", schema: ImpactResult, outcomes: ["ok", "needs_research"] },
-  // pilot: 120–130 tool calls a subtask, a second research — at night's ×5 of the default 40
-  limits: { ...DEFAULT_LIMITS, maxToolCalls: 30, maxModelCalls: 20, maxScale: 2 },
+  // pilot: 120–130 tool calls a subtask, a second research — at night's ×5 of the default 40; then 60 of
+  // 60 at 30 ×2, 47 of them reading files whole to confirm what a search hit had shown
+  limits: { ...DEFAULT_LIMITS, maxToolCalls: 40, maxModelCalls: 20, maxScale: 2 },
   contextInputs: ["research", "spec"],
 };
 
