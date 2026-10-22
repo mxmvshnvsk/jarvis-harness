@@ -52,6 +52,11 @@ export interface AgentDefinition<T = unknown> {
   readonly uncached?: { readonly baseChars?: number; readonly workingSet?: number };
   /** Where the agent may write (globs); without — wherever its capabilities and the path policy allow. */
   readonly writes?: readonly string[];
+  /**
+   * The outcome as the document's own verdict says it: a model that wrote the verdict and forgot the
+   * outcome (default "ok") sent a fix_required review to the approval (pilot). Undefined: as written.
+   */
+  readonly outcomeOf?: (doc: Record<string, unknown>) => string | undefined;
   /** `reasoning_effort` of the agent's calls (agents.<id>.reasoningEffort overrides it). */
   readonly reasoningEffort?: "none" | "low" | "medium" | "high";
 }

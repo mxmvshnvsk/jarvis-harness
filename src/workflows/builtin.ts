@@ -94,7 +94,7 @@ steps:
     agent: implementation
     onLimit: ask
     phase: implementation
-    inputs: [spec, plan, design, related-work]
+    inputs: [spec, plan, design, related-work, review]
     outputs: [implementation]
     transitions: { onSuccess: verify }
   # ADR-0019 §8 DAG: implementation → {tests, docs, telemetry} → review; children run in parallel,
@@ -138,7 +138,8 @@ steps:
     kind: agentic
     agent: review
     phase: review
-    inputs: [spec, plan, implementation, tests, docs, telemetry]
+    # its own previous version (a later round) and the checks: what to check first, what already ran
+    inputs: [spec, plan, implementation, tests, checks, docs, telemetry, review]
     outputs: [review]
     transitions:
       onSuccess: approve-impl
@@ -420,7 +421,7 @@ steps:
     agent: implementation
     onLimit: ask
     phase: implementation
-    inputs: [research, spec, design]
+    inputs: [research, spec, design, review]
     outputs: [implementation]
     transitions: { onSuccess: verify }
   - id: verify

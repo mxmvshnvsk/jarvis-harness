@@ -126,7 +126,16 @@ export async function failingOnBase(o: BaselineOptions): Promise<Set<string> | u
     }
     try {
       mkdirSync(join(o.cacheDir, "baseline", o.repoId), { recursive: true });
-      writeFileSync(file, JSON.stringify({ checked: { ...known.checked, [o.command]: byClass } }, null, 2));
+      // read again before writing: checks run side by side, and another command's answers written
+      // meanwhile were lost to the last writer (the next round ran their baseline again)
+      let now: BaselineFile = { checked: {} };
+      try {
+        if (existsSync(file)) now = JSON.parse(readFileSync(file, "utf8")) as BaselineFile;
+      } catch {
+        now = { checked: {} };
+      }
+      const merged = { ...(now.checked[o.command] ?? {}), ...byClass };
+      writeFileSync(file, JSON.stringify({ checked: { ...now.checked, [o.command]: merged } }, null, 2));
     } catch {
       // the answer still holds for this round
     }

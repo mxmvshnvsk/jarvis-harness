@@ -755,6 +755,10 @@ export class AgentRuntimeRunner implements AgentRunner {
           ...(generated.shortened ? { shortened: true } : {}),
         };
       }
+      // the outcome follows the verdict where the agent has one (review, review analysis)
+      const derived = def.outcomeOf?.(result.value as Record<string, unknown>);
+      if (derived && derived !== (result.value as AgentResultDoc).outcome)
+        result = { ...result, value: { ...(result.value as object), outcome: derived } };
       const doc = result.value as AgentResultDoc;
       const outcome = doc.outcome ?? "ok";
       if (outcome !== "ok" && !def.output.outcomes.includes(outcome)) {

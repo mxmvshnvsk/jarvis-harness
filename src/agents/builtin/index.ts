@@ -202,7 +202,8 @@ Produce the result document when the plan is implemented or when you are blocked
   output: { type: "implementation", schema: ImplementationResult, outcomes: ["ok", "needs_clarification"] },
   limits: { maxToolCalls: 80, maxModelCalls: 100, checkpointEvery: 5 },
   // the design frames on request: the spec carries their texts, and 73 KB went with every call (pilot)
-  contextInputs: ["spec", "plan", "related-work"],
+  // a later round: the review's findings with their files, lines and suggestions, not only a summary
+  contextInputs: ["spec", "plan", "related-work", "review"],
   baseChars: 100_000,
   // up to 100 calls, each re-sending the task message and the kept results where nothing is cached
   uncached: { baseChars: 60_000, workingSet: 40_000 },
@@ -242,6 +243,7 @@ export const REVIEW_AGENT: AgentDefinition = {
 Goal: decide whether the change satisfies the specification and the project's conventions.
 Method:
 - Read the diff of the workspace against its base (git.diff). Check every requirement's acceptance criteria against the code and the test results.
+- A previous review in your inputs means this is a later round: first check each of its findings — fixed or not, say which in the finding's issue — then look at the code changed for them. Do not raise new minor or nit findings on code the previous round already saw; a new blocker or major still counts.
 - The project's checks and the tests ran in verify before you, and passed: their results are in your inputs. You run no commands; judge the code.
 - Look for correctness, missing cases, convention violations, and scope creep. Each finding has a severity, a location and a concrete suggestion.
 - Check every standard in your context whose verification is semantic or hybrid; list the ones you checked in "standardsChecked" and report violations of required standards as findings with severity major or blocker.
@@ -252,9 +254,15 @@ Produce the result document.`,
   // verify ran the project's commands; a review that ran them again spent model calls on it (pilot)
   capabilities: [...READ_REPO],
   requires: { tools: true, structuredOutput: "json" },
-  output: { type: "review", schema: ReviewResult, outcomes: ["ok", "fix_required", "plan_wrong"] },
+  output: {
+    type: "review",
+    schema: ReviewResult,
+    outcomes: ["ok", "fix_required", "plan_wrong", "requirements_wrong"],
+  },
+  outcomeOf: (doc) =>
+    typeof doc.verdict === "string" ? (doc.verdict === "approve" ? "ok" : doc.verdict) : undefined,
   limits: DEFAULT_LIMITS,
-  contextInputs: ["spec", "plan", "implementation", "tests"],
+  contextInputs: ["spec", "plan", "implementation", "tests", "checks", "review"],
   baseChars: 100_000,
 };
 
@@ -282,6 +290,11 @@ Read the code around each comment before classifying; quote the comment id in ev
     schema: ReviewAnalysisResult,
     outcomes: ["ok", "fix_required", "spec_wrong", "requirements_wrong", "needs_clarification"],
   },
+  outcomeOf: (doc) =>
+    doc.outcome === "needs_clarification" || typeof doc.verdict !== "string"
+      ? undefined
+      : (({ fix_code: "fix_required", nothing_to_do: "ok" } as Record<string, string>)[doc.verdict] ??
+        doc.verdict),
   limits: DEFAULT_LIMITS,
   contextInputs: ["review-package", "spec", "requirements"],
 };
