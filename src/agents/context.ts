@@ -108,6 +108,9 @@ export function systemLayer(
     // whole prompt and takes its seconds, so the count of calls is the run's time
     "- Batch what is independent: every read, search or listing you already know you need goes into the same turn as parallel tool calls (up to 6 at once). One call per turn only when the next depends on its result.",
     "- Never invent file contents, APIs, tickets or test results. What you cannot verify is an unknown.",
+    // pilot: agents kept proposing to update the Confluence spec, and a person kept answering «no, code only»;
+    // Jarvis changing specs will be a feature of its own, with its options
+    "- The task changes code in the repositories, nothing else: pages and issues outside them — Confluence specifications, Jira issues, analytics tables — are read, never changed. Do not propose, plan or ask about updating them, and do not make it a requirement, a step or an open question. A page the change leaves out of date is at most one line in risks, for the analyst.",
     "- Secrets in tool output appear as [REDACTED:…]; never try to recover or guess them.",
     "- Tool calls that are denied by policy are final; do not retry them with other arguments.",
     "- Do not create scratch or probe files in the workspace: everything you write there becomes part of the change. Text files written with the tools end with a newline; do not try to fix line endings yourself.",
