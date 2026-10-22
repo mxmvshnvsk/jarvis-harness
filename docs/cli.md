@@ -1047,10 +1047,11 @@ Diff worktree run относительно базового коммита.
 Squash ветки run на текущую ветку основного репозитория одним коммитом; `// REVIEW:` маркеры удаляются
 (если `human.review.removeMarkersAfterApproval`).
 
-### `jarvis apply <run> --pr [--title <text>] [--target <branch>] [--yes]`
+### `jarvis apply <run> --pr [--title <text>] [--target <branch>] [--branch <name>] [--yes]`
 
 Доставка завершённого прогона pull request'ом (ADR-0003 §4): изменения прогона одним коммитом поверх его базы
-пушатся в `delivery.remote` (`origin`) веткой `jarvis/...`, PR открывается через MCP-сервер с `*.pr.create`
+пушатся в `delivery.remote` (`origin`) веткой по `delivery.branch` (иначе `jarvis/...`; `--branch` — своё
+имя), сообщение коммита и заголовок — по `delivery.commit` / `delivery.prTitle`, PR открывается через MCP-сервер с `*.pr.create`
 (профиль `bitbucket`). Push идёт вашим git — его credential helper или ssh-agent, токены в аргументы не
 попадают. Заголовок — `--title`, иначе заголовок спеки, иначе задача; описание — из спеки и реализации, со
 списком файлов и строкой «Prepared by Jarvis, run <id>.». `--target` — куда PR (иначе `delivery.target`,
@@ -1060,6 +1061,10 @@ Push и PR — эффекты в журнале (ADR-0002): повтор не п
 Ссылка на PR — в артефакте `pull-request`, в событии `run.delivered` и на странице прогона. При
 `delivery.pr: approve` команда показывает PR и спрашивает «Create this PR? [y/N]» (без терминала нужен `--yes`),
 одобрение записывается на вас; при `deny` — отказ с кодом 12. Нет сервера с PR — команда так и говорит.
+
+На странице прогона в `jarvis ui` — «Подготовить PR»: сначала карточка PR в том виде, в каком он уйдёт (ветка,
+цель, заголовок, описание, всё можно поправить), и только «Создать PR» на ней пушит и открывает. Имя ветки,
+которое git не примет, отклоняется до push.
 
 ### `jarvis gc [--days <n>] [--prune-branches]`
 

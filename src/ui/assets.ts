@@ -447,6 +447,12 @@ a.ref{text-decoration:none}a.ref code{color:var(--accent)}a.ref:hover code{text-
 .decide{display:flex;flex-direction:column;gap:8px;border-top:1px solid var(--line-soft);padding-top:16px}
 .decide textarea{width:100%;padding:8px 10px;border-radius:8px;resize:vertical;min-height:84px}
 .decide label{display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--muted)}
+.pr-card{display:flex;flex-direction:column;gap:12px;max-width:760px;padding:16px;border:1px solid var(--line);border-radius:var(--r-lg);background:var(--sunken)}
+.pr-card h3{margin:0;font-size:15px}
+.pr-card label{display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--muted)}
+.pr-card input,.pr-card textarea{padding:8px 10px;color:var(--ink)}
+.pr-card textarea{resize:vertical;font-family:var(--mono);font-size:13px}
+.pr-branches{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:flex-end}.pr-branches label{flex:1 1 240px;min-width:0}.pr-branches>span{padding-bottom:10px;color:var(--muted)}
 .decide .btn{width:100%}
 .versions{display:flex;flex-wrap:wrap;gap:6px;font-size:13px;align-items:center}
 .versions a,.versions span{padding:2px 8px;border-radius:6px;font-family:var(--mono)}

@@ -1499,10 +1499,20 @@ export const RU: Readonly<Record<string, string>> = {
   "Create PR": "Создать PR",
   "Approve and create PR": "Одобрить и создать PR",
   "the approval is recorded as yours": "одобрение запишется на вас",
-  "pushes the run's branch and opens a pull request through the MCP server, as {cmd}":
-    "пушит ветку прогона и открывает pull request через MCP-сервер, как {cmd}",
   "Pull request:": "Pull request:",
   Description: "Описание",
+  "Prepare PR": "Подготовить PR",
+  "shows the branch, target, title and description first; nothing is pushed yet":
+    "сначала покажет ветку, цель, заголовок и описание — ничего не пушится",
+  "The pull request as it will go out": "Pull request в том виде, в каком уйдёт",
+  Branch: "Ветка",
+  Into: "В ветку",
+  "{n} files": "файлов: {n}",
+  "one commit": "один коммит",
+  "pushes the branch and opens the pull request through the MCP server, as {cmd}":
+    "пушит ветку и открывает pull request через MCP-сервер, как {cmd}",
+  "The PR is prepared: check it below, change what is needed and create it":
+    "PR подготовлен: проверьте ниже, поправьте нужное и создайте",
   "PR opened": "Открыт PR",
   "No PR:": "PR не создан:",
   "Pushed the run's branch and opened the PR": "Ветка прогона запушена, PR открыт",

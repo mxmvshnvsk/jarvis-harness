@@ -46,7 +46,8 @@ import {
   deliverPr,
   PR_REQUEST,
   type PrRequest,
-  pendingPrRequest,
+  prDraftOf,
+  preparePr,
   prOf,
   prPolicy,
 } from "../app/deliver.ts";
@@ -536,6 +537,7 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServer>
       "no-request": html`<div class="banner bad">${t("No such contract change request, or it is decided already")}</div>`,
       "apply-failed": html`<div class="banner bad">${t("Not applied:")} ${r.url.searchParams.get("why") ?? t("see jarvis logs")}</div>`,
       "pr-created": html`<div class="banner ok">${t("Pushed the run's branch and opened the PR")}</div>`,
+      "pr-check": html`<div class="banner info">${t("The PR is prepared: check it below, change what is needed and create it")}</div>`,
       "pr-approve": html`<div class="banner info">${t("The project wants the PR approved first: check it below and approve it")}</div>`,
       "pr-failed": html`<div class="banner bad">${t("No PR:")} ${r.url.searchParams.get("why") ?? t("see jarvis logs")}</div>`,
       restored: html`<div class="banner ok">${t("The branch is back — apply it, or remove it again")}</div>`,
@@ -850,7 +852,7 @@ ${
     ? html`<form method="post" action="/runs/${encodeURIComponent(shortRunId(run.id))}/apply"><input type="hidden" name="t" value="${actions.token}"><div class="row"><button type="submit" class="btn primary">${th("Apply to {branch}", { branch: html`<code>${current}</code>` })}</button><span class="hint">${th("the run's changes as one commit on the branch checked out in the repository, as {cmd}; not pushed", { cmd: html`<code>jarvis apply</code>` })}</span></div></form>`
     : ""
 }
-${delivered ?? (actions && branchExists && run.state === "COMPLETED" && prPolicy(runtime) !== "deny" ? createPrHtml(run, actions.token, pendingPrRequest(runtime, run)?.request) : "")}
+${delivered ?? (actions && branchExists && run.state === "COMPLETED" && prPolicy(runtime) !== "deny" ? createPrHtml(run, actions.token, prDraftOf(runtime, run)?.request, prPolicy(runtime) === "approve") : "")}
 ${
   actions
     ? html`<form method="post" action="/runs/${encodeURIComponent(shortRunId(run.id))}/cleanup"><input type="hidden" name="t" value="${actions.token}">
@@ -2199,23 +2201,36 @@ ${candidateReviewHtml(c, run, run.workspace.repoRoot, actions, { back: `/runs/${
       }
     }
     if (m[2] === "pr") {
-      // as `jarvis apply --pr`: push the run's branch and open its PR (ADR-0003 §4); with
-      // `delivery.pr: approve` the first click shows the PR, «Approve and create PR» sends it
+      // as `jarvis apply --pr` (ADR-0003 §4): the first click prepares the PR and shows it on a card —
+      // branch, target, title, description, each editable; «Create PR» on the card pushes and opens
+      // it. With `delivery.pr: approve` that click is the person's approval of the PR as shown.
       if (run.state !== "COMPLETED") return redirect(r, `/runs/${short}?notice=not-ended`);
       if (run.workspace.mode !== "worktree") return redirect(r, `/runs/${short}?notice=no-checkout`);
       const who = await actor();
       if (!who) return redirect(r, `/runs/${short}?notice=actor`);
-      const pending = form.get("confirm") === "1" ? pendingPrRequest(runtime, run) : undefined;
-      if (pending)
-        recordDecision(runtime, run, {
-          actor: who,
-          artifact: pending.artifact,
-          type: PR_REQUEST,
-          decision: "approve",
-          channel: "ui",
-        });
+      const field = (name: string) => {
+        const v = form.get(name);
+        return typeof v === "string" && v.trim() ? { [name]: v.trim() } : {};
+      };
+      const edits = { ...field("source"), ...field("target"), ...field("title"), ...field("description") };
       try {
-        await deliverPr(runtime, run, { actor: who, channel: "ui" });
+        if (form.get("confirm") !== "1") {
+          await preparePr(runtime, run, edits);
+          return redirect(r, `/runs/${short}?notice=pr-check#checkout`);
+        }
+        const prepared = await preparePr(runtime, run, edits);
+        if (
+          prPolicy(runtime) === "approve" &&
+          !runtime.artifacts.isApproved(prepared.artifact.artifactId).approved
+        )
+          recordDecision(runtime, run, {
+            actor: who,
+            artifact: prepared.artifact,
+            type: PR_REQUEST,
+            decision: "approve",
+            channel: "ui",
+          });
+        await deliverPr(runtime, run, { actor: who, channel: "ui", ...edits });
         return redirect(r, `/runs/${short}?notice=pr-created#checkout`);
       } catch (error) {
         if (error instanceof DeliveryError && error.code === "approval")
@@ -2829,15 +2844,19 @@ function prLinkHtml(pr: Delivered): Html {
 }
 
 /**
- * «Create PR» next to Apply; with `delivery.pr: approve`, after the first click, the PR as it will go
- * out and «Approve and create PR».
+ * «Prepare PR» next to Apply; after it, the card of the PR as it will go out — the branch pushed, the
+ * target, the title and the description, each editable — and «Create PR». Nothing is pushed before.
+ * With `delivery.pr: approve` that click is the person's approval of the PR as shown.
  */
-function createPrHtml(run: Run, token: string, pending: PrRequest | undefined): Html {
+function createPrHtml(run: Run, token: string, draft: PrRequest | undefined, approve: boolean): Html {
   const action = `/runs/${encodeURIComponent(shortRunId(run.id))}/pr`;
-  if (pending)
-    return html`<form method="post" action="${action}" data-pr-request><input type="hidden" name="t" value="${token}"><input type="hidden" name="confirm" value="1">
-<p><b>${pending.title}</b> <span class="hint"><code>${pending.source}</code> → <code>${pending.target}</code></span></p>
-<details><summary>${t("Description")}</summary><pre style="white-space:pre-wrap">${pending.description}</pre></details>
-<div class="row"><button type="submit" class="btn primary">${t("Approve and create PR")}</button><span class="hint">${t("the approval is recorded as yours")}</span></div></form>`;
-  return html`<form method="post" action="${action}"><input type="hidden" name="t" value="${token}"><div class="row"><button type="submit" class="btn">${t("Create PR")}</button><span class="hint">${th("pushes the run's branch and opens a pull request through the MCP server, as {cmd}", { cmd: html`<code>jarvis apply --pr</code>` })}</span></div></form>`;
+  if (draft)
+    return html`<form method="post" action="${action}" class="pr-card" data-pr-request><input type="hidden" name="t" value="${token}"><input type="hidden" name="confirm" value="1">
+<h3>${t("The pull request as it will go out")}</h3>
+<div class="pr-branches"><label>${t("Branch")}<input type="text" name="source" value="${draft.source}" required spellcheck="false" class="mono"></label><span aria-hidden="true">→</span><label>${t("Into")}<input type="text" name="target" value="${draft.target}" required spellcheck="false" class="mono"></label></div>
+<label>${t("Title")}<input type="text" name="title" value="${draft.title}" required maxlength="200"></label>
+<label>${t("Description")}<textarea name="description" rows="8">${draft.description}</textarea></label>
+<p class="hint">${draft.workspace && draft.repo ? html`<code>${draft.workspace}/${draft.repo}</code> · ` : ""}${t("{n} files", { n: draft.files.length })} · ${t("one commit")} <code>${draft.commit.slice(0, 10)}</code></p>
+<div class="row"><button type="submit" class="btn primary">${approve ? t("Approve and create PR") : t("Create PR")}</button><span class="hint">${approve ? t("the approval is recorded as yours") : th("pushes the branch and opens the pull request through the MCP server, as {cmd}", { cmd: html`<code>jarvis apply --pr</code>` })}</span></div></form>`;
+  return html`<form method="post" action="${action}"><input type="hidden" name="t" value="${token}"><div class="row"><button type="submit" class="btn">${t("Prepare PR")}</button><span class="hint">${t("shows the branch, target, title and description first; nothing is pushed yet")}</span></div></form>`;
 }

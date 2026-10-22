@@ -272,6 +272,15 @@ describe("jarvis apply --pr", () => {
     expect(prs).toHaveLength(0);
   });
 
+  it("a branch name git does not take is refused before anything is pushed", async () => {
+    await setup();
+    const run = await completed();
+    await expect(
+      deliverPr(rt, run, { actor: ACTOR, channel: "cli", source: "feature/ABC 42..x" }),
+    ).rejects.toMatchObject({ code: "format" });
+    expect(prs).toHaveLength(0);
+  });
+
   it("a task in a Story goes into the Story's branch the run started from (relatedWork.story)", async () => {
     await setup();
     const run = await runOf();
@@ -561,15 +570,31 @@ describe("the run page: «Create PR» next to Apply", () => {
     const run = await completed();
     await serve();
     const short = shortRunId(run.id);
-    expect(await page(`/runs/${short}`)).toContain("Create PR");
-    expect(await page(`/runs/${short}`, "ru")).toContain("Создать PR");
+    expect(await page(`/runs/${short}`)).toContain("Prepare PR");
+    expect(await page(`/runs/${short}`, "ru")).toContain("Подготовить PR");
     // the form's token, as every run action
     expect((await post(`/runs/${short}/pr`, { t: "wrong" })).status).toBe(403);
-    const created = await post(`/runs/${short}/pr`, { t: ui.token });
+    // the first click shows the card: nothing pushed yet
+    const prepared = await post(`/runs/${short}/pr`, { t: ui.token });
+    expect(prepared.location).toContain("notice=pr-check");
+    const card = await page(`/runs/${short}`);
+    expect(card).toContain("The pull request as it will go out");
+    expect(card).toContain('name="source"');
+    expect(prs).toHaveLength(0);
+    // what the person changed on the card is what goes out
+    const created = await post(`/runs/${short}/pr`, {
+      t: ui.token,
+      confirm: "1",
+      source: "feature/ABC-42-totals",
+      title: "Order totals",
+    });
     expect(created.location).toContain("notice=pr-created");
+    expect((prs[0] as FakePr).args).toMatchObject({ source: "feature/ABC-42-totals", title: "Order totals" });
+    expect(remoteHead("feature/ABC-42-totals")).toMatch(/^[0-9a-f]{40}$/);
     const after = await page(`/runs/${short}`);
     expect(after).toContain("https://bitbucket.example/acme/orders-api/pull-requests/1");
     expect(after).not.toContain(">Create PR<");
+    expect(after).not.toContain(">Prepare PR<");
     expect(prs).toHaveLength(1);
   });
 
@@ -579,7 +604,7 @@ describe("the run page: «Create PR» next to Apply", () => {
     await serve();
     const short = shortRunId(run.id);
     const first = await post(`/runs/${short}/pr`, { t: ui.token });
-    expect(first.location).toContain("notice=pr-approve");
+    expect(first.location).toContain("notice=pr-check");
     const shown = await page(`/runs/${short}`);
     expect(shown).toContain("Approve and create PR");
     expect(shown).toContain("ABC-42: order totals");
@@ -607,7 +632,7 @@ describe("the run page: «Create PR» next to Apply", () => {
     await setup("delivery: { pr: deny }\n");
     const run = await completed();
     await serve();
-    expect(await page(`/runs/${shortRunId(run.id)}`)).not.toContain("Create PR");
+    expect(await page(`/runs/${shortRunId(run.id)}`)).not.toContain("Prepare PR");
   });
 });
 

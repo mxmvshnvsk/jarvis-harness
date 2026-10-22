@@ -500,11 +500,22 @@ export function buildProgram(options: RunOptions = {}): Command {
       "--target <branch>",
       "the branch the PR goes into (default: delivery.target, else the remote's default)",
     )
+    .option(
+      "--branch <name>",
+      "the branch the PR is pushed as (default: delivery.branch, else the run's own)",
+    )
     .option("-y, --yes", "delivery.pr: approve — approve the PR as shown without asking")
     .action(
       async (
         run: string,
-        opts: { message?: string; pr?: boolean; title?: string; target?: string; yes?: boolean },
+        opts: {
+          message?: string;
+          pr?: boolean;
+          title?: string;
+          target?: string;
+          branch?: string;
+          yes?: boolean;
+        },
       ) => {
         await runApply(ctxFor(), run, opts);
       },

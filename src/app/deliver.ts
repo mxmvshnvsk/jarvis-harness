@@ -130,6 +130,19 @@ export function pendingPrRequest(
   return { artifact, request: requestOf(runtime, artifact) };
 }
 
+/**
+ * The PR as it will go out, prepared and not sent yet: the card before the PR (branch, target, title,
+ * description), whatever the policy — a person sees what goes out before anything is pushed.
+ */
+export function prDraftOf(
+  runtime: Runtime,
+  run: Run,
+): { artifact: ArtifactVersion; request: PrRequest } | undefined {
+  if (prOf(runtime, run)) return undefined;
+  const artifact = runtime.artifacts.listLatest(run.id, PR_REQUEST)[0];
+  return artifact ? { artifact, request: requestOf(runtime, artifact) } : undefined;
+}
+
 export function requestOf(runtime: Runtime, artifact: ArtifactVersion): PrRequest {
   return JSON.parse(runtime.artifacts.text(artifact)) as PrRequest;
 }
@@ -170,7 +183,7 @@ export function prCapability(runtime: Runtime): Capability {
 export async function preparePr(
   runtime: Runtime,
   run: Run,
-  options: { title?: string; target?: string } = {},
+  options: { title?: string; target?: string; source?: string; description?: string } = {},
 ): Promise<{ artifact: ArtifactVersion; request: PrRequest }> {
   const ws = run.workspace;
   const branch = ws.branch;
@@ -215,16 +228,22 @@ export async function preparePr(
   try {
     title = (options.title?.trim() || headerOf(config, format, config.prTitle)).slice(0, 200);
     message = commitMessageOf(config, format);
-    source = branchOf(config, format) ?? branch;
+    source = options.source?.trim() || branchOf(config, format) || branch;
   } catch (error) {
     if (error instanceof FormatError) throw new DeliveryError("format", error.message);
     throw error;
   }
+  // a branch the person typed: one git takes (no spaces, no `..`, not ending in `.lock`)
+  if ((await git(["check-ref-format", "--branch", source], ws.repoRoot)).code !== 0)
+    throw new DeliveryError("format", `"${source}" is not a branch name git takes`);
+  const target = options.target?.trim();
+  if (target && (await git(["check-ref-format", "--branch", target], ws.repoRoot)).code !== 0)
+    throw new DeliveryError("format", `"${target}" is not a branch name git takes`);
   const commit = await squashed(runtime, run, base, branch, message);
   const coordinates = await repositoryOf(ws.repoRoot, remote);
   const request: PrRequest = {
     title,
-    description: descriptionOf(run, docs, files),
+    description: options.description?.trim() || descriptionOf(run, docs, files),
     source,
     // a task in a Story goes into the Story's branch the run started from (`relatedWork.story`)
     target:
@@ -263,6 +282,9 @@ export interface DeliverOptions {
   readonly channel: DeliveryChannel;
   readonly title?: string;
   readonly target?: string;
+  /** The branch pushed, as the person set it on the card before the PR. */
+  readonly source?: string;
+  readonly description?: string;
   /** The run's lease when the engine delivers; otherwise one is taken for the two effects. */
   readonly lease?: HeldLease;
 }
@@ -298,6 +320,8 @@ export async function deliverPr(runtime: Runtime, run: Run, options: DeliverOpti
   const { artifact, request } = await preparePr(runtime, run, {
     ...(options.title ? { title: options.title } : {}),
     ...(options.target ? { target: options.target } : {}),
+    ...(options.source ? { source: options.source } : {}),
+    ...(options.description ? { description: options.description } : {}),
   });
   const decision = runtime.artifacts.approvalsFor(artifact.artifactId, artifact.version)[0];
   if (decision && decision.decision !== "approve")

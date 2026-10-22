@@ -1157,6 +1157,8 @@ export interface ApplyOptions {
   readonly pr?: boolean;
   readonly title?: string;
   readonly target?: string;
+  /** The branch the PR is pushed as (`--branch`). */
+  readonly branch?: string;
   /** `delivery.pr: approve` without a terminal: the person approves the PR as shown. */
   readonly yes?: boolean;
 }
@@ -1214,6 +1216,7 @@ async function applyAsPr(
   const wanted = {
     ...(options.title ? { title: options.title } : {}),
     ...(options.target ? { target: options.target } : {}),
+    ...(options.branch ? { source: options.branch } : {}),
   };
   try {
     if (prPolicy(runtime) === "approve" && !prOf(runtime, run)) {
