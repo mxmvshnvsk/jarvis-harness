@@ -196,6 +196,9 @@ Produce the result document when the plan is implemented or when you are blocked
   baseChars: 100_000,
   // up to 100 calls, each re-sending the task message and the kept results where nothing is cached
   uncached: { baseChars: 60_000, workingSet: 40_000 },
+  // the plan decided the change: each call is an edit or a check, not a design (pilot: ~10k reasoning
+  // tokens before a one-line edit). agents.implementation.reasoningEffort overrides it
+  reasoningEffort: "low",
 };
 
 export const TEST_AGENT: AgentDefinition = {
