@@ -743,8 +743,11 @@ services:
   показывает, если найденное от него отличается («kept as set»). `--dry-run` только показывает;
 - библиотеки: `onboard` по файлам сборки, без модели, пишет `kind: library`, `publishes` и `tools.local.publish-local`
   репе, которую публикуют для других (Gradle с `maven-publish` и без приложения — `group:name` и
-  `publishToMavenLocal`; Maven без Spring Boot и не war — `groupId:artifactId` и `mvn install`; npm-пакет не
-  `private` с точкой входа — имя пакета и `npm pack`), а сервисам, в чьей сборке есть эти имена, — `uses`. В задаче на
+  `publishToMavenLocal`; Spring Boot starter — библиотека: приложением считается сборка с плагином
+  `org.springframework.boot`, если его `bootJar` не выключен, а не с Boot в зависимостях; Maven без Spring Boot и не war — `groupId:artifactId` и `mvn install`; npm-пакет не
+  `private` с точкой входа — имя пакета и `npm pack`), а сервисам, в чьей сборке есть эти имена, — `uses`
+  (сборка — все gradle-скрипты репы и её модулей, в том числе подключаемые вроде `libraries.gradle`, version
+  catalog, pom, package.json). В задаче на
   несколько сервисов сабтаск сервиса из `uses` библиотеки ждёт, пока её изменение примут и `publish-local` пройдёт в
   её копии, и получает в задаче новую версию ([workflows.md](workflows.md#граф-sdd-cross-задача-по-нескольким-сервисам-adr-0025-6)).
   `backend` и `frontend` — справочные, на поведение не влияют;

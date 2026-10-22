@@ -37,6 +37,35 @@ describe("a library, by its build", () => {
     expect(libraryOf(join(dir, "orders-api"))).toBeUndefined();
   });
 
+  it("a Spring Boot starter is a library: Boot in its dependencies, not its plugin (pilot)", () => {
+    write(
+      "common-starter/build.gradle",
+      [
+        "plugins {",
+        "  id 'java-library'",
+        "  id 'maven-publish'",
+        "  id 'io.spring.dependency-management' version '1.1.7'",
+        "}",
+        "group = 'com.example.common'",
+        'version = "local"',
+        "dependencies {",
+        "  api 'org.springframework.boot:spring-boot-starter-web'",
+        "  annotationProcessor 'org.springframework.boot:spring-boot-autoconfigure-processor'",
+        "}",
+      ].join("\n"),
+    );
+    write("common-starter/settings.gradle", "rootProject.name = 'common-starter'\n");
+    expect(libraryOf(join(dir, "common-starter"))?.publishes).toEqual(["com.example.common:common-starter"]);
+    // the plugin applied with its boot jar turned off: a library too; applied as is: an application
+    write(
+      "kit/build.gradle.kts",
+      'plugins {\n  id("org.springframework.boot")\n  `maven-publish`\n}\ntasks.bootJar { enabled = false }\n',
+    );
+    expect(libraryOf(join(dir, "kit"))).toBeDefined();
+    write("app/build.gradle", "apply plugin: 'org.springframework.boot'\napply plugin: 'maven-publish'\n");
+    expect(libraryOf(join(dir, "app"))).toBeUndefined();
+  });
+
   it("Maven: its own coordinates, not its parent's; mvn install", () => {
     write(
       "money/pom.xml",
@@ -75,6 +104,16 @@ describe("who uses it", () => {
     expect(usesOf(join(dir, "cat"), libs)).toEqual(["common-lib"]);
     expect(usesOf(join(dir, "web"), libs)).toEqual(["ui-kit"]);
     expect(usesOf(join(dir, "other"), libs)).toEqual([]);
+  });
+
+  it("a dependency kept in a Gradle script the build applies (pilot: libraries.gradle)", () => {
+    write("orders-api/build.gradle", "apply from: 'libraries.gradle'\n");
+    write(
+      "orders-api/libraries.gradle",
+      'ext.libs = [starter: "com.example.common:common-starter:$starterVersion"]\n',
+    );
+    const libs = new Map([["common-starter", ["com.example.common:common-starter"]]]);
+    expect(usesOf(join(dir, "orders-api"), libs)).toEqual(["common-starter"]);
   });
 
   it("the libraries of a map: what a person declared wins over the scan", () => {

@@ -27,11 +27,31 @@ const read = (file: string): string | undefined => {
 const first = (text: string | undefined, re: RegExp): string | undefined =>
   text ? (re.exec(text)?.[1] ?? undefined) : undefined;
 
+/**
+ * A Gradle build of an application: the Spring Boot plugin applied (its bootJar not turned off) or the
+ * application plugin. A Spring Boot starter names org.springframework.boot in its dependencies and is a
+ * library all the same (pilot: a common starter of the services was not found as one).
+ */
+function isApplication(build: string): boolean {
+  const boot =
+    /id\s*\(?\s*["']org\.springframework\.boot["']|apply\s*\(?\s*plugin\s*[:=]\s*["']org\.springframework\.boot["']|alias\s*\(\s*libs\.plugins\.spring\.?boot\s*\)/.test(
+      build,
+    );
+  const bootJarOff =
+    /bootJar\s*\{[^}]*enabled\s*=\s*false|bootJar\.enabled\s*=\s*false|named<BootJar>\("bootJar"\)\s*\{[^}]*enabled\s*=\s*false/.test(
+      build,
+    );
+  const application =
+    /^\s*application\s*\{|id\s*\(?\s*["']application["']|apply\s*\(?\s*plugin\s*[:=]\s*["']application["']/m.test(
+      build,
+    );
+  return (boot && !bootJarOff) || application;
+}
+
 function gradleLibrary(root: string): LibraryFacts | undefined {
   const build = read(join(root, "build.gradle.kts")) ?? read(join(root, "build.gradle"));
   if (!build || !/maven-publish/.test(build)) return undefined;
-  if (/org\.springframework\.boot|\bapplication\b\s*(\{|$)|id\s*\(?\s*["']application["']/m.test(build))
-    return undefined;
+  if (isApplication(build)) return undefined;
   const props = read(join(root, "gradle.properties"));
   const group =
     first(build, /^\s*group\s*=\s*["']([^"']+)["']/m) ?? first(props, /^\s*group\s*=\s*(\S+)\s*$/m);
@@ -85,13 +105,13 @@ export function libraryOf(root: string): LibraryFacts | undefined {
   return gradleLibrary(root) ?? mavenLibrary(root) ?? npmLibrary(root);
 }
 
-const BUILD_FILES = new Set([
-  "build.gradle",
-  "build.gradle.kts",
-  "pom.xml",
-  "package.json",
-  "libs.versions.toml",
-]);
+const BUILD_FILES = new Set(["pom.xml", "package.json", "libs.versions.toml"]);
+/**
+ * A build file: those above and every Gradle script — dependencies are often kept in one the build
+ * applies (`apply from: 'libraries.gradle'`; pilot: a service's use of a common starter not seen).
+ */
+const isBuildFile = (name: string): boolean =>
+  BUILD_FILES.has(name) || name.endsWith(".gradle") || name.endsWith(".gradle.kts");
 const SKIP = new Set(["node_modules", ".git", "build", "target", "dist", ".gradle", "src"]);
 
 /** The build files of a repository: at its root and in its modules, three levels down at most. */
@@ -105,7 +125,7 @@ function buildFiles(root: string): string[] {
       return;
     }
     for (const name of names) {
-      if (BUILD_FILES.has(name)) out.push(join(dir, name));
+      if (isBuildFile(name)) out.push(join(dir, name));
       else if (depth < 3 && !SKIP.has(name) && !name.startsWith(".")) {
         const sub = join(dir, name);
         try {
