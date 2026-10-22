@@ -3,6 +3,7 @@ import { basename, dirname, join } from "node:path";
 import { parse } from "yaml";
 import { z } from "zod";
 import { layoutOf } from "../core/paths.ts";
+import { reportProblem } from "./problems.ts";
 import { loadSourceDocuments, skillIdOf } from "./sources.ts";
 import type { KnowledgeRoots } from "./standards.ts";
 
@@ -78,14 +79,21 @@ function readSkill(dir: string, level: Skill["level"]): Skill {
 /**
  * The skills of a folder. A subfolder without `skill.yaml` is not a skill (notes, an `IMPROVEMENT.md`
  * left by hand) and is passed over: pilot — one such folder failed every agent call of the project. A
- * folder with `skill.yaml` is a skill, and a broken one still fails loudly.
+ * folder with a broken `skill.yaml` is passed over too, and said (jarvis skills, doctor).
  */
 function readSkillsDir(dir: string, level: Skill["level"]): Skill[] {
   if (!existsSync(dir)) return [];
   return readdirSync(dir)
     .filter((d) => statSync(join(dir, d)).isDirectory() && existsSync(join(dir, d, "skill.yaml")))
     .sort()
-    .map((d) => readSkill(join(dir, d), level));
+    .flatMap((d) => {
+      try {
+        return [readSkill(join(dir, d), level)];
+      } catch (error) {
+        reportProblem(join(dir, d), error instanceof Error ? error.message : String(error));
+        return [];
+      }
+    });
 }
 
 export const BUILTIN_SKILLS: readonly Skill[] = [

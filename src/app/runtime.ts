@@ -13,6 +13,7 @@ import { InteractionStore } from "../interaction/store.ts";
 import { GraphStore } from "../knowledge/graph/store.ts";
 import { GraphToolProvider } from "../knowledge/graph/tools.ts";
 import { repoIdOf } from "../knowledge/graph/update.ts";
+import { onKnowledgeProblem } from "../knowledge/problems.ts";
 import { type Embedder, OpenAiCompatibleEmbedder } from "../knowledge/retrieval/embedder.ts";
 import { KnowledgeIndex } from "../knowledge/retrieval/index.ts";
 import { McpPool, ToolsCache } from "../mcp/client/pool.ts";
@@ -113,6 +114,8 @@ export function createRuntime(loaded: LoadedConfig, options: RuntimeOptions = {}
     redact: (text) => redactor.redact(text).text,
     ...logSettingsFrom(env),
   });
+  // a knowledge file passed over (broken front matter, a skill missing a file): in the log, once
+  onKnowledgeProblem((file, message) => log.error("knowledge.problem", { file, message }));
   events.setTap((event) => {
     log.log(eventLevel(event.kind), event.kind, {
       ...(event.runId ? { runId: event.runId } : {}),
@@ -162,6 +165,9 @@ export function createRuntime(loaded: LoadedConfig, options: RuntimeOptions = {}
   registry.register(new LocalToolProvider(loaded.config));
   const graph = new GraphStore(db.db);
   const index = new KnowledgeIndex(db.db);
+  // a failed batch of embeddings: said, and search goes on lexically until the next refresh
+  index.onEmbedError = (error, left) =>
+    log.error("knowledge.embed", { left, message: error instanceof Error ? error.message : String(error) });
   const embeddingsModelId = loaded.config.knowledge.retrieval.embeddings;
   const embeddingsModel = embeddingsModelId ? loaded.config.models[embeddingsModelId] : undefined;
   const embedder =

@@ -1,5 +1,6 @@
 import { effectiveStacks } from "../../capabilities/detector.ts";
 import { changedFiles, checkStandards } from "../../knowledge/check.ts";
+import { knowledgeProblems } from "../../knowledge/problems.ts";
 import { resolvePackage } from "../../knowledge/resolver.ts";
 import { loadSkills } from "../../knowledge/skills.ts";
 import { knowledgeRootsOf } from "../../knowledge/sources.ts";
@@ -16,7 +17,9 @@ function rootsOf(loaded: Awaited<ReturnType<typeof loadForCli>>, cwd: string) {
 export async function runStandardsList(ctx: CliContext): Promise<void> {
   const loaded = await loadForCli(ctx);
   const standards = loadStandards(rootsOf(loaded, ctx.cwd));
-  ctx.out.result({ standards }, () => {
+  const problems = knowledgeProblems();
+  ctx.out.result({ standards, ...(problems.length > 0 ? { problems } : {}) }, () => {
+    for (const p of problems) ctx.out.line(`${ctx.out.style.warn("passed over:")} ${p.file} — ${p.message}`);
     if (standards.length === 0) {
       ctx.out.line("no standards (.jarvis/standards/<id>.md, ADR-0020 §1)");
       return;

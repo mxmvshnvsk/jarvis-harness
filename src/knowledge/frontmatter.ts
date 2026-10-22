@@ -3,13 +3,24 @@ import { parse } from "yaml";
 export interface FrontMatter {
   readonly data: Record<string, unknown>;
   readonly body: string;
+  /** The front matter is not valid YAML: data is empty, the body is still the document's. */
+  readonly error?: string;
 }
 
-/** Splits `---\nyaml\n---\nbody`. A file without front matter has empty data. */
+/** Splits `---\nyaml\n---\nbody`. A file without front matter has empty data; broken YAML too (said). */
 export function parseFrontMatter(text: string): FrontMatter {
   const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/.exec(text);
   if (!match) return { data: {}, body: text };
-  const parsed: unknown = parse(match[1] as string);
+  let parsed: unknown;
+  try {
+    parsed = parse(match[1] as string);
+  } catch (error) {
+    return {
+      data: {},
+      body: match[2] ?? "",
+      error: error instanceof Error ? (error.message.split("\n")[0] ?? "") : String(error),
+    };
+  }
   const data =
     parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {};
   return { data, body: match[2] ?? "" };

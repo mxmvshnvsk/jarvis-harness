@@ -301,6 +301,46 @@ DROP INDEX events_run_kind;
 CREATE INDEX events_run_kind_seq ON events(run_id, kind, seq);
 `,
   },
+  {
+    version: 10,
+    name: "retrieval_by_project",
+    sql: `
+-- ADR-0015: the knowledge index per project, rebuilt on the next refresh (it is derived data).
+-- One index for every repository of the machine pruned the others' units on each refresh and mixed
+-- their search hits; a delete by the FTS table's unindexed source id scanned it for every unit (515 s
+-- to index a repository cold); vectors were JSON keyed by section number, embedded again whenever a
+-- heading moved. Units are keyed by (project, source id) and point at their FTS row; vectors are
+-- float32 blobs keyed by the text they embed.
+DROP TABLE IF EXISTS knowledge_fts;
+DROP TABLE IF EXISTS knowledge_units;
+DROP TABLE IF EXISTS knowledge_vectors;
+CREATE VIRTUAL TABLE knowledge_fts USING fts5(
+  title,
+  body,
+  tokenize = 'unicode61 remove_diacritics 2'
+);
+CREATE TABLE knowledge_units (
+  project        TEXT NOT NULL,
+  source_id      TEXT NOT NULL,
+  source_version TEXT NOT NULL,
+  kind           TEXT NOT NULL,
+  title          TEXT NOT NULL,
+  ref            TEXT NOT NULL,
+  indexed_at     TEXT NOT NULL,
+  fts_rowid      INTEGER NOT NULL,
+  text_hash      TEXT NOT NULL,
+  PRIMARY KEY (project, source_id)
+);
+CREATE INDEX knowledge_units_fts ON knowledge_units(fts_rowid);
+CREATE TABLE knowledge_vectors (
+  text_hash TEXT NOT NULL,
+  embedder  TEXT NOT NULL,
+  dims      INTEGER NOT NULL,
+  vector    BLOB NOT NULL,
+  PRIMARY KEY (text_hash, embedder)
+);
+`,
+  },
 ];
 
 export const LATEST_SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]?.version ?? 0;

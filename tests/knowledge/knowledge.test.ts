@@ -6,8 +6,9 @@ import { detectStacks } from "../../src/capabilities/detector.ts";
 import { changedFiles, checkStandards } from "../../src/knowledge/check.ts";
 import { globMatches, parseFrontMatter } from "../../src/knowledge/frontmatter.ts";
 import { renderPackage } from "../../src/knowledge/package.ts";
+import { knowledgeProblems } from "../../src/knowledge/problems.ts";
 import { readByRef, resolvePackage } from "../../src/knowledge/resolver.ts";
-import { loadSkills, SkillLoadError } from "../../src/knowledge/skills.ts";
+import { loadSkills } from "../../src/knowledge/skills.ts";
 import { loadStandards, parseStandard, StandardLoadError } from "../../src/knowledge/standards.ts";
 import { type Sandbox, sandbox } from "../helpers/tmp.ts";
 
@@ -209,8 +210,10 @@ describe("skills and the resolver", () => {
     // a folder without skill.yaml is not a skill: passed over, the rest still load
     sb.write("project/.jarvis/skills/better-errors/IMPROVEMENT.md", "a note\n");
     expect(loadSkills({ projectRoot: sb.project }).map((s) => s.id)).not.toContain("better-errors");
+    // a broken skill is passed over and said, not every agent step failed
     sb.write("project/.jarvis/skills/broken/skill.yaml", "id: broken\n");
-    expect(() => loadSkills({ projectRoot: sb.project })).toThrow(SkillLoadError);
+    expect(loadSkills({ projectRoot: sb.project }).map((s) => s.id)).not.toContain("broken");
+    expect(knowledgeProblems().some((p) => p.file.endsWith("skills/broken"))).toBe(true);
   });
 
   it("selects by stack, paths, kind and agent, deterministically, with required standards pulled in", () => {

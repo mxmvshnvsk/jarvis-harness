@@ -363,6 +363,8 @@ export class LocalToolProvider implements ToolProvider {
           const kinds = asked.length > 0 || ctx.run.workflow !== "ask" ? asked : allowed;
           const result = await search(ctx.runtime, roots, str(args, "query"), {
             limit: num(args, "limit", 10),
+            // this run's own documents too (research, spec…); other runs' are not this agent's
+            runId: ctx.run.id,
             ...(kinds.length > 0 ? { kinds } : {}),
           });
           const lines = result.evidence.map(

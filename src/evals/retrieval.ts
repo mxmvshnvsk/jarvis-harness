@@ -3,7 +3,7 @@ import { parse } from "yaml";
 import { z } from "zod";
 import type { Runtime } from "../app/runtime.ts";
 import type { RetrievalResult } from "../knowledge/retrieval/retriever.ts";
-import { search } from "../knowledge/retrieval/service.ts";
+import { projectKeyOf, search } from "../knowledge/retrieval/service.ts";
 import type { KnowledgeRoots } from "../knowledge/standards.ts";
 
 /**
@@ -138,7 +138,16 @@ export async function runRetrievalEval(
       ...(options.glossary === false ? { glossary: false } : {}),
     });
     indexes = result.indexes;
-    scores.push(scoreCase(c, result, runtime.index.sizes(result.evidence.map((e) => e.sourceId))));
+    scores.push(
+      scoreCase(
+        c,
+        result,
+        runtime.index.sizes(
+          result.evidence.map((e) => e.sourceId),
+          projectKeyOf(roots),
+        ),
+      ),
+    );
   }
   return {
     suite: "retrieval",

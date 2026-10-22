@@ -26,6 +26,8 @@ export interface RetrievalResult {
 }
 
 export interface RetrieveOptions {
+  /** Whose units are searched: the project's key, and a run's (`run:<id>`) for its artifacts. */
+  readonly projects: readonly string[];
   readonly kinds?: readonly UnitKind[];
   readonly limit?: number;
   readonly glossary?: readonly GlossaryEntry[];
@@ -37,7 +39,7 @@ const RRF_K = 60;
 export async function retrieve(
   index: KnowledgeIndex,
   query: string,
-  options: RetrieveOptions = {},
+  options: RetrieveOptions,
 ): Promise<RetrievalResult> {
   const { terms, expansions } = expandQuery(query, options.glossary ?? []);
   const limit = options.limit ?? 10;
@@ -45,6 +47,7 @@ export async function retrieve(
   const lexical = index.lexical(terms.length > 0 ? terms : tokenize(query), {
     ...(kinds ? { kinds } : {}),
     limit: limit * 2,
+    projects: options.projects,
   });
   const lists: Array<{
     name: "lexical" | "semantic";
@@ -55,7 +58,11 @@ export async function retrieve(
     if (vector)
       lists.push({
         name: "semantic",
-        hits: index.semantic(vector, options.embedder.id, { ...(kinds ? { kinds } : {}), limit: limit * 2 }),
+        hits: index.semantic(vector, options.embedder.id, {
+          ...(kinds ? { kinds } : {}),
+          limit: limit * 2,
+          projects: options.projects,
+        }),
       });
   }
   const fused = new Map<string, Evidence>();

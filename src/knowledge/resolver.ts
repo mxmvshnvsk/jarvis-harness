@@ -7,6 +7,7 @@ import { layoutOf } from "../core/paths.ts";
 import { capabilityMatches } from "../tools/registry.ts";
 import { catalogOf, neighboursDoc } from "./catalog.ts";
 import { globMatches, parseFrontMatter } from "./frontmatter.ts";
+import { reportProblem } from "./problems.ts";
 import { loadSkills, type Skill, skillRef } from "./skills.ts";
 import { loadSourceDocuments } from "./sources.ts";
 import { type KnowledgeRoots, loadStandards, type Scope, type Standard, standardRef } from "./standards.ts";
@@ -49,8 +50,14 @@ export function loadKnowledgeDocs(roots: KnowledgeRoots): KnowledgeDoc[] {
       .filter((x) => x.endsWith(".md") && x !== "README.md" && x !== "glossary.md")
       .sort()) {
       const raw = readFileSync(join(dir, f), "utf8");
-      const { data, body } = parseFrontMatter(raw);
+      const { data, body, error } = parseFrontMatter(raw);
+      if (error) reportProblem(join(dir, f), `front matter is not valid YAML: ${error}`);
       const fm = KnowledgeFrontMatter.safeParse(data);
+      if (!error && !fm.success)
+        reportProblem(
+          join(dir, f),
+          `front matter: ${fm.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`,
+        );
       const meta = fm.success ? fm.data : { tags: [], paths: [], stacks: [], agents: [] };
       out.push({
         name: `${prefix}${f}`,

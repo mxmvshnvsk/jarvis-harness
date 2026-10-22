@@ -4,6 +4,7 @@ import { z } from "zod";
 import type { KnowledgeSource } from "../core/config/schema.ts";
 import { layoutOf } from "../core/paths.ts";
 import { parseFrontMatter } from "./frontmatter.ts";
+import { reportProblem } from "./problems.ts";
 
 /**
  * Standards (ADR-0020 §1–2): typed, versioned rules in `.jarvis/standards/<id>.md` — YAML front
@@ -90,7 +91,8 @@ export class StandardLoadError extends Error {
 }
 
 export function parseStandard(file: string, text: string, level: Standard["level"]): Standard {
-  const { data, body } = parseFrontMatter(text);
+  const { data, body, error } = parseFrontMatter(text);
+  if (error) throw new StandardLoadError(file, `front matter is not valid YAML: ${error}`);
   const parsed = StandardFrontMatterSchema.safeParse(data);
   if (!parsed.success) {
     throw new StandardLoadError(
@@ -110,7 +112,15 @@ function readDir(dir: string, level: Standard["level"]): Standard[] {
   return readdirSync(dir)
     .filter((f) => f.endsWith(".md") && f !== "README.md")
     .sort()
-    .map((f) => parseStandard(join(dir, f), readFileSync(join(dir, f), "utf8"), level));
+    .flatMap((f) => {
+      // one broken standard is passed over (and said), not every step of the project failed
+      try {
+        return [parseStandard(join(dir, f), readFileSync(join(dir, f), "utf8"), level)];
+      } catch (error) {
+        reportProblem(join(dir, f), error instanceof Error ? error.message : String(error));
+        return [];
+      }
+    });
 }
 
 export interface KnowledgeRoots {

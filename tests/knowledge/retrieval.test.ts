@@ -7,7 +7,7 @@ import { run } from "../../src/cli/main.ts";
 import { expandQuery, parseGlossary } from "../../src/knowledge/retrieval/glossary.ts";
 import { cosine, splitSections } from "../../src/knowledge/retrieval/index.ts";
 import { retrieve } from "../../src/knowledge/retrieval/retriever.ts";
-import { rankKnowledge, refreshIndex, search } from "../../src/knowledge/retrieval/service.ts";
+import { projectKeyOf, rankKnowledge, refreshIndex, search } from "../../src/knowledge/retrieval/service.ts";
 import { testRuntime } from "../helpers/engine.ts";
 import { type FakeOpenAi, startFakeOpenAi } from "../helpers/fakeOpenAi.ts";
 import { type Sandbox, sandbox } from "../helpers/tmp.ts";
@@ -153,6 +153,7 @@ describe("hybrid retrieval with an embedder (ADR-0015 §4–5)", () => {
 
     // "money back" has no lexical hit at all; the toy embedder maps it next to refunds
     const r = await retrieve(rt.index, "money back", {
+      projects: [projectKeyOf(roots)],
       embedder: rt.embedder as NonNullable<typeof rt.embedder>,
       limit: 3,
     });
@@ -162,6 +163,7 @@ describe("hybrid retrieval with an embedder (ADR-0015 §4–5)", () => {
 
     // a query both indexes agree on ranks first with two paths
     const both = await retrieve(rt.index, "refund ledger", {
+      projects: [projectKeyOf(roots)],
       embedder: rt.embedder as NonNullable<typeof rt.embedder>,
       limit: 3,
     });

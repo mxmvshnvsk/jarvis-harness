@@ -112,97 +112,155 @@ export class KnowledgeIndex {
       }));
   }
 
-  async upsert(units: readonly KnowledgeUnit[], embedder?: Embedder): Promise<IndexReport> {
+  /**
+   * Indexes a project's units (`project`: its key, `projectKeyOf`; a run's artifacts: `run:<id>`).
+   * Units are keyed by project and id — two repositories' `code:src/index.ts` are two units — and a
+   * section's vector by its text, so a moved section or another project's same text is not embedded
+   * again. Pilot: one index for every repository on the machine, each refresh pruning the others.
+   */
+  async upsert(
+    units: readonly KnowledgeUnit[],
+    embedder: Embedder | undefined,
+    project: string,
+  ): Promise<IndexReport> {
     let indexed = 0;
     let unchanged = 0;
     let embedded = 0;
-    const toEmbed: KnowledgeUnit[] = [];
+    const toEmbed = new Map<string, string>();
     const now = this.clock().toISOString();
-    // one transaction: the first index of a repository writes thousands of units
+    const has = embedder
+      ? this.db.prepare("SELECT 1 FROM knowledge_vectors WHERE text_hash = ? AND embedder = ?")
+      : undefined;
+    const want = (u: KnowledgeUnit, hash: string) => {
+      if (embedder && !toEmbed.has(hash) && !has?.get(hash, embedder.id))
+        toEmbed.set(hash, `${u.title}\n${u.body}`.slice(0, 8000));
+    };
+    const get = this.db.prepare(
+      "SELECT source_version, fts_rowid, text_hash FROM knowledge_units WHERE project = ? AND source_id = ?",
+    );
+    const delFts = this.db.prepare("DELETE FROM knowledge_fts WHERE rowid = ?");
+    const addFts = this.db.prepare("INSERT INTO knowledge_fts (title, body) VALUES (?, ?)");
+    const putUnit = this.db.prepare(
+      `INSERT OR REPLACE INTO knowledge_units (project, source_id, source_version, kind, title, ref, indexed_at, fts_rowid, text_hash)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    // IMMEDIATE: the write lock from the start — a deferred one read first, and another process's
+    // commit in between made it fail at once with SQLITE_BUSY (UI and a run refresh side by side)
     const own = !this.db.isTransaction;
-    if (own) this.db.exec("BEGIN");
+    if (own) this.db.exec("BEGIN IMMEDIATE");
     try {
       for (const u of units) {
-        const existing = this.db
-          .prepare("SELECT source_version FROM knowledge_units WHERE source_id = ?")
-          .get(u.sourceId) as { source_version: string } | undefined;
-        const vectorMissing = embedder
-          ? !this.db
-              .prepare(
-                "SELECT 1 FROM knowledge_vectors WHERE source_id = ? AND embedder = ? AND source_version = ?",
-              )
-              .get(u.sourceId, embedder.id, u.sourceVersion)
-          : false;
-        if (existing?.source_version === u.sourceVersion) {
+        const hash = unitVersion(`${u.title}\n${u.body}`);
+        const existing = get.get(project, u.sourceId) as
+          | { source_version: string; fts_rowid: number; text_hash: string }
+          | undefined;
+        if (existing?.source_version === u.sourceVersion && existing.text_hash === hash) {
           unchanged += 1;
-          if (vectorMissing) toEmbed.push(u);
+          want(u, hash);
           continue;
         }
-        this.db.prepare("DELETE FROM knowledge_fts WHERE source_id = ?").run(u.sourceId);
-        this.db
-          .prepare(
-            "INSERT INTO knowledge_fts (source_id, source_version, kind, title, body) VALUES (?, ?, ?, ?, ?)",
-          )
-          .run(u.sourceId, u.sourceVersion, u.kind, u.title, u.body);
-        this.db
-          .prepare(
-            "INSERT OR REPLACE INTO knowledge_units (source_id, source_version, kind, title, ref, indexed_at) VALUES (?, ?, ?, ?, ?, ?)",
-          )
-          .run(u.sourceId, u.sourceVersion, u.kind, u.title, u.ref, now);
-        this.db.prepare("DELETE FROM knowledge_vectors WHERE source_id = ?").run(u.sourceId);
+        // by rowid: a delete by the unindexed source id scanned the whole FTS table for every unit
+        if (existing) delFts.run(existing.fts_rowid);
+        const rowid = Number(addFts.run(u.title, u.body).lastInsertRowid);
+        putUnit.run(project, u.sourceId, u.sourceVersion, u.kind, u.title, u.ref, now, rowid, hash);
         indexed += 1;
-        if (embedder) toEmbed.push(u);
+        want(u, hash);
       }
       if (own) this.db.exec("COMMIT");
     } catch (error) {
       if (own) this.db.exec("ROLLBACK");
       throw error;
     }
-    if (embedder && toEmbed.length > 0) {
-      const vectors = await embedder.embed(toEmbed.map((u) => `${u.title}\n${u.body}`.slice(0, 8000)));
-      toEmbed.forEach((u, i) => {
-        const v = vectors[i];
-        if (!v) return;
-        this.db
-          .prepare(
-            "INSERT OR REPLACE INTO knowledge_vectors (source_id, source_version, embedder, dims, vector_json) VALUES (?, ?, ?, ?, ?)",
-          )
-          .run(u.sourceId, u.sourceVersion, embedder.id, v.length, JSON.stringify(v));
-        embedded += 1;
-      });
-    }
+    if (embedder && toEmbed.size > 0) embedded = await this.embed(embedder, toEmbed);
     return { indexed, unchanged, removed: 0, embedded };
   }
 
-  /** Drops project units that no longer exist (artifacts are never removed here). */
-  prune(keep: ReadonlySet<string>): number {
+  /**
+   * Vectors in batches, each written as it comes: one request of 10k texts went past the API's limit,
+   * failed, and every refresh sent it again. A batch that fails is said and left for the next refresh;
+   * search goes on lexically meanwhile.
+   */
+  private async embed(embedder: Embedder, texts: Map<string, string>): Promise<number> {
+    const put = this.db.prepare(
+      "INSERT OR REPLACE INTO knowledge_vectors (text_hash, embedder, dims, vector) VALUES (?, ?, ?, ?)",
+    );
+    const all = [...texts];
+    let done = 0;
+    for (let at = 0; at < all.length; at += EMBED_BATCH) {
+      const batch = all.slice(at, at + EMBED_BATCH);
+      let vectors: number[][];
+      try {
+        vectors = await embedder.embed(batch.map(([, t]) => t));
+      } catch (error) {
+        this.onEmbedError?.(error, all.length - at);
+        break;
+      }
+      this.db.exec("BEGIN IMMEDIATE");
+      try {
+        batch.forEach(([hash], i) => {
+          const v = vectors[i];
+          if (!v) return;
+          put.run(hash, embedder.id, v.length, Buffer.from(new Float32Array(v).buffer));
+          done += 1;
+        });
+        this.db.exec("COMMIT");
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        throw error;
+      }
+      this.vectorsAt += 1;
+    }
+    return done;
+  }
+
+  /** Said when a batch of embeddings failed (the runtime logs it); the rest waits for the next refresh. */
+  onEmbedError: ((error: unknown, left: number) => void) | undefined;
+
+  /** Drops the project's units that no longer exist; other projects' are not touched. */
+  prune(keep: ReadonlySet<string>, project: string): number {
     const rows = this.db
-      .prepare("SELECT source_id FROM knowledge_units WHERE kind != 'artifact'")
-      .all() as Array<{ source_id: string }>;
-    let removed = 0;
+      .prepare("SELECT source_id, fts_rowid FROM knowledge_units WHERE project = ?")
+      .all(project) as Array<{ source_id: string; fts_rowid: number }>;
+    const gone = rows.filter((r) => !keep.has(r.source_id));
+    if (gone.length === 0) return 0;
     const own = !this.db.isTransaction;
-    if (own) this.db.exec("BEGIN");
+    if (own) this.db.exec("BEGIN IMMEDIATE");
     try {
-      for (const { source_id } of rows) {
-        if (keep.has(source_id)) continue;
-        this.db.prepare("DELETE FROM knowledge_fts WHERE source_id = ?").run(source_id);
-        this.db.prepare("DELETE FROM knowledge_units WHERE source_id = ?").run(source_id);
-        this.db.prepare("DELETE FROM knowledge_vectors WHERE source_id = ?").run(source_id);
-        removed += 1;
+      const delFts = this.db.prepare("DELETE FROM knowledge_fts WHERE rowid = ?");
+      const delUnit = this.db.prepare("DELETE FROM knowledge_units WHERE project = ? AND source_id = ?");
+      for (const r of gone) {
+        delFts.run(r.fts_rowid);
+        delUnit.run(project, r.source_id);
       }
       if (own) this.db.exec("COMMIT");
     } catch (error) {
       if (own) this.db.exec("ROLLBACK");
       throw error;
     }
+    return gone.length;
+  }
+
+  /** Drops whole projects (the artifacts of runs that ended): what no search reaches any more. */
+  dropProjects(projects: readonly string[]): number {
+    let removed = 0;
+    for (const project of projects) removed += this.prune(new Set(), project);
     return removed;
   }
 
+  /** The projects indexed, by prefix (`run:` — runs' artifacts). */
+  projects(prefix = ""): string[] {
+    return (
+      this.db
+        .prepare("SELECT DISTINCT project FROM knowledge_units WHERE project LIKE ? ESCAPE '\\'")
+        .all(`${prefix.replace(/[\\%_]/g, "\\$&")}%`) as Array<{ project: string }>
+    ).map((r) => r.project);
+  }
+
   /** Indexed code by file: the version its units carry and their ids (to keep an unchanged file as is). */
-  codeVersions(): Map<string, { version: string; ids: string[] }> {
+  codeVersions(project: string): Map<string, { version: string; ids: string[] }> {
     const rows = this.db
-      .prepare("SELECT source_id, source_version FROM knowledge_units WHERE kind = 'code'")
-      .all() as Array<{ source_id: string; source_version: string }>;
+      .prepare("SELECT source_id, source_version FROM knowledge_units WHERE project = ? AND kind = 'code'")
+      .all(project) as Array<{ source_id: string; source_version: string }>;
     const out = new Map<string, { version: string; ids: string[] }>();
     for (const r of rows) {
       const path = r.source_id.slice("code:".length).replace(/#\d+$/, "");
@@ -218,12 +276,14 @@ export class KnowledgeIndex {
   }
 
   /** Characters of each unit's indexed text, for the retrieved-tokens metric (ADR-0015 §6). */
-  sizes(sourceIds: readonly string[]): Map<string, number> {
+  sizes(sourceIds: readonly string[], project: string): Map<string, number> {
     const out = new Map<string, number>();
+    const q = this.db.prepare(
+      `SELECT length(f.title) + length(f.body) AS n FROM knowledge_units u JOIN knowledge_fts f ON f.rowid = u.fts_rowid
+       WHERE u.project = ? AND u.source_id = ?`,
+    );
     for (const id of sourceIds) {
-      const row = this.db
-        .prepare("SELECT length(title) + length(body) AS n FROM knowledge_fts WHERE source_id = ?")
-        .get(id) as { n: number } | undefined;
+      const row = q.get(project, id) as { n: number } | undefined;
       if (row) out.set(id, row.n);
     }
     return out;
@@ -237,23 +297,24 @@ export class KnowledgeIndex {
 
   lexical(
     terms: readonly string[],
-    options: { kinds?: readonly UnitKind[]; limit?: number } = {},
+    options: { kinds?: readonly UnitKind[]; limit?: number; projects: readonly string[] },
   ): Array<{ sourceId: string; ref: string; kind: UnitKind; title: string; score: number; snippet: string }> {
-    const match = terms
-      .map((t) => `"${t.replace(/"/g, "")}"`)
-      .filter((t) => t.length > 2)
+    const match = [...new Set(terms.map((t) => t.replace(/"/g, "")).filter((t) => t.length > 2))]
+      .slice(0, MAX_TERMS)
+      .map(termQuery)
       .join(" OR ");
-    if (!match) return [];
+    if (!match || options.projects.length === 0) return [];
     const kinds = options.kinds ?? UNIT_KINDS;
     const rows = this.db
       .prepare(
-        `SELECT f.source_id AS source_id, u.ref AS ref, f.kind AS kind, f.title AS title, bm25(knowledge_fts) AS score,
-                snippet(knowledge_fts, 4, '[', ']', '…', 12) AS snippet
-         FROM knowledge_fts f JOIN knowledge_units u ON u.source_id = f.source_id
-         WHERE knowledge_fts MATCH ? AND f.kind IN (${kinds.map(() => "?").join(",")})
+        `SELECT u.source_id AS source_id, u.ref AS ref, u.kind AS kind, u.title AS title, bm25(knowledge_fts) AS score,
+                snippet(knowledge_fts, 1, '[', ']', '…', 12) AS snippet
+         FROM knowledge_fts f JOIN knowledge_units u ON u.fts_rowid = f.rowid
+         WHERE knowledge_fts MATCH ? AND u.kind IN (${kinds.map(() => "?").join(",")})
+           AND u.project IN (${options.projects.map(() => "?").join(",")})
          ORDER BY score LIMIT ?`,
       )
-      .all(match, ...kinds, options.limit ?? 20) as Array<{
+      .all(match, ...kinds, ...options.projects, options.limit ?? 20) as Array<{
       source_id: string;
       ref: string;
       kind: UnitKind;
@@ -271,39 +332,69 @@ export class KnowledgeIndex {
     }));
   }
 
+  /** Vectors read once per embedder and kept while nothing was embedded since (a parse of all per query was 1.8 s at 10k). */
+  private vectorsAt = 0;
+  private vectorCache: { embedder: string; at: number; byHash: Map<string, Float32Array> } | undefined;
+
+  private vectorsOf(embedder: string): Map<string, Float32Array> {
+    const c = this.vectorCache;
+    if (c && c.embedder === embedder && c.at === this.vectorsAt) return c.byHash;
+    const rows = this.db
+      .prepare("SELECT text_hash, vector FROM knowledge_vectors WHERE embedder = ?")
+      .all(embedder) as Array<{ text_hash: string; vector: Uint8Array }>;
+    const byHash = new Map<string, Float32Array>();
+    for (const r of rows) {
+      const b = r.vector;
+      byHash.set(r.text_hash, new Float32Array(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength)));
+    }
+    this.vectorCache = { embedder, at: this.vectorsAt, byHash };
+    return byHash;
+  }
+
   semantic(
     query: number[],
     embedder: string,
-    options: { kinds?: readonly UnitKind[]; limit?: number } = {},
+    options: { kinds?: readonly UnitKind[]; limit?: number; projects: readonly string[] },
   ): Array<{ sourceId: string; ref: string; kind: UnitKind; title: string; score: number }> {
+    if (options.projects.length === 0) return [];
     const kinds = options.kinds ?? UNIT_KINDS;
+    const vectors = this.vectorsOf(embedder);
     const rows = this.db
       .prepare(
-        `SELECT v.source_id AS source_id, v.vector_json AS vector_json, u.ref AS ref, u.kind AS kind, u.title AS title
-         FROM knowledge_vectors v JOIN knowledge_units u ON u.source_id = v.source_id AND u.source_version = v.source_version
-         WHERE v.embedder = ? AND u.kind IN (${kinds.map(() => "?").join(",")})`,
+        `SELECT source_id, ref, kind, title, text_hash FROM knowledge_units
+         WHERE kind IN (${kinds.map(() => "?").join(",")}) AND project IN (${options.projects.map(() => "?").join(",")})`,
       )
-      .all(embedder, ...kinds) as Array<{
+      .all(...kinds, ...options.projects) as Array<{
       source_id: string;
-      vector_json: string;
       ref: string;
       kind: UnitKind;
       title: string;
+      text_hash: string;
     }>;
-    return rows
-      .map((r) => ({
-        sourceId: r.source_id,
-        ref: r.ref,
-        kind: r.kind,
-        title: r.title,
-        score: cosine(query, JSON.parse(r.vector_json) as number[]),
-      }))
-      .sort((a, b) => b.score - a.score)
-      .slice(0, options.limit ?? 20);
+    const out: Array<{ sourceId: string; ref: string; kind: UnitKind; title: string; score: number }> = [];
+    for (const r of rows) {
+      const v = vectors.get(r.text_hash);
+      if (!v) continue;
+      out.push({ sourceId: r.source_id, ref: r.ref, kind: r.kind, title: r.title, score: cosine(query, v) });
+    }
+    return out.sort((a, b) => b.score - a.score).slice(0, options.limit ?? 20);
   }
 }
 
-export function cosine(a: readonly number[], b: readonly number[]): number {
+/** Texts per embeddings request (OpenAI-compatible APIs take up to 2048; gateways often fewer). */
+export const EMBED_BATCH = 128;
+/** Search terms per query: a query of hundreds of ORed tokens matched everything a little. */
+const MAX_TERMS = 40;
+
+/**
+ * A term as FTS5 matches it: a long word by its stem — its last letters cut and a prefix query — so
+ * «заявки» finds «заявка» (the tokenizer does not stem Russian).
+ */
+function termQuery(term: string): string {
+  return term.length >= 6 ? `"${term.slice(0, Math.max(4, term.length - 2))}"*` : `"${term}"`;
+}
+
+export function cosine(a: ArrayLike<number>, b: ArrayLike<number>): number {
   let dot = 0;
   let na = 0;
   let nb = 0;
