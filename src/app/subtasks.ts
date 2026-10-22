@@ -23,6 +23,8 @@ export interface Subtask {
   readonly task: string;
   readonly requirements: readonly string[];
   readonly deliverAfter: readonly string[];
+  /** The Jira task of the Story this subtask is (src/app/storyTasks.ts). */
+  readonly issue?: string;
 }
 
 export interface ContractItem {
@@ -106,6 +108,9 @@ export function parseSplit(text: string): Split | undefined {
               task: o.task,
               requirements: strings(o.requirements),
               deliverAfter: strings(o.deliverAfter),
+              ...(typeof o.issue === "string" && /^[A-Z][A-Z0-9]+-\d+$/.test(o.issue.trim())
+                ? { issue: o.issue.trim() }
+                : {}),
             },
           ]
         : [];

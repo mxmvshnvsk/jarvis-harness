@@ -1658,17 +1658,15 @@ function subtasksHtml(page: RunPage, actions?: Actions): Html {
       ? html`<p class="hint sub-pub">✓ published${p.version ? html` <code>${p.version}</code>` : ""} by <code>${p.command ?? ""}</code></p>`
       : html`<div class="banner bad sub-pub"><b>publish-local failed</b> — <code>${p.command ?? ""}</code>; the services that use it keep waiting.${p.tail ? html`<pre class="tf-tail">${p.tail}</pre>` : ""}</div>`;
   };
-  return html`<section class="panel" aria-labelledby="subtasks" data-live="subtasks">
+  return html`<section class="panel subtasks" aria-labelledby="subtasks" data-live="subtasks">
 <h2 id="subtasks">Subtasks <span class="meta">${done} of ${views.length} done</span></h2>
 ${page.masterBudget ? masterBudgetHtml(page.masterBudget) : ""}
-<ul style="margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:8px">${views.map(
-    (
-      v,
-    ) => html`<li class="row" style="flex-wrap:wrap;gap:8px 14px;padding:8px 0;border-top:1px solid var(--line-soft)">
-<span class="meta">${v.subtask.key}</span>${v.run ? html`<a href="/runs/${shortRunId(v.run.id)}" style="font-weight:600">${v.subtask.service}</a>` : html`<b>${v.subtask.service}</b>`}
-<span class="muted" style="flex:1 1 260px;min-width:0">${firstLine(v.subtask.task, 140)}${v.run?.currentStep && v.state !== "COMPLETED" ? html` · <span class="meta">${v.run.currentStep}</span>` : ""}</span>
-${pill(v)}
-${v.state === "queued" ? act(v.subtask.key, "start", "Start now") : ""}${v.state === "blocked" ? act(v.subtask.key, "start", "Start now anyway") : ""}${v.published && !v.published.ok ? act(v.subtask.key, "publish", "Run publish-local again", true) : ""}${v.state === "CANCELLED" || v.state === "FAILED" ? act(v.subtask.key, "retry", "Retry") : ""}${v.state !== "COMPLETED" && v.state !== "dropped" ? act(v.subtask.key, "drop", "Drop") : ""}
+<ul class="sub-list">${views.map(
+    (v) => html`<li class="sub-row">
+<span class="meta sub-key">${v.subtask.key}</span>
+<span class="sub-service">${v.run ? html`<a href="/runs/${shortRunId(v.run.id)}">${v.subtask.service}</a>` : html`<b>${v.subtask.service}</b>`}${v.subtask.issue ? html`<span class="meta mono">${v.subtask.issue}</span>` : ""}</span>
+<span class="muted sub-task">${firstLine(v.subtask.task, 140)}${v.run?.currentStep && v.state !== "COMPLETED" ? html` · <span class="meta">${v.run.currentStep}</span>` : ""}</span>
+<span class="sub-acts">${pill(v)}${v.state === "queued" ? act(v.subtask.key, "start", "Start now") : ""}${v.state === "blocked" ? act(v.subtask.key, "start", "Start now anyway") : ""}${v.published && !v.published.ok ? act(v.subtask.key, "publish", "Run publish-local again", true) : ""}${v.state === "CANCELLED" || v.state === "FAILED" ? act(v.subtask.key, "retry", "Retry") : ""}${v.state !== "COMPLETED" && v.state !== "dropped" ? act(v.subtask.key, "drop", "Drop") : ""}</span>
 ${v.state === "blocked" ? html`<p class="hint sub-pub">Starts when ${(v.waitsFor ?? []).map(serviceOf).join(", ")} is accepted and published, against the new version. «Start now anyway» — against the version it has.</p>` : ""}${published(v)}
 </li>`,
   )}</ul>

@@ -16,6 +16,7 @@ import {
 } from "../../app/contractFields.ts";
 import { crossCatalogText } from "../../app/crossCatalog.ts";
 import { SCOPE_TYPE, scopeDecision, scopeOf } from "../../app/crossScope.ts";
+import { readStoryTasks, STORY_TASKS, storyTasksText } from "../../app/storyTasks.ts";
 import {
   type ContractItem,
   deliveryOrder,
@@ -65,7 +66,17 @@ const catalogStep: DeterministicTool = async (ctx) => {
   const text = crossCatalogText(ctx.runtime, ctx.run);
   if (text === undefined)
     return { status: "failure", reason: "a task across services runs in a knowledge repository (ADR-0025)" };
-  return { status: "success", outputs: [put(ctx, "catalog", "catalog.md", text)] };
+  // a task that is a Story (or in one): its Jira tasks per side, for the split to tie each subtask to one
+  const available = new Set(ctx.tools.list().map((d) => d.name));
+  const story = available.has("jira.get")
+    ? await readStoryTasks(ctx.runtime, ctx.run.task, async (name, args) => {
+        const r = await ctx.tools.invoke(name, args);
+        return { ok: r.ok, text: r.truncated && r.fullRef ? ctx.runtime.blobs.getText(r.fullRef) : r.text };
+      }).catch(() => undefined)
+    : undefined;
+  const outputs = [put(ctx, "catalog", "catalog.md", story ? `${text}\n\n${storyTasksText(story)}` : text)];
+  if (story) outputs.push(put(ctx, STORY_TASKS, "story-tasks.json", JSON.stringify(story, null, 2)));
+  return { status: "success", outputs };
 };
 
 /** `cross.spawn`: the approved split's subtasks, the first ones started. */

@@ -226,6 +226,12 @@ export const SplitResult = z.object({
           .array(z.string())
           .default([])
           .describe("keys delivered before it: the producer first"),
+        issue: z
+          .string()
+          .optional()
+          .describe(
+            "the Jira task of the Story this subtask is, from the catalog's «Jira tasks of the Story» (the task of its service's side); empty when there is none",
+          ),
       }),
     )
     .min(1),

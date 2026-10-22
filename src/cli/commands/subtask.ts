@@ -7,6 +7,7 @@ import { createEngine } from "../../app/engine.ts";
 import { handOff } from "../../app/handoff.ts";
 import { masterBudgetLine, masterBudgetOf } from "../../app/masterBudget.ts";
 import { createRuntime, type Runtime } from "../../app/runtime.ts";
+import { issueOfSubtask } from "../../app/storyTasks.ts";
 import {
   type ContractItem,
   childrenOf,
@@ -82,7 +83,8 @@ export function subtaskTask(
   const line = (c: ContractItem) =>
     `- ${c.kind} ${c.id}: ${c.change} — ${c.producer} ${c.kind === "topic" ? "sends" : "serves"}${c.consumers.length > 0 ? `; ${c.consumers.join(", ")} ${c.kind === "topic" ? "read" : "call"}` : ""}${c.producer === sub.service ? " (this service produces it)" : ""}`;
   return [
-    sub.task,
+    // the Jira task first: the run's key — its branch, its commits — and its Story
+    sub.issue ? `${sub.issue} ${sub.task}` : sub.task,
     "",
     `Part of a task across services: ${first} (${shortRunId(master.id)}) — subtask ${sub.key} of ${split.subtasks.length}, ${sub.service}.`,
     ...(sub.requirements.length > 0
@@ -157,7 +159,14 @@ export async function runSubtaskRun(ctx: CliContext, masterRef: string, which: s
     const actor = await actorFor(ctx, runtime);
     const engine = createEngine(runtime);
     const runId = newRunId();
-    const task = subtaskTask(master, sub, split, usedLibraries(runtime, master, sub, split));
+    // a subtask that is a Jira task of the Story works under its key: its branch, commits, PR into the Story's branch
+    const issue = issueOfSubtask(runtime, master, sub, split);
+    const task = subtaskTask(
+      master,
+      issue ? { ...sub, issue } : sub,
+      split,
+      usedLibraries(runtime, master, sub, split),
+    );
     const workspace = await prepareWorkspace(
       ctx,
       runtime,
