@@ -670,7 +670,7 @@ ${
 <a href="${runHref(r.run)}">${t("Open")}</a>
 </div>`
             : html`<div class="panel running">
-<div class="what"><a href="${runHref(r.run)}">${firstLine(r.run.task)}</a><span class="meta">${cancelling(r.run) ? html`<span class="bad">${t("cancelling…")}</span> · ` : ""}${r.run.workflow} · ${shortRunId(r.run.id)} · ${activityText(r.activity, r.position)}${r.planProgress ? html` · <b class="planat">${t("plan {at}", { at: planAt(r.planProgress) })}</b>${r.planProgress.current !== undefined ? ` ${cut(r.planProgress.steps[r.planProgress.current]?.description ?? "", 70)}` : ""}` : ""}</span></div>
+<div class="what"><a href="${runHref(r.run)}">${firstLine(r.run.task)}</a><span class="meta">${cancelling(r.run) ? html`<span class="bad">${t("cancelling…")}</span> · ` : ""}${r.run.workflow} · ${shortRunId(r.run.id)} · ${activityText(r.activity, r.position)}${r.fixing ? html` · <b class="planat">${fixAt(r.fixing)}</b>` : ""}${r.planProgress ? html` · <b class="planat">${t("plan {at}", { at: planAt(r.planProgress) })}</b>${r.planProgress.current !== undefined ? ` ${cut(r.planProgress.steps[r.planProgress.current]?.description ?? "", 70)}` : ""}` : ""}</span></div>
 <div class="budget">${toolBudget(r.activity, now)}</div>
 <a href="${runHref(r.run)}">${t("Follow")}</a>
 </div>`,
@@ -873,7 +873,26 @@ function stepSkillsHtml(k: StepSkills): Html {
   return html`<span class="note">${t("skills:")} ${names.length > 0 ? names.join(", ") : t("none")} — ${why}${k.missing.length > 0 ? html` · <span class="bad">${t("no such skill: {ids}", { ids: k.missing.join(", ") })}</span>` : ""}</span>`;
 }
 
-function stepRow(s: StepRow, now: number, plan?: PlanProgress): Html {
+/**
+ * Where a step on a back edge is, in one line — the dock, the step's row and the Runs page say what the
+ * card says: the round and what it fixes, not the plan from its first step.
+ */
+function fixAt(f: NonNullable<RunPage["fixing"]>): string {
+  const round = f.max ? t("round {n} of {m}", { n: f.round, m: f.max }) : t("round {n}", { n: f.round });
+  const what = f.review
+    ? t("fixing what {who} sent back", { who: f.review.by })
+    : f.reasons.length > 0
+      ? t("fixing {defects}", { defects: plural(f.reasons.length, "defect") })
+      : t("fixing what {step} found", { step: f.from });
+  return `${round} · ${what}`;
+}
+
+function stepRow(
+  s: StepRow,
+  now: number,
+  plan?: PlanProgress,
+  fixing?: NonNullable<RunPage["fixing"]>,
+): Html {
   const icon = {
     done: ["✓", "ok"],
     returned: ["↺", "warn"],
@@ -935,7 +954,13 @@ function stepRow(s: StepRow, now: number, plan?: PlanProgress): Html {
           : t("waits for you"),
     );
   if (s.status === "running")
-    notes.push(plan ? `${t("running now")} · ${t("plan {at}", { at: planAt(plan) })}` : t("running now"));
+    notes.push(
+      fixing
+        ? `${t("running now")} · ${fixAt(fixing)}`
+        : plan
+          ? `${t("running now")} · ${t("plan {at}", { at: planAt(plan) })}`
+          : t("running now"),
+    );
   if (s.status === "stopped") notes.push(t("stopped before it finished"));
   const took =
     s.status === "running" && s.startedAt
@@ -1639,7 +1664,15 @@ ${page.untrusted ? untrustedHtml(page.untrusted) : html`<div data-live="untruste
 <div class="cols">
 <section class="panel side steps" aria-labelledby="steps" data-live="steps">
 <h2 id="steps">${t("Steps")}</h2>
-<ol style="margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:2px">${page.steps.map((s) => stepRow(s, now, s.status === "running" ? page.planProgress : undefined))}</ol>
+<ol style="margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:2px">${page.steps.map(
+    (s) =>
+      stepRow(
+        s,
+        now,
+        s.status === "running" ? page.planProgress : undefined,
+        s.status === "running" ? page.fixing : undefined,
+      ),
+  )}</ol>
 </section>
 <div class="mainc">
 ${review ?? ""}
@@ -1700,7 +1733,7 @@ function runDock(page: RunPage, actions?: Actions): Html {
           html`<button type="submit" class="btn" title="${t("Stops after the current model or tool call, keeps its place; Resume goes on")}">${t("Pause")}</button>`,
         );
     return dockHtml(
-      html`<span class="spin" aria-hidden="true"></span><div class="what"><b>${a.step.id}${a.step.iteration > 1 ? `#${a.step.iteration}` : ""}${page.planProgress ? ` · ${t("plan {at}", { at: planAt(page.planProgress) })}` : ""}</b><span>${callText(a)}</span></div><span class="grow"></span>${steerHtml(page, a.step, actions)}${pause}`,
+      html`<span class="spin" aria-hidden="true"></span><div class="what"><b>${a.step.id}${a.step.iteration > 1 ? `#${a.step.iteration}` : ""}${page.planProgress ? ` · ${t("plan {at}", { at: planAt(page.planProgress) })}` : page.fixing ? ` · ${fixAt(page.fixing)}` : ""}</b><span>${callText(a)}</span></div><span class="grow"></span>${steerHtml(page, a.step, actions)}${pause}`,
     );
   }
   return dockHtml("");

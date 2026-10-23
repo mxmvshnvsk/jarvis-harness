@@ -387,6 +387,8 @@ export interface RunningRun {
   readonly position?: { readonly index: number; readonly total: number };
   /** An implementation's place in its plan (src/app/planProgress.ts). */
   readonly planProgress?: PlanProgress;
+  /** A round on a back edge: what it fixes, instead of the plan. */
+  readonly fixing?: FixView;
 }
 
 export interface RecentRun {
@@ -646,10 +648,12 @@ export async function runsPage(
       const activity = activityOf(events, new Date(now));
       const plan = workflowOf(engine, run)?.steps.map((s) => s.id) ?? [];
       const at = activity?.step ? plan.indexOf(activity.step.id) : -1;
-      const progress = implementing(activity) ? planProgressOf(runtime, run, events) : undefined;
+      const fixing = fixingOf(runtime, events, activity);
+      const progress = implementing(activity) && !fixing ? planProgressOf(runtime, run, events) : undefined;
       running.push({
         run,
         ...(activity ? { activity } : {}),
+        ...(fixing ? { fixing } : {}),
         ...(at >= 0 ? { position: { index: at + 1, total: plan.length } } : {}),
         ...(progress ? { planProgress: progress } : {}),
       });
@@ -1732,6 +1736,7 @@ export async function runPage(
           carried.set(line.report.stepId, line.report);
   }
   const activity = activityOf(events, now);
+  const fixing = run.state === "RUNNING" ? fixingOf(runtime, events, activity) : undefined;
   const leaseLive = run.lease !== undefined && Date.parse(run.lease.until) >= now.getTime();
   const row = (id: string): StepRow => {
     const theirs = carried.get(id);
@@ -1861,24 +1866,15 @@ export async function runPage(
     ...((p) => (p ? { pausing: p.by ? { by: p.by } : {} } : {}))(
       run.state === "RUNNING" ? pauseRequested(runtime, run.id) : undefined,
     ),
-    ...((f) => (f ? { fixing: f } : {}))(
-      run.state === "RUNNING"
-        ? fixOf(
-            events,
-            activity?.step?.id,
-            (artifactId, version, decision) =>
-              runtime.artifacts
-                .approvalsFor(artifactId, version)
-                .filter((a) => a.decision === decision)
-                .at(-1)?.comment,
-          )
-        : undefined,
-    ),
+    ...(fixing ? { fixing } : {}),
     ...((u) => (u ? { untrusted: u } : {}))(
       events.some((e) => e.kind === UNTRUSTED_CONTENT) ? untrustedOf(events) : undefined,
     ),
+    // a round that fixes what was found is not the plan again (pilot: «plan 1 of 11» in round 2)
     ...((p) => (p ? { planProgress: p } : {}))(
-      run.state === "RUNNING" && implementing(activity) ? planProgressOf(runtime, run, events) : undefined,
+      run.state === "RUNNING" && implementing(activity) && !fixing
+        ? planProgressOf(runtime, run, events)
+        : undefined,
     ),
   };
 }
@@ -2053,6 +2049,23 @@ export interface FixView {
     readonly decision: string;
     readonly comment?: string;
   };
+}
+
+/** The running step's fix round, if it is one: with the comments people sent the work back with. */
+export function fixingOf(
+  runtime: Runtime,
+  events: readonly StoredEvent[],
+  activity: Activity | undefined,
+): FixView | undefined {
+  return fixOf(
+    events,
+    activity?.step?.id,
+    (artifactId, version, decision) =>
+      runtime.artifacts
+        .approvalsFor(artifactId, version)
+        .filter((a) => a.decision === decision)
+        .at(-1)?.comment,
+  );
 }
 
 /**

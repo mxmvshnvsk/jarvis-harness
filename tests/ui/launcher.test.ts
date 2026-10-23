@@ -846,11 +846,25 @@ describe("New task on the page", () => {
     ev("workflow.loop", "verify", { edge: "verify->implementation#defects_found", iteration: 1, max: 2 });
     ev("step.start", "implementation", { stepId: "implementation", iteration: 2 });
     ev("agent.start", "implementation", { agent: "implementation" });
+    rt.artifacts.put({
+      runId: run.id,
+      type: "plan",
+      name: "plan.json",
+      content: JSON.stringify({ steps: [{ id: "1", description: "The slots method", files: ["src/a.ts"] }] }),
+      mediaType: "application/json",
+      provenance: { kind: "agent", agentId: "plan" },
+      stepId: "plan",
+    });
     const short = run.id.replace(/^run_/, "").slice(0, 8);
     const body = await page(`/runs/${short}`);
     expect(body).toContain(
       '<span class="of">Round 2 of 3</span><span class="d">Fixing 2 defects verify found</span>',
     );
+    // the dock, the step's row and the Runs page say the same: the round, not the plan from its start
+    expect(body).toContain("implementation#2 · round 2 of 3 · fixing 2 defects</b>");
+    expect(body).toContain("running now · round 2 of 3 · fixing 2 defects");
+    expect(body).not.toContain("plan 1 of 1");
+    expect(await page("/")).toContain('<b class="planat">round 2 of 3 · fixing 2 defects</b>');
     expect(body).toContain("missing route for the courier app");
     // open while implementation works: a hint for its next model call, and the switches of the run
     expect(body).toContain(
