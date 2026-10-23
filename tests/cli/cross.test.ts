@@ -216,6 +216,52 @@ describe("a task across services", () => {
       expect(body).toContain("Subtasks");
       expect(body).toContain("2 of 2 done");
       expect(body).toContain("✗ orders-api");
+      // each subtask's PR, followed on its run: the master's list says where its review stands
+      const put = (runId: string, type: string, doc: unknown) =>
+        rt.artifacts.put({
+          runId,
+          type,
+          name: `${type}.json`,
+          content: JSON.stringify(doc),
+          mediaType: "application/json",
+          provenance: { kind: "tool", capability: "runtime.delivery" },
+          stepId: "deliver",
+        });
+      const pr = (id: string) => ({
+        id,
+        url: `https://git.example.com/pull-requests/${id}`,
+        title: "t",
+        source: "feature/ABC-42",
+        target: "dev",
+        commit: "c",
+        capability: "bitbucket.pr.create",
+        actor: "user:dev@example.com",
+        at: "2026-10-22T12:00:00.000Z",
+      });
+      put(views[0]?.run?.id as string, "pull-request", pr("924"));
+      put(views[0]?.run?.id as string, "pr-review", {
+        pr: { id: "924", source: "feature/ABC-42", target: "dev" },
+        state: "OPEN",
+        reviewers: [{ name: "Ann" }],
+        approvals: 0,
+        threads: [{ id: 1, author: "Ann", text: "rename it", replies: [] }],
+        openTasks: 0,
+        build: { successful: 1, failed: 0, inProgress: 0 },
+        ready: false,
+        blockers: ["approvals: 0 of 1", "open threads: 1"],
+        checkedAt: "2026-10-22T12:05:00.000Z",
+      });
+      put(views[1]?.run?.id as string, "pull-request", pr("925"));
+      const withPrs = runContent(
+        await runPage(rt, createEngine(rt), m, { homeDir: sb.home }),
+        Date.now(),
+      ).value;
+      expect(withPrs).toContain('<span class="pill wait">1 PR comment</span>');
+      expect(withPrs).toContain('<span class="pill plain">PR: not read yet</span>');
+      expect(withPrs).toMatch(
+        /<a href="https:\/\/git.example.com\/pull-requests\/924"[^>]*>PR #924<\/a> · approvals 0 of 1 · open threads: 1 · build ✓ · <a href="\/runs\/[0-9a-f]{8}\/pr">code review<\/a>/,
+      );
+      expect(withPrs).toContain("· 2 PRs: with comments: 1, in review: 1");
       const child = await runPage(rt, createEngine(rt), views[1]?.run as never, { homeDir: sb.home });
       expect(runContent(child, Date.now()).value).toContain("subtask 2 of 2 · notify-api of");
     } finally {
@@ -525,7 +571,9 @@ steps:
       expect(body).toContain('<span class="pill wait">waits for you · contract</span>');
       expect(body).toContain("Σ task: 0 model calls");
       expect(body).toMatch(/<td class="k">the master&#39;s own steps<\/td>/);
-      expect(body).toMatch(/<a href="\/runs\/[0-9a-f]{8}">1 orders-api<\/a> <span class="muted">WAITING_HUMAN<\/span>/);
+      expect(body).toMatch(
+        /<a href="\/runs\/[0-9a-f]{8}">1 orders-api<\/a> <span class="muted">WAITING_HUMAN<\/span>/,
+      );
       expect(body).toContain("Asks for: + deliverySlotId, required");
       // the subtask's own page sends to the master
       const subBody = runContent(

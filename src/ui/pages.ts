@@ -47,6 +47,7 @@ import type {
   Spend,
   StepRow,
   StepSkills,
+  SubtaskPr,
   TestsStop,
   UntrustedView,
   WaitCard,
@@ -1702,6 +1703,9 @@ function subtasksHtml(page: RunPage, actions?: Actions): Html {
   const done = views.filter((v) => v.state === "COMPLETED" || v.state === "dropped").length;
   const serviceOf = (key: string) => views.find((v) => v.subtask.key === key)?.subtask.service ?? key;
   const pill = (v: SubtaskView) => {
+    // done, with a PR: where its review stands — followed on the subtask's run
+    const pr = page.subtaskPr?.[v.subtask.key];
+    if (pr && v.state === "COMPLETED") return prPill(pr);
     // what it does now: its step, or what it waits for — not the bare state
     const n = page.subtaskNow?.[v.subtask.key];
     if (
@@ -1734,7 +1738,7 @@ function subtasksHtml(page: RunPage, actions?: Actions): Html {
       : html`<div class="banner bad sub-pub"><b>publish-local failed</b> — <code>${p.command ?? ""}</code>; the services that use it keep waiting.${p.tail ? html`<pre class="tf-tail">${p.tail}</pre>` : ""}</div>`;
   };
   return html`<section class="panel subtasks" aria-labelledby="subtasks" data-live="subtasks">
-<h2 id="subtasks">Subtasks <span class="meta">${done} of ${views.length} done</span></h2>
+<h2 id="subtasks">Subtasks <span class="meta">${done} of ${views.length} done</span>${prsSummary(page)}</h2>
 ${page.masterBudget ? masterBudgetHtml(page.masterBudget) : ""}
 <ul class="sub-list">${views.map(
     (v) => html`<li class="sub-row">
@@ -1742,10 +1746,70 @@ ${page.masterBudget ? masterBudgetHtml(page.masterBudget) : ""}
 <span class="sub-service">${v.run ? html`<a href="/runs/${shortRunId(v.run.id)}">${v.subtask.service}</a>` : html`<b>${v.subtask.service}</b>`}${v.subtask.issue ? html`<span class="meta mono">${v.subtask.issue}</span>` : ""}</span>
 <span class="muted sub-task">${firstLine(v.subtask.task, 140)}${page.subtaskNow?.[v.subtask.key]?.detail && v.state !== "COMPLETED" ? html`<span class="meta sub-now">${page.subtaskNow[v.subtask.key]?.detail}</span>` : ""}</span>
 <span class="sub-acts">${pill(v)}${v.state === "queued" ? act(v.subtask.key, "start", "Start now") : ""}${v.state === "blocked" ? act(v.subtask.key, "start", "Start now anyway") : ""}${v.published && !v.published.ok ? act(v.subtask.key, "publish", "Run publish-local again", true) : ""}${v.state === "CANCELLED" || v.state === "FAILED" ? act(v.subtask.key, "retry", "Retry") : ""}${v.state !== "COMPLETED" && v.state !== "dropped" ? act(v.subtask.key, "drop", "Drop") : ""}</span>
-${v.state === "blocked" ? html`<p class="hint sub-pub">Starts when ${(v.waitsFor ?? []).map(serviceOf).join(", ")} is accepted and published, against the new version. «Start now anyway» — against the version it has.</p>` : ""}${published(v)}
+${page.subtaskPr?.[v.subtask.key] ? prLine(page.subtaskPr[v.subtask.key] as SubtaskPr) : ""}${v.state === "blocked" ? html`<p class="hint sub-pub">Starts when ${(v.waitsFor ?? []).map(serviceOf).join(", ")} is accepted and published, against the new version. «Start now anyway» — against the version it has.</p>` : ""}${published(v)}
 </li>`,
   )}</ul>
 </section>`;
+}
+
+// t("ready to merge") t("merged") t("PR declined") t("PR: not read yet") t("in review")
+const PR_PHASE: Record<SubtaskPr["phase"], { label: string; tone: string }> = {
+  ready: { label: "ready to merge", tone: "ok" },
+  merged: { label: "merged", tone: "ok" },
+  declined: { label: "PR declined", tone: "bad" },
+  unread: { label: "PR: not read yet", tone: "plain" },
+  review: { label: "in review", tone: "info" },
+  comments: { label: "", tone: "wait" },
+  replies: { label: "", tone: "wait" },
+};
+
+/** A done subtask's PR, as its pill: what its review waits for. */
+function prPill(pr: SubtaskPr): Html {
+  const label =
+    pr.phase === "replies"
+      ? plural(pr.waiting, "answer to approve", "answers to approve")
+      : pr.phase === "comments"
+        ? pr.threads > 0
+          ? plural(pr.threads, "PR comment")
+          : t("PR tasks open")
+        : t(PR_PHASE[pr.phase].label);
+  return html`<span class="pill ${PR_PHASE[pr.phase].tone}">${label}</span>`;
+}
+
+/** A line under a subtask with a PR: the PR, approvals, threads, build, and its code review page. */
+function prLine(pr: SubtaskPr): Html {
+  const short = shortRunId(pr.run.id);
+  const build =
+    pr.build === "ok"
+      ? t("build ✓")
+      : pr.build === "failed"
+        ? t("build failed")
+        : pr.build === "running"
+          ? t("build running")
+          : "";
+  const bits = [
+    pr.phase === "unread" || pr.phase === "merged" || pr.phase === "declined"
+      ? ""
+      : t("approvals {a} of {b}", { a: pr.approvals, b: pr.need }),
+    pr.threads > 0 ? t("open threads: {n}", { n: pr.threads }) : "",
+    build,
+  ].filter(Boolean);
+  const name = `PR${pr.id ? ` #${pr.id}` : ""}`;
+  return html`<p class="hint sub-pr">${pr.url ? html`<a href="${pr.url}" target="_blank" rel="noopener">${name}</a>` : name}${bits.length > 0 ? ` · ${bits.join(" · ")}` : ""} · <a href="/runs/${short}/pr">${pr.waiting > 0 ? t("answer the comments") : t("code review")}</a>${pr.following ? "" : pr.phase === "merged" || pr.phase === "declined" ? "" : html` <span class="muted">${t("not followed")}</span>`}</p>`;
+}
+
+/** The subtasks' PRs at a glance, on the panel's heading: how many are ready, wait for a person, are merged. */
+function prsSummary(page: RunPage): Html | string {
+  const prs = Object.values(page.subtaskPr ?? {});
+  if (prs.length === 0) return "";
+  const n = (ph: ReadonlyArray<SubtaskPr["phase"]>) => prs.filter((p) => ph.includes(p.phase)).length;
+  const bits = [
+    n(["merged"]) ? t("merged: {n}", { n: n(["merged"]) }) : "",
+    n(["ready"]) ? t("ready: {n}", { n: n(["ready"]) }) : "",
+    n(["comments", "replies"]) ? t("with comments: {n}", { n: n(["comments", "replies"]) }) : "",
+    n(["review", "unread"]) ? t("in review: {n}", { n: n(["review", "unread"]) }) : "",
+  ].filter(Boolean);
+  return html` <span class="meta sub-prs">· ${plural(prs.length, "PR")}: ${bits.join(", ")}</span>`;
 }
 
 /**

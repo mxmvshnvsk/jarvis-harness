@@ -22,12 +22,16 @@ import {
   rerunRequested,
   waitingCard,
 } from "../app/decide.ts";
+import { prOf } from "../app/deliver.ts";
 import { unresolvedEffectOf } from "../app/effects.ts";
+import { finalizedOf } from "../app/finalize.ts";
 import { continuedBy } from "../app/handoff.ts";
 import { Journey, type LoopReport, type StepReport } from "../app/journey.ts";
 import { type MasterBudget, masterBudgetOf } from "../app/masterBudget.ts";
 import { pauseRequested } from "../app/pause.ts";
 import { type PlanProgress, planProgressOf } from "../app/planProgress.ts";
+import { followsPr, prReviewOf } from "../app/prReview.ts";
+import { triageOf } from "../app/prTriage.ts";
 import { redoableInPlace, redoTargets } from "../app/redo.ts";
 import { type RestartPlan, restartPlanOf } from "../app/restart.ts";
 import { type Resumable, resumableOf } from "../app/resumable.ts";
@@ -917,6 +921,8 @@ export interface RunPage {
   readonly family?: FamilySpend;
   /** A master: what each started subtask does now, by its key. */
   readonly subtaskNow?: Readonly<Record<string, SubtaskNow>>;
+  /** A master: the PR of each subtask that has one, by its key — its review is followed on the subtask's run. */
+  readonly subtaskPr?: Readonly<Record<string, SubtaskPr>>;
   /** Untrusted content from the internet with no approval since (ADR-0016 §4): effects are held. */
   readonly untrusted?: UntrustedView;
 }
@@ -970,6 +976,62 @@ export interface SubtaskNow {
   readonly tone: "info" | "wait" | "plain";
   /** One line under it: the agent's calls, its tools, its wait. */
   readonly detail?: string;
+}
+
+/** Where a subtask's PR stands, from the subtask run's last read of it (src/app/prReview.ts). */
+export interface SubtaskPr {
+  readonly run: Run;
+  readonly id?: string;
+  readonly url?: string;
+  /** merged: merged on the server, or the task finalized; read: never read yet. */
+  readonly phase: "unread" | "review" | "comments" | "replies" | "ready" | "merged" | "declined";
+  readonly approvals: number;
+  readonly need: number;
+  /** Open threads of reviewers (not Jarvis's own). */
+  readonly threads: number;
+  /** Answers or fixes Jarvis proposes for its comments, waiting for a person. */
+  readonly waiting: number;
+  readonly build?: "ok" | "failed" | "running";
+  readonly blockers: readonly string[];
+  readonly following: boolean;
+}
+
+export function subtaskPrOf(runtime: Runtime, run: Run): SubtaskPr | undefined {
+  const pr = prOf(runtime, run);
+  if (!pr) return undefined;
+  const review = prReviewOf(runtime, run);
+  const need = runtime.loaded.config.delivery.flow.ready.approvals;
+  const threads = review ? review.threads.filter((x) => !x.mine).length : 0;
+  const waiting = triageOf(runtime, run).items.filter((i) => i.state === "proposed").length;
+  const b = review?.build;
+  const build = b ? (b.failed > 0 ? "failed" : b.inProgress > 0 ? "running" : "ok") : undefined;
+  const phase: SubtaskPr["phase"] =
+    finalizedOf(runtime, run) || review?.state === "MERGED"
+      ? "merged"
+      : review?.state === "DECLINED"
+        ? "declined"
+        : !review
+          ? "unread"
+          : waiting > 0
+            ? "replies"
+            : threads > 0 || review.openTasks > 0
+              ? "comments"
+              : review.ready
+                ? "ready"
+                : "review";
+  return {
+    run,
+    ...(pr.id ? { id: pr.id } : {}),
+    ...(pr.url ? { url: pr.url } : {}),
+    phase,
+    approvals: review?.approvals ?? 0,
+    need,
+    threads,
+    waiting,
+    ...(build ? { build } : {}),
+    blockers: review?.blockers ?? [],
+    following: followsPr(runtime, run),
+  };
 }
 
 export function spendOf(events: readonly StoredEvent[], now: Date, live: boolean): Spend {
@@ -1080,6 +1142,7 @@ function crossOf(
   | "masterBudget"
   | "family"
   | "subtaskNow"
+  | "subtaskPr"
 > {
   const of = masterOf(runtime, run);
   if (of)
@@ -1106,6 +1169,7 @@ function crossOf(
   const own = spendOf(runEvents(runtime, run.id), now, leaseLiveOf(run, now));
   const parts: Array<FamilySpend["parts"][number]> = [{ label: t("the master's own steps"), spend: own }];
   const subtaskNow: Record<string, SubtaskNow> = {};
+  const subtaskPr: Record<string, SubtaskPr> = {};
   for (const v of subtasks) {
     if (!v.run) continue;
     const events = runEvents(runtime, v.run.id);
@@ -1117,10 +1181,13 @@ function crossOf(
     });
     const n = subtaskNowOf(v.run, events, now);
     if (n) subtaskNow[v.subtask.key] = n;
+    const pr = subtaskPrOf(runtime, v.run);
+    if (pr) subtaskPr[v.subtask.key] = pr;
   }
   const family: FamilySpend = { total: parts.map((p) => p.spend).reduce(plus), parts };
   return {
     ...(subtasks.length > 0 ? { subtasks, family, subtaskNow } : {}),
+    ...(Object.keys(subtaskPr).length > 0 ? { subtaskPr } : {}),
     ...(contractCheck ? { contractCheck } : {}),
     ...(contractRequests.length > 0
       ? { contractRequests, contractItems: splitOf(runtime, run)?.contract ?? [] }
