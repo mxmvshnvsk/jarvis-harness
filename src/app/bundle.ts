@@ -48,6 +48,44 @@ function rowsOf(runtime: Runtime, table: string, where: string, params: unknown[
     .all(...(params as string[])) as unknown as Row[];
 }
 
+/** The blobs of the agents' conversations: the latest transcript of each step's round, and what it cut. */
+function conversationRefs(runtime: Runtime, tables: Record<string, Row[]>): string[] {
+  const latest = new Map<string, { at: string; ref: string }>();
+  for (const c of tables.checkpoints ?? []) {
+    let ref: unknown;
+    try {
+      ref = (JSON.parse(String(c.state_json ?? "{}")) as { transcriptRef?: unknown }).transcriptRef;
+    } catch {
+      continue;
+    }
+    if (typeof ref !== "string") continue;
+    const key = `${c.step_id}#${c.iteration}`;
+    const at = String(c.created_at ?? "");
+    if ((latest.get(key)?.at ?? "") <= at) latest.set(key, { at, ref });
+  }
+  const refs = new Set([...latest.values()].map((l) => l.ref));
+  for (const e of tables.events ?? []) {
+    if (e.kind !== "context.trimmed") continue;
+    try {
+      const p = JSON.parse(String(e.payload_json ?? "{}")) as { originals?: Array<{ ref?: unknown }> };
+      for (const o of p.originals ?? []) if (typeof o.ref === "string") refs.add(o.ref);
+    } catch {
+      // a payload that does not parse: nothing to take
+    }
+  }
+  // a long tool output names its full text by a prefix: «…[truncated: full output N bytes, blob 1a2b…]»
+  const prefixes = new Set<string>();
+  for (const ref of refs) {
+    if (!runtime.blobs.has(ref)) continue;
+    for (const m of runtime.blobs.getText(ref).matchAll(/blob ([0-9a-f]{12})\b/g))
+      prefixes.add(m[1] as string);
+  }
+  for (const prefix of prefixes)
+    for (const r of rowsOf(runtime, "blobs", "content_ref LIKE ?", [`${prefix}%`]))
+      refs.add(r.content_ref as string);
+  return [...refs];
+}
+
 export async function exportRun(runtime: Runtime, runId: string): Promise<RunBundle> {
   const run = runtime.runs.require(runId);
   const tables: Record<string, Row[]> = {};
@@ -65,6 +103,10 @@ export async function exportRun(runtime: Runtime, runId: string): Promise<RunBun
     if (e.args_ref) refs.add(e.args_ref as string);
     if (e.result_ref) refs.add(e.result_ref as string);
   }
+  // what the agents saw and said: the last saved conversation of each step's round, and the full
+  // text of what was cut from it (a tool's long output, trimmed context) — without it a bundle tells
+  // that a check failed, not why (pilot: «project.lint exit 1» five times, its output nowhere)
+  for (const ref of conversationRefs(runtime, tables)) refs.add(ref);
   const blobs: Record<string, string> = {};
   tables.blobs = [];
   for (const ref of refs) {

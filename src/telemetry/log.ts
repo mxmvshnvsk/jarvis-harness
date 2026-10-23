@@ -224,6 +224,8 @@ export function logFiles(dir: string): string[] {
 /** Reads the log files in time order and applies the filter; the last `tail` records win. */
 export function readLogs(dir: string, filter: LogFilter = {}, now = Date.now()): LogRecord[] {
   const min = RANK[filter.level ?? "info"];
+  // the short id a person types (cad7b5c2) or the full one (run_cad7b5c2…): records keep the full one
+  const run = filter.run ? (filter.run.startsWith("run_") ? filter.run : `run_${filter.run}`) : undefined;
   const out: LogRecord[] = [];
   for (const file of logFiles(dir)) {
     for (const line of readFileSync(file, "utf8").split("\n")) {
@@ -235,7 +237,7 @@ export function readLogs(dir: string, filter: LogFilter = {}, now = Date.now()):
         continue;
       }
       if (RANK[record.level] > min) continue;
-      if (filter.run && !(record.runId ?? "").startsWith(filter.run)) continue;
+      if (run && !(record.runId ?? "").startsWith(run)) continue;
       if (filter.event && !record.event.includes(filter.event)) continue;
       if (filter.sinceMs !== undefined && Date.parse(record.ts) < now - filter.sinceMs) continue;
       out.push(record);

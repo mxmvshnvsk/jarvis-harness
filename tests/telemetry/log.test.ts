@@ -146,6 +146,8 @@ describe("readLogs / eventLevel", () => {
     log.debug("model.request", { runId: "run_aaaa1" });
     log.info("model.call", { runId: "run_bbbb2" });
     expect(readLogs(dir, { run: "run_aaaa" }).map((r) => r.event)).toEqual(["model.call", "model.error"]);
+    // the short id a person types (pilot: «no records match (run cad7b5c2)» with the run's records there)
+    expect(readLogs(dir, { run: "aaaa" }).map((r) => r.event)).toEqual(["model.call", "model.error"]);
     expect(readLogs(dir, { level: "error" }).map((r) => r.event)).toEqual(["model.error"]);
     expect(readLogs(dir, { level: "debug", run: "run_aaaa" })).toHaveLength(3);
     expect(readLogs(dir, { event: "request", level: "debug" })).toHaveLength(1);
