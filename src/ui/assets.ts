@@ -57,7 +57,9 @@ a{color:var(--accent)}a:hover{color:var(--accent-dark)}
 @media (min-width:720px){.top{position:sticky;top:0;z-index:40}html{scroll-padding-top:72px}}
 .wrap{max-width:1240px;margin:0 auto;padding:0 24px}
 /* not the progress .bar below: that one clips (overflow:hidden), which hid the mcp and models popovers */
-.top .bar{min-height:56px;height:auto;padding:10px 24px;display:flex;flex-wrap:wrap;align-items:center;gap:8px 6px;overflow:visible;border-radius:0;background:none}
+/* the header's content as wide as the page's (main.wrap, the dock): on a wide screen the logo and the
+   buttons stay over the content instead of the screen's edges; its background still spans the screen */
+.top .bar{max-width:1240px;margin:0 auto;min-height:56px;height:auto;padding:10px 24px;display:flex;flex-wrap:wrap;align-items:center;gap:8px 6px;overflow:visible;border-radius:0;background:none}
 .brand{display:inline-flex;align-items:center;gap:8px;margin-right:14px;font-family:var(--mono);font-weight:600;font-size:15px;color:var(--ink);text-decoration:none}
 .brand .mark{width:16px;height:16px;border-radius:5px;background:var(--ink)}
 .top nav a{display:inline-flex;align-items:center;gap:7px;height:32px;padding:0 10px;border-radius:var(--r);color:var(--muted);text-decoration:none;font-size:14px}
@@ -858,6 +860,7 @@ p.sv-pair{margin:0;font-size:14px}
 .mdrafts>div{display:flex;flex-direction:column;gap:4px}
 @media (max-width:640px){
   .wrap{padding:0 16px}
+  .top .bar{padding-left:16px;padding-right:16px}
   main.wrap{padding-top:20px;gap:22px}
   h1{font-size:24px;line-height:31px}
   .card{flex-basis:100%;padding:16px}

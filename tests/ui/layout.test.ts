@@ -123,6 +123,32 @@ describe("the pages' layout in a browser", () => {
           }
         });
 
+  it("on a very wide screen the header's content lines up with the page's, not the screen's edges", async (t) => {
+    if (!browser) return t.skip(why);
+    const page = await open(
+      pages.paths.runs as string,
+      { name: "wide", width: 2560, height: 1000 } as never,
+      "dark",
+    );
+    try {
+      const box = await page.evaluate(() => {
+        const r = (sel: string) => document.querySelector(sel)?.getBoundingClientRect();
+        const bar = r(".top .bar");
+        return {
+          brand: r(".top .brand")?.left ?? 0,
+          main: r("main.wrap")?.left ?? 0,
+          barRight: bar?.right ?? 0,
+          mainRight: r("main.wrap")?.right ?? 0,
+        };
+      });
+      expect(Math.abs(box.brand - (box.main + 24))).toBeLessThanOrEqual(2);
+      expect(Math.abs(box.barRight - box.mainRight)).toBeLessThanOrEqual(2);
+      await shot(page, "header-2560");
+    } finally {
+      await page.context().close();
+    }
+  });
+
   it("the decision column stays in sight beside a long document, its buttons too", async (t) => {
     if (!browser) return t.skip(why);
     const page = await open(pages.paths.review as string, SIZES[0], "light");
