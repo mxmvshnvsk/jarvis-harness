@@ -1,3 +1,4 @@
+import { COVERAGE_ACTOR } from "../agents/coverage.ts";
 import { reasonOf } from "../app/activity.ts";
 import { ANALYSIS_AGENTS, ARBITER_ACTOR, arbitrate } from "../app/arbiter.ts";
 import { isAutonomous, noteAutonomy } from "../app/autonomy.ts";
@@ -287,6 +288,27 @@ export class LocalWorkflowEngine {
           outcome = await this.executeStep(run, workflow, step, iteration, lease, workspace);
         } catch (error) {
           const suspend = this.toSuspension(error, run);
+          // an analysis that left gaps: one round to cover them by itself, no person asked (coverage.ts)
+          const gapStop = suspend?.checkpointState?.budget as Record<string, unknown> | undefined;
+          if (suspend?.waitingFor?.kind === "budget" && gapStop?.retry === true) {
+            const cap = Number(gapStop.cap) || 20;
+            this.rt.events.emit({
+              kind: "budget.grant",
+              runId: run.id,
+              stepId: step.id,
+              iteration,
+              actor: COVERAGE_ACTOR,
+              payload: {
+                scope: "agent",
+                dimension: "toolCalls",
+                toolCalls: Math.max(5, Math.round(cap / 4)),
+                modelCalls: 5,
+                gaps: Array.isArray(gapStop.gaps) ? gapStop.gaps.length : 0,
+                channel: "auto",
+              },
+            });
+            continue;
+          }
           // an autonomous run at a budget stop: its judge grants more and the step goes on, or the run ends
           if (suspend && isAutonomous(run) && suspend.waitingFor?.kind === "budget") {
             const judged = await this.judgeBudget(run, step, iteration, suspend);
@@ -940,6 +962,7 @@ export class LocalWorkflowEngine {
       iteration,
       ...(typeof b.agent === "string" ? { agent: b.agent } : {}),
       suggested: 0,
+      ...(Array.isArray(b.gaps) ? { gaps: b.gaps.filter((g): g is string => typeof g === "string") } : {}),
     };
     if (!Number.isFinite(stop.used) || !Number.isFinite(stop.cap)) return undefined;
     const decision = await arbitrate(this.rt, run, stop);

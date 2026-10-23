@@ -24,6 +24,8 @@ export interface BudgetStop {
   readonly agent?: string;
   /** What "more" adds unless the person says otherwise: half the cap, rounded. */
   readonly suggested: number;
+  /** An analysis stopped on what it left uncovered (src/agents/coverage.ts), not on a limit. */
+  readonly gaps?: readonly string[];
 }
 
 export interface BudgetGrant {
@@ -90,6 +92,7 @@ export function budgetStopOf(runtime: Runtime, run: Run): BudgetStop | undefined
     iteration: parked.iteration ?? run.currentIteration ?? 1,
     ...(typeof b.agent === "string" ? { agent: b.agent } : {}),
     suggested: suggestedMore(dimension, cap),
+    ...(Array.isArray(b.gaps) ? { gaps: b.gaps.filter((g): g is string => typeof g === "string") } : {}),
   };
 }
 

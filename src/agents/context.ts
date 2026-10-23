@@ -59,6 +59,11 @@ export function numberedLines(text: string): string {
 export function incompleteNote(a: ArtifactVersion): string {
   const p = a.provenance;
   if (p.kind !== "agent") return "";
+  // measured coverage: incomplete is what it left uncovered, not the limit it ended on
+  if (p.gaps !== undefined)
+    return p.gaps.length > 0
+      ? `> INCOMPLETE: agent ${p.agentId}'s document leaves these uncovered: ${p.gaps.join("; ")}. Do not take them as settled.\n\n`
+      : "";
   if (!p.budgetExhausted)
     return p.shortened
       ? `> SHORTENED: agent ${p.agentId}'s document was cut at the output limit and written again shorter; items may be missing. Verify what you rely on.\n\n`

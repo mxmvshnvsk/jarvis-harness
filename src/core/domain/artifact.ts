@@ -12,6 +12,11 @@ export const ProvenanceSchema = z.discriminatedUnion("kind", [
     budgetExhausted: z.enum(["tools", "model", "budget"]).optional(),
     /** Written again shorter after it was cut at the output limit: items may have been dropped. */
     shortened: z.boolean().optional(),
+    /**
+     * What the document leaves uncovered of its step's goal, measured from the artifacts (src/agents/
+     * coverage.ts): set — the agent's coverage was checked; empty — complete, whatever limit it ended on.
+     */
+    gaps: z.array(z.string()).optional(),
   }),
   z.strictObject({
     kind: z.literal("tool"),

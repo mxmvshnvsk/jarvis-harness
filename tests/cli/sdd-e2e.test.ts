@@ -140,7 +140,7 @@ const docs: Record<string, (reviewRound: number) => unknown> = {
   impact: () => ({
     ...base,
     affected: [
-      { path: "src/onboarding.ts", kind: "code", reason: "flag" },
+      { path: "src/onboarding.ts", kind: "code", reason: "flag", requirements: ["R1"] },
       { path: "docs/onboarding.md", kind: "docs", reason: "documented behaviour" },
       { path: "src/onboarding.ts", kind: "telemetry", reason: "counter" },
     ],
@@ -152,7 +152,13 @@ const docs: Record<string, (reviewRound: number) => unknown> = {
   plan: () => ({
     ...base,
     steps: [
-      { id: "S1", description: "flip the flag", files: ["src/onboarding.ts"], verification: "project.check" },
+      {
+        id: "S1",
+        description: "flip the flag",
+        files: ["src/onboarding.ts"],
+        verification: "project.check",
+        requirements: ["R1"],
+      },
     ],
     outcome: "ok",
   }),

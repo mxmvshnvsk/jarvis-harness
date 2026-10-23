@@ -177,6 +177,10 @@ export const ImpactResult = z.object({
       path: z.string().min(1),
       kind: z.enum(["code", "test", "docs", "telemetry", "config"]),
       reason: z.string().min(1),
+      requirements: z
+        .array(z.string().min(1))
+        .default([])
+        .describe("the spec's requirement ids (R1, R2…) this path serves"),
     }),
   ),
   dependencies: z.array(z.string()).default([]).describe("modules/services that depend on the affected code"),
@@ -268,6 +272,10 @@ export const PlanResult = z.object({
       description: z.string().min(1),
       files: z.array(z.string()).default([]),
       verification: z.string().min(1),
+      requirements: z
+        .array(z.string().min(1))
+        .default([])
+        .describe("the spec's requirement ids (R1, R2…) this step implements"),
     }),
   ),
   outcome: z.enum(["ok", "spec_infeasible"]).default("ok"),

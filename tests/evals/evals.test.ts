@@ -66,10 +66,22 @@ gold:
     },
     impact: {
       ...base,
-      affected: [{ path: "src/onboarding.ts", kind: "code", reason: "flag" }],
+      affected: [{ path: "src/onboarding.ts", kind: "code", reason: "flag", requirements: ["R1"] }],
       outcome: "ok",
     },
-    plan: { ...base, steps: [{ id: "S1", description: "d", verification: "project.check" }], outcome: "ok" },
+    plan: {
+      ...base,
+      steps: [
+        {
+          id: "S1",
+          description: "d",
+          files: ["src/onboarding.ts"],
+          verification: "project.check",
+          requirements: ["R1"],
+        },
+      ],
+      outcome: "ok",
+    },
     implementation: { ...base, changedFiles: ["src/onboarding.ts"], outcome: "ok" },
     test: { ...base, commandsRun: ["project.check"], passed: true, outcome: "ok" },
     review: { ...base, findings: [], verdict: "approve", outcome: "ok" },

@@ -138,10 +138,16 @@ export function createStyle(enabled: boolean, options: { links?: boolean } = {})
 }
 
 /** `research (tool limit)` for an artifact whose agent stopped on a limit; undefined otherwise. */
+/**
+ * An agent's document that is incomplete: what it left uncovered, where its coverage is measured
+ * (src/agents/coverage.ts) — a limit reached with nothing uncovered is complete; else the limit it hit.
+ */
 export function incompleteOf(
   a: Pick<ArtifactVersion, "provenance">,
-): { agentId: string; limit: string } | undefined {
+): { agentId: string; limit?: string; gaps?: readonly string[] } | undefined {
   const p = a.provenance;
+  if (p.kind === "agent" && p.gaps !== undefined)
+    return p.gaps.length > 0 ? { agentId: p.agentId, gaps: p.gaps } : undefined;
   return p.kind === "agent" && p.budgetExhausted
     ? {
         agentId: p.agentId,

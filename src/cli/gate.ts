@@ -242,7 +242,13 @@ async function brief(
   }
   const partial = incompleteOf(a);
   if (partial)
-    ctx.out.line(`  ${st.warn(`⚠ incomplete: agent ${partial.agentId} hit its ${partial.limit} limit`)}`);
+    ctx.out.line(
+      `  ${st.warn(
+        partial.gaps
+          ? `⚠ incomplete: agent ${partial.agentId} left ${partial.gaps.length} uncovered — ${partial.gaps.slice(0, 3).join("; ")}${partial.gaps.length > 3 ? "; …" : ""}`
+          : `⚠ incomplete: agent ${partial.agentId} hit its ${partial.limit} limit`,
+      )}`,
+    );
   if (type === "implementation") {
     const files = await changedFilesOf(run).catch(() => []);
     if (files.length > 0) {
@@ -644,9 +650,14 @@ async function budgetGate(
   const unit = unitOf(stop.dimension);
   const width = ctx.out.columns - 1;
   ctx.out.line();
-  ctx.out.line(
-    `${st.warn("⏸")} ${st.heading(`${stop.stepId} stopped: ${amount(stop.used)} of ${amount(stop.cap)} ${unit}`)} ${st.muted(`— ${sourceOf(stop)}`)}`,
-  );
+  if (stop.gaps && stop.gaps.length > 0) {
+    ctx.out.line(`${st.warn("⏸")} ${st.heading(`${stop.stepId} left ${stop.gaps.length} uncovered`)}`);
+    for (const g of stop.gaps.slice(0, 8)) ctx.out.line(cutStyled(`  - ${g}`, width));
+    if (stop.gaps.length > 8) ctx.out.line(`  ${st.muted(`+${stop.gaps.length - 8} more`)}`);
+  } else
+    ctx.out.line(
+      `${st.warn("⏸")} ${st.heading(`${stop.stepId} stopped: ${amount(stop.used)} of ${amount(stop.cap)} ${unit}`)} ${st.muted(`— ${sourceOf(stop)}`)}`,
+    );
   ctx.out.line(
     `  ${st.muted(
       stop.scope === "agent"

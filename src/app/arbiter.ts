@@ -136,6 +136,9 @@ export async function arbitrate(runtime: Runtime, run: Run, stop: BudgetStop): P
           content: [
             `# Task\n${run.task.split("\n")[0]}`,
             `# Stop\n${stop.agent ?? stop.stepId}, step ${stop.stepId} round ${stop.iteration}: ${stop.used} of ${stop.cap} ${unit} (${stop.scope}).`,
+            stop.gaps && stop.gaps.length > 0
+              ? `# Not the limit: its document leaves these uncovered — more calls are to cover them\n${stop.gaps.map((g) => `- ${g}`).join("\n")}`
+              : "",
             `# The journal\n${signals.summary}. ${signals.calls} calls in the step, ${signals.repeats} repeats, ${signals.rereads} re-reads, ${signals.errors} failed.`,
             signals.top.length > 0
               ? `# Made most often\n${signals.top.map((t) => `- ${t.call} ×${t.times}`).join("\n")}`

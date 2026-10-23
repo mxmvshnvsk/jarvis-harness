@@ -1326,6 +1326,10 @@ export const RU: Readonly<Record<string, string>> = {
   "The change is in {service}, which has no subtask: accepting adds one, delivered before {asking}.":
     "Изменение — в {service}, у которого нет сабтаска: принятие добавит его, поставка — раньше {asking}.",
   "Waits for a library": "Ждёт библиотеку",
+  "{step} left {n} uncovered": "{step}: не покрыто — {n}",
+  "its own goal, checked against the spec and the task: more calls go to cover them, with the conversation kept; finish takes the document as it is, marked incomplete":
+    "цель шага, сверенная со спекой и задачей: ещё вызовы уйдут на покрытие, разговор сохраняется; «закончить» примет документ как есть, с пометкой «неполный»",
+  "incomplete: agent {agent} left {n} uncovered": "неполный: агент {agent} не покрыл пунктов — {n}",
   "Jarvis prepares answers to {n} from the sources — the gate opens after them":
     "Jarvis готовит ответы на {n} по источникам — гейт откроется после них",
   "budget judge: +{n} for {agent} — {why}": "судья бюджета: +{n} для {agent} — {why}",

@@ -30,6 +30,7 @@ import { wrapUntrusted } from "../security/policy/untrusted.ts";
 import { callRefsOf } from "../telemetry/callRefs.ts";
 import type { ToolResult } from "../tools/types.ts";
 import { buildBaseMessages, outlinesFor, planStepFilesNow } from "./context.ts";
+import { COVERAGE_ACTOR, coverageGaps, gapsMessage } from "./coverage.ts";
 import type { AgentRegistry } from "./definition.ts";
 import { packageForStep } from "./knowledge.ts";
 import { ReadLedger, readKey } from "./rereads.ts";
@@ -838,6 +839,8 @@ export class AgentRuntimeRunner implements AgentRunner {
         });
         return { status: "failure", reason: `agent ${def.id} produced undeclared outcome "${outcome}"` };
       }
+      // what the document leaves uncovered of the step's goal: incomplete is that, not a limit reached
+      const gaps = coverageGaps(ctx, def.id, result.value);
       const artifact = rt.artifacts.put({
         runId: ctx.run.id,
         type: def.output.type,
@@ -849,6 +852,7 @@ export class AgentRuntimeRunner implements AgentRunner {
           agentId: def.id,
           ...callRefsOf(rt.events, ctx.run.id, ctx.step.id, ctx.iteration),
           ...(budgetExhausted ? { budgetExhausted } : {}),
+          ...(gaps ? { gaps } : {}),
           // cut at the output limit and written again shorter: said, not silent (pilot: requirements lost)
           ...(result.shortened ? { shortened: true } : {}),
         },
@@ -857,6 +861,47 @@ export class AgentRuntimeRunner implements AgentRunner {
         stepId: ctx.step.id,
         iteration: ctx.iteration,
       });
+      // gaps: the agent goes on to cover them — once by itself, then as a person (or the judge) says;
+      // its document stays as this version meanwhile. "Finish" from a person takes it as it is.
+      if (gaps && gaps.length > 0 && !grants.finish) {
+        const retried = rt.events
+          .list({ runId: ctx.run.id, kind: "budget.grant", limit: 100_000 })
+          .some(
+            (e) =>
+              e.actor === COVERAGE_ACTOR && e.stepId === ctx.step.id && (e.iteration ?? 1) === ctx.iteration,
+          );
+        if (!retried || ask) {
+          transcript = [
+            ...transcript,
+            { role: "assistant", content: JSON.stringify(result.value) },
+            { role: "user", content: gapsMessage(gaps) },
+          ];
+          checkpoint();
+          emit("agent.gaps", {
+            gaps,
+            artifact: `${artifact.artifactId}@${artifact.version}`,
+            retry: !retried,
+          });
+          throw new SuspendRun(
+            "WAITING_HUMAN",
+            `${def.id} left ${gaps.length} uncovered: ${gaps.slice(0, 3).join("; ")}${gaps.length > 3 ? "; …" : ""}`,
+            {
+              checkpointState: {
+                budget: {
+                  scope: "agent",
+                  dimension: "toolCalls",
+                  used: toolCalls,
+                  cap: limits.maxToolCalls,
+                  agent: def.id,
+                  gaps,
+                  ...(retried ? {} : { retry: true }),
+                },
+              },
+              waitingFor: { kind: "budget", detail: "agent gaps" },
+            },
+          );
+        }
+      }
       storeCandidates(rt, ctx, def.id, doc, artifact);
       const reason = (doc.reasons ?? []).map((r) => `${r.kind}: ${r.summary}`).join("; ");
       emit("agent.finish", {

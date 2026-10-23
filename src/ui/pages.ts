@@ -1092,12 +1092,18 @@ function budgetCardHtml(card: BudgetCard, page: RunPage, actions?: Actions): Htm
   return html`<section class="panel decision" aria-labelledby="decision" data-live="card">
 <div class="row" style="flex-direction:column;align-items:flex-start;gap:4px">
 <span class="warn" style="font-size:13px;font-weight:500">${t("Waits for you")}</span>
-<h2 id="decision" style="font-size:22px;line-height:28px">${t("{step} stopped: {used} of {cap} {unit}", { step: s.stepId, used: amount(s.used), cap: amount(s.cap), unit })}</h2>
+${
+  s.gaps && s.gaps.length > 0
+    ? html`<h2 id="decision" style="font-size:22px;line-height:28px">${t("{step} left {n} uncovered", { step: s.stepId, n: s.gaps.length })}</h2>
+<span class="muted" style="font-size:14px">${t("its own goal, checked against the spec and the task: more calls go to cover them, with the conversation kept; finish takes the document as it is, marked incomplete")}</span>
+<ul class="gaps">${s.gaps.map((g) => html`<li>${g}</li>`)}</ul>`
+    : html`<h2 id="decision" style="font-size:22px;line-height:28px">${t("{step} stopped: {used} of {cap} {unit}", { step: s.stepId, used: amount(s.used), cap: amount(s.cap), unit })}</h2>
 <span class="muted" style="font-size:14px">${sourceOf(s)} · ${
-    s.scope === "agent"
-      ? t("its conversation is kept: more calls go on from where it stopped")
-      : t("the step goes on from its last model call; the cap grows for this run only")
-  }</span>
+        s.scope === "agent"
+          ? t("its conversation is kept: more calls go on from where it stopped")
+          : t("the step goes on from its last model call; the cap grows for this run only")
+      }</span>`
+}
 </div>
 ${card.signals ? stallHtml(card.signals) : ""}
 ${
@@ -1144,7 +1150,7 @@ ${
 }
 ${f?.risks.slice(0, 2).map((r) => html`<p><span class="warn">${t("risk")}</span> ${cut(r, 160)}</p>`) ?? ""}
 ${card.excerpt ? html`<pre class="path" style="white-space:pre-wrap">${card.excerpt}</pre>` : ""}
-${partial ? html`<p class="warn">⚠ ${t("incomplete: agent {agent} hit its {limit} limit", { agent: partial.agentId, limit: partial.limit })}</p>` : ""}
+${partial ? html`<p class="warn">⚠ ${partial.gaps ? t("incomplete: agent {agent} left {n} uncovered", { agent: partial.agentId, n: partial.gaps.length }) : t("incomplete: agent {agent} hit its {limit} limit", { agent: partial.agentId, limit: partial.limit ?? "" })}</p>` : ""}
 ${
   card.files && card.files.length > 0
     ? html`<div class="changed"><span class="hint">${t("{n} changed", { n: plural(card.files.length, "file") })}</span>${card.files
@@ -2508,7 +2514,7 @@ ${
 </div>
 ${extras.banner ?? ""}
 ${page.editFile ? html`<p class="meta">✎ ${th("Edit it as a file: {file} — the change becomes the next version, yours, before the next step reads it (or {cmd}).", { file: html`<code>${page.editFile}</code>`, cmd: html`<code>jarvis edit ${shortRunId(page.run.id)} ${a.type}</code>` })}</p>` : ""}
-${partial ? html`<div class="banner bad">⚠ ${t("incomplete: agent {agent} hit its {limit} limit — what it did not cover is unknown", { agent: partial.agentId, limit: partial.limit })}</div>` : ""}
+${partial ? html`<div class="banner bad">⚠ ${partial.gaps ? html`${t("incomplete: agent {agent} left {n} uncovered", { agent: partial.agentId, n: partial.gaps.length })}<ul>${partial.gaps.map((g) => html`<li>${g}</li>`)}</ul>` : t("incomplete: agent {agent} hit its {limit} limit — what it did not cover is unknown", { agent: partial.agentId, limit: partial.limit ?? "" })}</div>` : ""}
 ${
   diff || page.questions || extras.tryOut
     ? html`<nav class="tabs" aria-label="${t("Sections")}">${page.questions ? html`<a href="#questions">${t("Questions")} <span class="muted">${page.questions.list.length}</span></a>` : ""}${extras.tryOut ? html`<a href="#try">${t("Try it")}</a>` : ""}<a href="#document">${diff ? t("Summary") : t("Document")}</a>${diff ? html`<a href="#files">${t("Files changed")} <span class="muted">${diff.length}</span></a>` : ""}</nav>`

@@ -3,6 +3,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { BUILTIN_AGENTS } from "../../src/agents/builtin/index.ts";
+import { incompleteNote } from "../../src/agents/context.ts";
 import { AgentRegistry } from "../../src/agents/definition.ts";
 import { AgentRuntimeRunner, inParallel } from "../../src/agents/runner.ts";
 import { type BudgetStop, budgetGranted, budgetStopOf, grantBudget } from "../../src/app/budgetStop.ts";
@@ -952,6 +953,85 @@ context: { maxContext: 8000 }
       { what: "budget", grant: false, by: "model", diagnosis: "stuck", agent: "impact" },
     ]);
     expect(read).toBe(6);
+  });
+
+  it("an analysis that leaves gaps: one round to cover them by itself, then a person decides (not the limit)", async () => {
+    for (const ask of [true, false]) {
+      sb.write(
+        "project/.jarvis/project.yaml",
+        `version: 1\nworkspace: { mode: cwd }\n${ask ? "" : "agents: { impact: { onLimit: finish } }\n"}`,
+      );
+      rt = await testRuntime(sb, { PATH: process.env.PATH ?? "" });
+      const run = createRun(rt, "im");
+      rt.artifacts.put({
+        runId: run.id,
+        type: "spec",
+        name: "spec.json",
+        content: JSON.stringify({
+          requirements: [
+            { id: "R1", text: "the banner is gone" },
+            { id: "R2", text: "the field is not sent" },
+          ],
+        }),
+        provenance: { kind: "tool", capability: "artifact.write" },
+      });
+      let asks = 0;
+      const told: string[] = [];
+      server.respond((req) => {
+        const messages = req.body.messages as Array<{ role: string; content: string }>;
+        const last = messages.at(-1)?.content ?? "";
+        if (last.startsWith("Your document leaves these uncovered")) told.push(last);
+        if (req.body.tools && asks++ % 2 === 0) return toolCallCompletion("repo.list", {});
+        // R2 never gets a path
+        return completion(
+          JSON.stringify({
+            summary: "s",
+            affected: [{ path: "src/banner.tsx", kind: "code", reason: "renders it", requirements: ["R1"] }],
+            sources: [],
+            outcome: "ok",
+          }),
+        );
+      });
+      const wf = workflowOf({
+        name: "im",
+        entry: "impact",
+        steps: [
+          {
+            id: "impact",
+            kind: "agentic",
+            agent: "impact",
+            outputs: ["impact"],
+            transitions: { onSuccess: "DONE" },
+          },
+        ],
+      });
+      const result = await engineWith(rt, wf).execute(run.id, { owner: "cli:t" });
+      // the first gaps: told and given a round by itself, no person asked
+      expect(rt.events.list({ runId: run.id, kind: "budget.grant" }).map((e) => e.actor)).toEqual([
+        "service:coverage",
+      ]);
+      expect(told[0]).toContain(
+        "requirement R2 (the field is not sent): no path it affects, nor where it is",
+      );
+      const latest = rt.artifacts.listLatest(run.id, "impact")[0];
+      expect(latest?.provenance).toMatchObject({
+        kind: "agent",
+        gaps: ["requirement R2 (the field is not sent): no path it affects, nor where it is"],
+      });
+      if (ask) {
+        // still there: a person decides, the card lists what is uncovered
+        expect(result.run.state).toBe("WAITING_HUMAN");
+        expect(result.run.waitingFor).toMatchObject({ kind: "budget", detail: "agent gaps" });
+        expect(budgetStopOf(rt, result.run)?.gaps).toEqual([
+          "requirement R2 (the field is not sent): no path it affects, nor where it is",
+        ]);
+        await rt.close();
+      } else {
+        // nobody to ask: it goes on, the document marked incomplete for the steps after it
+        expect(result.run.state).toBe("COMPLETED");
+        expect(incompleteNote(latest as never)).toContain("leaves these uncovered: requirement R2");
+      }
+    }
   });
 
   it("onLimit: ask — the run waits at the limit with the conversation kept; more goes on, finish ends it", async () => {
