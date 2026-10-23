@@ -56,3 +56,23 @@ export function failureDigest(output: string): string | undefined {
     "[the whole output:]",
   ].join("\n");
 }
+
+/** Colours, cursor moves and spinner redraws: a terminal's, not words (pilot: «[33m…[0m» on the card). */
+// biome-ignore lint/suspicious/noControlCharactersInRegex: matching terminal escapes is the point
+const CONTROL = /\u001b\[[0-9;?]*[A-Za-z]|\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)/g;
+
+/**
+ * A hook's (or any refused command's) words: what says error first, then its end (pilot: lefthook's run-lint failed, and its last
+ * 40 lines were the tests that passed and the summary — the lint's errors were above them).
+ */
+export const hookOutput = (r: { stdout: string; stderr: string }) => {
+  const text = `${r.stdout}\n${r.stderr}`
+    .replace(CONTROL, "")
+    .split("\n")
+    .map((l) => l.split("\r").at(-1) ?? "")
+    .join("\n")
+    .trim();
+  const end = text.split("\n").slice(-40).join("\n");
+  const digest = failureDigest(text);
+  return digest ? `${digest.slice(0, digest.lastIndexOf("\n[the whole output:]"))}` : end;
+};

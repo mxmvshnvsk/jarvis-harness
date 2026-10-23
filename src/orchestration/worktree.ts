@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import type { WorkspaceRef } from "../core/domain/run.ts";
 import { git, runShell } from "../tools/local/exec.ts";
+import { hookOutput } from "../tools/local/failure.ts";
 import { isScratchFile } from "../tools/local/scratch.ts";
 import { cacheKey, type DepsCacheConfig, restoreDeps, saveDeps } from "./depsCache.ts";
 import { CwdWorkspace, type Workspace, type WorkspaceFactory } from "./workspace.ts";
@@ -352,9 +353,7 @@ export class WorktreeWorkspace implements Workspace {
     const committed = await git(["commit", "-q", "-m", message], repo, { env: this.env, timeoutMs: 600_000 });
     if (committed.code !== 0) {
       await git(["reset", "-q", "--hard"], repo);
-      throw new WorktreeError(
-        `the repository's hooks refused the commit: ${`${committed.stdout}\n${committed.stderr}`.trim().split("\n").slice(-12).join("\n")}`,
-      );
+      throw new WorktreeError(`the repository's hooks refused the commit: ${hookOutput(committed)}`);
     }
     const commit = await must(git(["rev-parse", "HEAD"], repo), "rev-parse");
     return { commit, files };

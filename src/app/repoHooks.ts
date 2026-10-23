@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { HOOK_MARKER } from "../hooks/gitHooks.ts";
 import { git, runCommand } from "../tools/local/exec.ts";
+import { hookOutput } from "../tools/local/failure.ts";
 
 /**
  * The repository's own git hooks (husky, lint-staged, commitlint): what a person's commit and push go
@@ -50,9 +51,6 @@ export async function repoHooksOf(checkout: string): Promise<Partial<Record<Hook
   return out;
 }
 
-const tail = (r: { stdout: string; stderr: string }) =>
-  `${r.stdout}\n${r.stderr}`.trim().split("\n").slice(-40).join("\n");
-
 /** One hook run as git would run it: in the checkout, with its arguments and input. */
 export async function runHook(
   checkout: string,
@@ -94,7 +92,7 @@ export async function runHook(
     return {
       hook,
       ok: r.code === 0 && !r.timedOut,
-      output: r.timedOut ? `${tail(r)}\n(timed out)` : tail(r),
+      output: r.timedOut ? `${hookOutput(r)}\n(timed out)` : hookOutput(r),
     };
   } finally {
     if (dir) rmSync(dir, { recursive: true, force: true });
@@ -133,7 +131,7 @@ export async function commitWithHooks(
     const r = await git(["commit", "-q", "--allow-empty", "-F", file], checkout, { env, timeoutMs: 600_000 });
     if (r.code !== 0) {
       await git(["reset", "-q", "--soft", head], checkout);
-      return { ok: false, output: tail(r) };
+      return { ok: false, output: hookOutput(r) };
     }
     return { ok: true, commit: (await git(["rev-parse", "HEAD"], checkout)).stdout.trim() };
   } finally {

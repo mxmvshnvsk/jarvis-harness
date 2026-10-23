@@ -112,6 +112,36 @@ describe("the run's base in the PR flow", () => {
     await rt?.close();
   });
 
+  it("refused by a long hook: its error lines first, without the terminal's colours", async () => {
+    const dir = repo();
+    const base = sh(dir, "rev-parse", "HEAD");
+    sh(dir, "checkout", "-q", "-b", "jarvis/abc-44");
+    writeFileSync(join(dir, "a.ts"), "export const a = 3;\n");
+    sh(dir, "commit", "-q", "-am", "checkpoint");
+    // lefthook-like: the lint's errors early, then many passing tests and a coloured summary
+    hook(
+      dir,
+      "pre-commit",
+      [
+        'printf "\\033[33mlib:lint: \\033[0m/w/src/form.test.tsx\\n"',
+        'printf "\\033[33mlib:lint: \\033[0m  7:8  error  Expected a line break  object-curly-newline\\n"',
+        'i=0; while [ $i -lt 80 ]; do printf "\\033[33mlib:test: \\033[0mPASS src/t$i.test.ts\\n"; i=$((i+1)); done',
+        'printf "summary: \\342\\234\\224 run-test \\360\\237\\245\\212 run-lint\\n"',
+        "exit 1",
+      ].join("\n"),
+    );
+    const refused = await commitWithHooks(dir, "jarvis/abc-44", base, "feat: ABC-44 x", env);
+    const output = (refused as { output: string }).output;
+    expect(output.split("\n").slice(0, 3)).toEqual([
+      "[failed — the lines that say error (1 of 83 lines):]",
+      "lib:lint: /w/src/form.test.tsx",
+      "lib:lint:   7:8  error  Expected a line break  object-curly-newline",
+    ]);
+    expect(output).toContain("run-lint");
+    expect(output).not.toContain("\u001b[");
+    expect(output).not.toContain("[the whole output:]");
+  });
+
   it("the PR's target as the remote has it now, not the checkout's HEAD", async () => {
     const origin = join(sb.root, "origin.git");
     execFileSync("git", ["init", "-q", "--bare", "-b", "dev", origin], { env });
