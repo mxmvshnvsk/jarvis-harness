@@ -781,18 +781,30 @@ export async function runRedo(
   step: string,
   options: { readonly note?: string; readonly noRun?: boolean },
 ): Promise<void> {
-  const loaded = await loadForCli(ctx);
-  const runtime = createRuntime(loaded, { env: ctx.env });
+  let loaded = await loadForCli(ctx);
+  let runtime = createRuntime(loaded, { env: ctx.env });
   let ended = false;
   try {
-    const run = requireRun(ctx, runtime, ref);
-    if (run.options?.parent) {
+    let run = requireRun(ctx, runtime, ref);
+    // the run's repository, wherever the command is typed: its project's tools and agents (a subtask's
+    // service, typed in the master's repository)
+    if (loaded.project?.root !== run.workspace.repoRoot && existsSync(run.workspace.repoRoot)) {
+      runtime.close();
+      ctx = { ...ctx, cwd: run.workspace.repoRoot };
+      loaded = await loadForCli(ctx);
+      runtime = createRuntime(loaded, { env: ctx.env });
+      run = requireRun(ctx, runtime, ref);
+    }
+    ended = run.state === "CANCELLED" || run.state === "COMPLETED";
+    // a subtask goes back in place, as any run (the master sees the same run); an ended one is not
+    // started anew here — a new run would not be the master's (pilot: a subtask going round in its
+    // fix round could not be sent back to its implementation)
+    if (ended && run.options?.parent) {
       ctx.out.error(
-        `${shortRunId(run.id)} is subtask ${run.options.parent.key} of ${shortRunId(run.options.parent.runId)}: \`jarvis subtask retry\``,
+        `${shortRunId(run.id)} is subtask ${run.options.parent.key} of ${shortRunId(run.options.parent.runId)} and has ended: \`jarvis subtask retry ${shortRunId(run.options.parent.runId)} ${run.options.parent.key}\``,
       );
       throw new CliExit(EXIT.error);
     }
-    ended = run.state === "CANCELLED" || run.state === "COMPLETED";
     if (!ended) {
       const engine = createEngine(runtime);
       const workflow = engine.workflow(run.workflow);

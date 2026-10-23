@@ -223,6 +223,30 @@ describe("jarvis redo", () => {
     }
   });
 
+  it("a subtask goes back in place, as any run; an ended one is sent to `jarvis subtask retry`", async () => {
+    await jarvis(["work", "ABC-53", "--workflow", "staged"]);
+    const [first] = await runs();
+    const runId = first?.run.id as string;
+    const id = runId.slice(4, 12);
+    // a subtask of a master (pilot: «cad… is subtask 3 of d1…» refused a redo in place)
+    const loaded = await loadConfig({ cwd: sb.project, homeDir: sb.home, env: {} });
+    const rt = createRuntime(loaded, { env: {} });
+    const parent = { runId: "run_00000000aaaaaaaaaaaa", key: "3" };
+    (rt.runs as unknown as { db: { prepare(sql: string): { run(...a: unknown[]): void } } }).db
+      .prepare("UPDATE runs SET options_json = ? WHERE id = ?")
+      .run(JSON.stringify({ ...(first?.run.options ?? {}), parent }), runId);
+    rt.close();
+    const r = await jarvis(["redo", id, "research", "--note", "remove the folder"]);
+    expect(r.err).not.toContain("is subtask");
+    expect(r.out).toContain("goes back to research");
+    await jarvis(["cancel", id]);
+    const ended = await jarvis(["redo", id, "research"]);
+    expect(ended.code).not.toBe(0);
+    expect(ended.err).toContain(
+      `${id} is subtask 3 of 00000000 and has ended: \`jarvis subtask retry 00000000 3\``,
+    );
+  });
+
   it("a step the run never reached is refused", async () => {
     await jarvis(["work", "ABC-51", "--workflow", "staged"]);
     const id = ((await runs())[0]?.run.id ?? "").slice(4, 12);
