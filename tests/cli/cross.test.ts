@@ -9,8 +9,8 @@ import { deliveryOrder, setCliLauncher, subtasksOf } from "../../src/app/subtask
 import { run } from "../../src/cli/main.ts";
 import { loadConfig } from "../../src/core/config/load.ts";
 import { forgetLayouts } from "../../src/core/paths.ts";
-import { runPage } from "../../src/ui/model.ts";
-import { runContent } from "../../src/ui/pages.ts";
+import { runPage, runsPage } from "../../src/ui/model.ts";
+import { runContent, runsContent } from "../../src/ui/pages.ts";
 import { type Sandbox, sandbox } from "../helpers/tmp.ts";
 
 /**
@@ -262,6 +262,17 @@ describe("a task across services", () => {
         /<a href="https:\/\/git.example.com\/pull-requests\/924"[^>]*>PR #924<\/a> · approvals 0 of 1 · open threads: 1 · build ✓ · <a href="\/runs\/[0-9a-f]{8}\/pr">code review<\/a>/,
       );
       expect(withPrs).toContain("· 2 PRs: with comments: 1, in review: 1");
+      // the subtask's own head and the list of runs: the PR's phase, not a bare COMPLETED
+      const first = runContent(
+        await runPage(rt, createEngine(rt), views[0]?.run as never, { homeDir: sb.home }),
+        Date.now(),
+      ).value;
+      expect(first).toContain(
+        '<span class="pill wait" title="COMPLETED · the PR&#39;s review">⏸ PR_REVIEW · 1 PR comment</span>',
+      );
+      const list = runsContent(await runsPage(rt, createEngine(rt), { homeDir: sb.home }), Date.now()).value;
+      expect(list).toContain('<span class="warn">⏸ PR_REVIEW · 1 PR comment</span>');
+      expect(list).toContain('<span class="muted">◌ PR_REVIEW · not read yet</span>');
       const child = await runPage(rt, createEngine(rt), views[1]?.run as never, { homeDir: sb.home });
       expect(runContent(child, Date.now()).value).toContain("subtask 2 of 2 · notify-api of");
     } finally {

@@ -1339,6 +1339,8 @@ export const RU: Readonly<Record<string, string>> = {
   merged: "влит",
   "PR declined": "PR отклонён",
   "PR: not read yet": "PR: ещё не прочитан",
+  "not read yet": "ещё не прочитан",
+  "the PR's review": "ревью PR",
   "in review": "на ревью",
   "PR tasks open": "открыты задачи в PR",
   "build ✓": "сборка ✓",

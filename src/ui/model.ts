@@ -381,6 +381,8 @@ export interface RunningRun {
   readonly run: Run;
   /** Parked on a quota window or a model that is down: goes on by itself. */
   readonly wait?: BudgetWait;
+  /** Stopped, not ended: a master waiting for its subtasks, a pause, Ctrl-C — Resume goes on. */
+  readonly suspended?: true;
   readonly activity?: Activity;
   readonly position?: { readonly index: number; readonly total: number };
   /** An implementation's place in its plan (src/app/planProgress.ts). */
@@ -389,6 +391,8 @@ export interface RunningRun {
 
 export interface RecentRun {
   readonly run: Run;
+  /** Done, with a PR: where its review stands. */
+  readonly pr?: RunPr;
   readonly modelCalls: number;
   readonly tookMs: number;
 }
@@ -634,6 +638,9 @@ export async function runsPage(
       // in progress, only paused: with what runs, not with what ended
       const wait = budgetWaitOf(runtime, run);
       running.push({ run, ...(wait ? { wait } : {}) });
+    } else if (run.state === "SUSPENDED") {
+      // stopped, not ended: with what is in progress, not with what ended
+      running.push({ run, suspended: true });
     } else if (run.state === "RUNNING" && live(run, now)) {
       const events = runEvents(runtime, run.id);
       const activity = activityOf(events, new Date(now));
@@ -666,6 +673,7 @@ export async function runsPage(
     // the model calls of the rows shown only: counting them is a query per run
     runs: matching.slice((pageNo - 1) * size, pageNo * size).map((run) => ({
       run,
+      ...((p) => (p ? { pr: p } : {}))(run.state === "COMPLETED" ? runPrOf(runtime, run) : undefined),
       modelCalls: runtime.events.count({ runId: run.id, kind: "model.call" }),
       tookMs: Math.max(0, Date.parse(run.updatedAt) - Date.parse(run.createdAt)),
     })),
@@ -922,7 +930,9 @@ export interface RunPage {
   /** A master: what each started subtask does now, by its key. */
   readonly subtaskNow?: Readonly<Record<string, SubtaskNow>>;
   /** A master: the PR of each subtask that has one, by its key — its review is followed on the subtask's run. */
-  readonly subtaskPr?: Readonly<Record<string, SubtaskPr>>;
+  readonly subtaskPr?: Readonly<Record<string, RunPr>>;
+  /** A done run with a PR: where its review stands — the head says it instead of a bare COMPLETED. */
+  readonly pr?: RunPr;
   /** Untrusted content from the internet with no approval since (ADR-0016 §4): effects are held. */
   readonly untrusted?: UntrustedView;
 }
@@ -979,7 +989,7 @@ export interface SubtaskNow {
 }
 
 /** Where a subtask's PR stands, from the subtask run's last read of it (src/app/prReview.ts). */
-export interface SubtaskPr {
+export interface RunPr {
   readonly run: Run;
   readonly id?: string;
   readonly url?: string;
@@ -994,9 +1004,11 @@ export interface SubtaskPr {
   readonly build?: "ok" | "failed" | "running";
   readonly blockers: readonly string[];
   readonly following: boolean;
+  /** The task was finalized (with or without the merge): the flow is over. */
+  readonly finalized?: true;
 }
 
-export function subtaskPrOf(runtime: Runtime, run: Run): SubtaskPr | undefined {
+export function runPrOf(runtime: Runtime, run: Run): RunPr | undefined {
   const pr = prOf(runtime, run);
   if (!pr) return undefined;
   const review = prReviewOf(runtime, run);
@@ -1005,8 +1017,9 @@ export function subtaskPrOf(runtime: Runtime, run: Run): SubtaskPr | undefined {
   const waiting = triageOf(runtime, run).items.filter((i) => i.state === "proposed").length;
   const b = review?.build;
   const build = b ? (b.failed > 0 ? "failed" : b.inProgress > 0 ? "running" : "ok") : undefined;
-  const phase: SubtaskPr["phase"] =
-    finalizedOf(runtime, run) || review?.state === "MERGED"
+  const finalized = finalizedOf(runtime, run) !== undefined;
+  const phase: RunPr["phase"] =
+    finalized || review?.state === "MERGED"
       ? "merged"
       : review?.state === "DECLINED"
         ? "declined"
@@ -1031,6 +1044,7 @@ export function subtaskPrOf(runtime: Runtime, run: Run): SubtaskPr | undefined {
     ...(build ? { build } : {}),
     blockers: review?.blockers ?? [],
     following: followsPr(runtime, run),
+    ...(finalized ? { finalized: true as const } : {}),
   };
 }
 
@@ -1169,7 +1183,7 @@ function crossOf(
   const own = spendOf(runEvents(runtime, run.id), now, leaseLiveOf(run, now));
   const parts: Array<FamilySpend["parts"][number]> = [{ label: t("the master's own steps"), spend: own }];
   const subtaskNow: Record<string, SubtaskNow> = {};
-  const subtaskPr: Record<string, SubtaskPr> = {};
+  const subtaskPr: Record<string, RunPr> = {};
   for (const v of subtasks) {
     if (!v.run) continue;
     const events = runEvents(runtime, v.run.id);
@@ -1181,7 +1195,7 @@ function crossOf(
     });
     const n = subtaskNowOf(v.run, events, now);
     if (n) subtaskNow[v.subtask.key] = n;
-    const pr = subtaskPrOf(runtime, v.run);
+    const pr = runPrOf(runtime, v.run);
     if (pr) subtaskPr[v.subtask.key] = pr;
   }
   const family: FamilySpend = { total: parts.map((p) => p.spend).reduce(plus), parts };
@@ -1811,6 +1825,7 @@ export async function runPage(
     plan,
     steps: order.map(row).filter((r) => forThisRun(runtime, run, workflow, r)),
     ...crossOf(runtime, run, now),
+    ...((p) => (p ? { pr: p } : {}))(run.state === "COMPLETED" ? runPrOf(runtime, run) : undefined),
     tokens,
     workedMs,
     ...((t) => (t ? { time: t } : {}))(timeSplitOf(events, now, leaseLive)),

@@ -42,12 +42,12 @@ import type {
   FeedItem,
   LoopCard,
   RunPage,
+  RunPr,
   RunsPage,
   ScopeCard,
   Spend,
   StepRow,
   StepSkills,
-  SubtaskPr,
   TestsStop,
   UntrustedView,
   WaitCard,
@@ -248,9 +248,41 @@ const cancelling = (run: Run): boolean => run.cancelRequested && !isTerminal(run
 const pausable = (page: Pick<RunPage, "run" | "leaseLive">): boolean =>
   page.run.state === "RUNNING" && page.leaseLive === true && !cancelling(page.run);
 
-function statePill(run: Run, extra?: string): Html {
+/**
+ * A done run's PR flow, as a state: the phase in the words of the PR panel (not translated), and what
+ * the review waits for — a run that delivered is not done until its PR is.
+ */
+function prStateOf(pr: RunPr): { word: string; tone: string; glyph: string; note?: string } {
+  if (pr.finalized) return { word: "FINALIZED", tone: "ok", glyph: "✓" };
+  if (pr.phase === "merged") return { word: "MERGED", tone: "ok", glyph: "✓" };
+  if (pr.phase === "declined") return { word: "DECLINED", tone: "bad", glyph: "✗" };
+  if (pr.phase === "ready") return { word: "READY_TO_MERGE", tone: "ok", glyph: "✓" };
+  if (pr.phase === "review" || pr.phase === "unread")
+    return {
+      word: "PR_REVIEW",
+      tone: "info",
+      glyph: "◌",
+      ...(pr.phase === "unread" ? { note: t("not read yet") } : {}),
+    };
+  return { word: "PR_REVIEW", tone: "wait", glyph: "⏸", note: prWaits(pr) };
+}
+
+/** What a PR's review waits for from a person: answers to approve, comments, tasks. */
+function prWaits(pr: RunPr): string {
+  return pr.phase === "replies"
+    ? plural(pr.waiting, "answer to approve", "answers to approve")
+    : pr.threads > 0
+      ? plural(pr.threads, "PR comment")
+      : t("PR tasks open");
+}
+
+function statePill(run: Run, extra?: string, pr?: RunPr): Html {
   if (cancelling(run))
     return html`<span class="pill bad"><span class="spin" aria-hidden="true"></span> CANCELLING</span>`;
+  if (pr && run.state === "COMPLETED") {
+    const p = prStateOf(pr);
+    return html`<span class="pill ${p.tone}" title="COMPLETED · ${t("the PR's review")}">${p.glyph} ${p.word}${p.note ? ` · ${p.note}` : ""}</span>`;
+  }
   const s = run.state;
   const tone =
     s === "COMPLETED"
@@ -469,8 +501,13 @@ function toolBudget(a: Activity | undefined, now: number): Html {
 <span class="meta">${t("tools")} ${max ? `${used}/${max}` : used}${since ? html` · ${since}` : ""}${step && step.modelCalls > 1 && used > 0 ? html` · ${perCall(used, step.modelCalls, t("tools per model call"))}` : ""}</span>`;
 }
 
-function recentState(run: Run): Html {
+function recentState(run: Run, pr?: RunPr): Html {
   const why = run.stateReason ? ` · ${cut(reasonText(run.stateReason), 48)}` : "";
+  if (pr && run.state === "COMPLETED") {
+    const p = prStateOf(pr);
+    const cls = p.tone === "info" ? "muted" : p.tone === "wait" ? "warn" : p.tone;
+    return html`<span class="${cls}">${p.glyph} ${p.word}${p.note ? ` · ${p.note}` : ""}</span>`;
+  }
   switch (run.state) {
     case "COMPLETED":
       return html`<span class="ok">✓ COMPLETED</span>`;
@@ -622,12 +659,17 @@ ${launches.map((l) => launchHtml(l, now, start?.homeDir ?? ""))}
 ${
   page.running.length > 0 || launches.length > 0
     ? page.running.map((r) =>
-        r.wait
+        r.suspended
           ? html`<div class="panel running paused">
+<div class="what"><a href="${runHref(r.run)}">${firstLine(r.run.task)}</a><span class="meta">${r.run.workflow} · ${shortRunId(r.run.id)} · <span class="mono">SUSPENDED</span>${r.run.stateReason ? ` · ${cut(reasonText(r.run.stateReason), 90)}` : ""}</span></div>
+<a href="${runHref(r.run)}">${t("Open")}</a>
+</div>`
+          : r.wait
+            ? html`<div class="panel running paused">
 <div class="what"><a href="${runHref(r.run)}">${firstLine(r.run.task)}</a><span class="meta">${r.run.workflow} · ${shortRunId(r.run.id)} · ⏸ ${r.wait.kind === "model" ? t("waits for the model {model}", { model: r.wait.model ?? "" }) : r.wait.pool ? t("waits for the quota window of {pool}", { pool: r.wait.pool }) : t("waits for the quota window")} · ${t("goes on {when}", { when: whenText(r.wait.resumeAfter, now) })}</span></div>
 <a href="${runHref(r.run)}">${t("Open")}</a>
 </div>`
-          : html`<div class="panel running">
+            : html`<div class="panel running">
 <div class="what"><a href="${runHref(r.run)}">${firstLine(r.run.task)}</a><span class="meta">${cancelling(r.run) ? html`<span class="bad">${t("cancelling…")}</span> · ` : ""}${r.run.workflow} · ${shortRunId(r.run.id)} · ${activityText(r.activity, r.position)}${r.planProgress ? html` · <b class="planat">${t("plan {at}", { at: planAt(r.planProgress) })}</b>${r.planProgress.current !== undefined ? ` ${cut(r.planProgress.steps[r.planProgress.current]?.description ?? "", 70)}` : ""}` : ""}</span></div>
 <div class="budget">${toolBudget(r.activity, now)}</div>
 <a href="${runHref(r.run)}">${t("Follow")}</a>
@@ -737,7 +779,7 @@ function recentHtml(page: RunsPage): Html {
 <thead><tr><th scope="col">Run</th><th scope="col">${t("Task")}</th><th scope="col">Workflow</th><th scope="col">${t("State")}</th><th scope="col">${t("Took")}</th><th scope="col">${t("Model")}</th></tr></thead>
 <tbody>${list.runs.map(
           (r) =>
-            html`<tr><td class="mono"><a href="${runHref(r.run)}">${marked(shortRunId(r.run.id), list.terms)}</a></td><td>${marked(firstLine(r.run.task, 90), list.terms)}</td><td>${marked(r.run.workflow === "sdd-cross" ? "sdd (cross-repos)" : r.run.workflow, list.terms)}${r.run.options?.parent ? html` <span class="meta" title="${t("a subtask of a task across services")}">· ${t("subtask {key} of", { key: r.run.options.parent.key })} <a href="/runs/${shortRunId(r.run.options.parent.runId)}">${shortRunId(r.run.options.parent.runId)}</a></span>` : ""}</td><td>${recentState(r.run)}</td><td>${duration(r.tookMs)}</td><td class="muted">${plural(r.modelCalls, "call")}</td></tr>`,
+            html`<tr><td class="mono"><a href="${runHref(r.run)}">${marked(shortRunId(r.run.id), list.terms)}</a></td><td>${marked(firstLine(r.run.task, 90), list.terms)}</td><td>${marked(r.run.workflow === "sdd-cross" ? "sdd (cross-repos)" : r.run.workflow, list.terms)}${r.run.options?.parent ? html` <span class="meta" title="${t("a subtask of a task across services")}">· ${t("subtask {key} of", { key: r.run.options.parent.key })} <a href="/runs/${shortRunId(r.run.options.parent.runId)}">${shortRunId(r.run.options.parent.runId)}</a></span>` : ""}</td><td>${recentState(r.run, r.pr)}</td><td>${duration(r.tookMs)}</td><td class="muted">${plural(r.modelCalls, "call")}</td></tr>`,
         )}</tbody></table></div>`
       : list.query
         ? html`<div class="panel empty">${t("No runs match «{q}».", { q: list.query })}</div>`
@@ -1578,7 +1620,7 @@ export function runContent(
   const card = page.card;
   const rest = r.task.split("\n").slice(1).join("\n").trim();
   return html`<div class="lede-col" style="display:flex;flex-direction:column;gap:8px" data-live="head">
-<div class="row">${statePill(r, extra)}<span class="meta" style="font-size:13px">${meta}</span></div>
+<div class="row">${statePill(r, extra, page.pr)}<span class="meta" style="font-size:13px">${meta}</span></div>
 <div class="runtitle">
 <div class="runtext">
 <h1>${firstLine(r.task, 300)}</h1>
@@ -1746,14 +1788,14 @@ ${page.masterBudget ? masterBudgetHtml(page.masterBudget) : ""}
 <span class="sub-service">${v.run ? html`<a href="/runs/${shortRunId(v.run.id)}">${v.subtask.service}</a>` : html`<b>${v.subtask.service}</b>`}${v.subtask.issue ? html`<span class="meta mono">${v.subtask.issue}</span>` : ""}</span>
 <span class="muted sub-task">${firstLine(v.subtask.task, 140)}${page.subtaskNow?.[v.subtask.key]?.detail && v.state !== "COMPLETED" ? html`<span class="meta sub-now">${page.subtaskNow[v.subtask.key]?.detail}</span>` : ""}</span>
 <span class="sub-acts">${pill(v)}${v.state === "queued" ? act(v.subtask.key, "start", "Start now") : ""}${v.state === "blocked" ? act(v.subtask.key, "start", "Start now anyway") : ""}${v.published && !v.published.ok ? act(v.subtask.key, "publish", "Run publish-local again", true) : ""}${v.state === "CANCELLED" || v.state === "FAILED" ? act(v.subtask.key, "retry", "Retry") : ""}${v.state !== "COMPLETED" && v.state !== "dropped" ? act(v.subtask.key, "drop", "Drop") : ""}</span>
-${page.subtaskPr?.[v.subtask.key] ? prLine(page.subtaskPr[v.subtask.key] as SubtaskPr) : ""}${v.state === "blocked" ? html`<p class="hint sub-pub">Starts when ${(v.waitsFor ?? []).map(serviceOf).join(", ")} is accepted and published, against the new version. «Start now anyway» — against the version it has.</p>` : ""}${published(v)}
+${page.subtaskPr?.[v.subtask.key] ? prLine(page.subtaskPr[v.subtask.key] as RunPr) : ""}${v.state === "blocked" ? html`<p class="hint sub-pub">Starts when ${(v.waitsFor ?? []).map(serviceOf).join(", ")} is accepted and published, against the new version. «Start now anyway» — against the version it has.</p>` : ""}${published(v)}
 </li>`,
   )}</ul>
 </section>`;
 }
 
 // t("ready to merge") t("merged") t("PR declined") t("PR: not read yet") t("in review")
-const PR_PHASE: Record<SubtaskPr["phase"], { label: string; tone: string }> = {
+const PR_PHASE: Record<RunPr["phase"], { label: string; tone: string }> = {
   ready: { label: "ready to merge", tone: "ok" },
   merged: { label: "merged", tone: "ok" },
   declined: { label: "PR declined", tone: "bad" },
@@ -1764,20 +1806,13 @@ const PR_PHASE: Record<SubtaskPr["phase"], { label: string; tone: string }> = {
 };
 
 /** A done subtask's PR, as its pill: what its review waits for. */
-function prPill(pr: SubtaskPr): Html {
-  const label =
-    pr.phase === "replies"
-      ? plural(pr.waiting, "answer to approve", "answers to approve")
-      : pr.phase === "comments"
-        ? pr.threads > 0
-          ? plural(pr.threads, "PR comment")
-          : t("PR tasks open")
-        : t(PR_PHASE[pr.phase].label);
+function prPill(pr: RunPr): Html {
+  const label = pr.phase === "replies" || pr.phase === "comments" ? prWaits(pr) : t(PR_PHASE[pr.phase].label);
   return html`<span class="pill ${PR_PHASE[pr.phase].tone}">${label}</span>`;
 }
 
 /** A line under a subtask with a PR: the PR, approvals, threads, build, and its code review page. */
-function prLine(pr: SubtaskPr): Html {
+function prLine(pr: RunPr): Html {
   const short = shortRunId(pr.run.id);
   const build =
     pr.build === "ok"
@@ -1802,7 +1837,7 @@ function prLine(pr: SubtaskPr): Html {
 function prsSummary(page: RunPage): Html | string {
   const prs = Object.values(page.subtaskPr ?? {});
   if (prs.length === 0) return "";
-  const n = (ph: ReadonlyArray<SubtaskPr["phase"]>) => prs.filter((p) => ph.includes(p.phase)).length;
+  const n = (ph: ReadonlyArray<RunPr["phase"]>) => prs.filter((p) => ph.includes(p.phase)).length;
   const bits = [
     n(["merged"]) ? t("merged: {n}", { n: n(["merged"]) }) : "",
     n(["ready"]) ? t("ready: {n}", { n: n(["ready"]) }) : "",

@@ -394,6 +394,10 @@ describe("New task on the page", () => {
     const html = await page(`/runs/${short2}`);
     expect(html).toContain("stopped with Ctrl-C");
     expect(html).toContain(`action="/runs/${short2}/resume"`);
+    // stopped, not ended: under Running, not with what ended
+    const runs = await page("/");
+    const running = runs.slice(runs.indexOf('data-live="running"'), runs.indexOf('aria-labelledby="recent"'));
+    expect(running).toContain(`${short2} · <span class="mono">SUSPENDED</span> · interrupted with Ctrl-C`);
   });
 
   it("nothing to resume: undecided, failed, ended", () => {
