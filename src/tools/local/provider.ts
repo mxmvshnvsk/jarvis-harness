@@ -21,6 +21,7 @@ import { effectMarker } from "../../storage/effects.ts";
 import type { Capability, ToolContext, ToolOutput, ToolProvider } from "../types.ts";
 import { projectArgs } from "./args.ts";
 import { git, hasRipgrep, runCommand, runShell } from "./exec.ts";
+import { failureDigest } from "./failure.ts";
 import { filesFor, rulesFor } from "./fix.ts";
 import { PathDeniedError, resolveInWorkspace } from "./paths.ts";
 import { isScratchFile } from "./scratch.ts";
@@ -1077,7 +1078,10 @@ export class LocalToolProvider implements ToolProvider {
       timeoutMs,
       env: { ...ctx.env, CI: ctx.env.CI ?? "1", JARVIS_RUN: ctx.run.id },
     });
-    const text = `$ ${command}\n${r.stdout}${r.stderr ? `\n[stderr]\n${r.stderr}` : ""}\n[exit ${r.code ?? "killed"}${r.timedOut ? ", timed out" : ""} in ${r.durationMs} ms]`;
+    const body = `${r.stdout}${r.stderr ? `\n[stderr]\n${r.stderr}` : ""}\n[exit ${r.code ?? "killed"}${r.timedOut ? ", timed out" : ""} in ${r.durationMs} ms]`;
+    // a failure: what says error, and the end, first — a long output is cut (tools.maxOutputBytes)
+    const digest = r.code !== 0 || r.timedOut ? failureDigest(body) : undefined;
+    const text = `$ ${command}\n${digest ? `${digest}\n` : ""}${body}`;
     return {
       ok: r.code === 0 && !r.timedOut,
       text,

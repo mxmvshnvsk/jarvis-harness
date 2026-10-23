@@ -347,7 +347,10 @@ export class BoundTools {
     let fullRef: string | undefined;
     if (Buffer.byteLength(text, "utf8") > max) {
       fullRef = this.rt.blobs.put(text, "text/plain").contentRef;
-      text = `${Buffer.from(text, "utf8").subarray(0, max).toString("utf8")}\n…[truncated: full output ${Buffer.byteLength(text)} bytes, blob ${fullRef.slice(0, 12)}]`;
+      // its start and its end: a command's verdict is at its end (a summary, the exit code)
+      const buf = Buffer.from(text, "utf8");
+      const tail = Math.floor(max / 4);
+      text = `${buf.subarray(0, max - tail).toString("utf8")}\n…[truncated: full output ${buf.length} bytes, blob ${fullRef.slice(0, 12)}; its end:]\n${buf.subarray(buf.length - tail).toString("utf8")}`;
       truncated = true;
     }
     recordRedaction(this.rt.events, redactedText, {

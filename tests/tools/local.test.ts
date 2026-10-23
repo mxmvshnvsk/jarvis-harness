@@ -259,10 +259,14 @@ describe("local tools", () => {
 
   it("caps output and keeps the full redacted text as a blob", async () => {
     const { bind } = await setup("version: 1\ntools:\n  maxOutputBytes: 200\n");
-    writeFileSync(join(sb.project, "big.txt"), "x".repeat(2000));
+    writeFileSync(join(sb.project, "big.txt"), `${"x".repeat(2000)}THE-END`);
     const r = await bind().invoke("repo.read", { path: "big.txt" });
     expect(r.ok).toBe(true);
     expect(r.truncated).toBe(true);
+    // its start and its end: a command's verdict is at its end (pilot: a lint's errors past 64 KB)
+    expect(r.text).toMatch(
+      /…\[truncated: full output \d+ bytes, blob [0-9a-f]{12}; its end:\]\n[\s\S]*THE-END/,
+    );
     expect(r.text.length).toBeLessThan(400);
     expect(r.fullRef).toBeDefined();
     expect(rt.blobs.getText(r.fullRef as string).length).toBeGreaterThan(2000);
