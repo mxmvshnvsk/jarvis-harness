@@ -311,6 +311,13 @@ describe("open questions answered on the page", () => {
     const short = run.id.slice(4, 12);
     // no model here: the gate is reached all the same, the failure said
     expect(rt.events.list({ runId: run.id, kind: "answers.failed" })).toHaveLength(1);
+    // the answers are prepared before the gate opens, not while a person already decides
+    const seqOf = (kind: string) => rt.events.list({ runId: run.id, kind }).at(-1)?.seq ?? 0;
+    const parked = rt.events
+      .list({ runId: run.id, kind: "run.state" })
+      .find((e) => e.payload?.state === "WAITING_HUMAN")?.seq;
+    expect(seqOf("answers.preparing")).toBeGreaterThan(0);
+    expect(seqOf("answers.failed")).toBeLessThan(parked ?? 0);
     rt.artifacts.put({
       runId: run.id,
       type: "answer-suggestions",

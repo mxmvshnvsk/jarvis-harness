@@ -980,13 +980,13 @@ export const RU: Readonly<Record<string, string>> = {
     "Jarvis готовит ответы по задаче, её страницам, дизайну и research — около минуты",
   "Answer before accepting": "Ответьте перед тем, как принять",
   "Open questions": "Открытые вопросы",
-  "Answered questions go back with «Send back» — the next version must follow them; the rest stays open.":
-    "Ответы уходят вместе с «Вернуть на доработку» — следующая версия обязана их учесть; остальные вопросы остаются открытыми.",
+  "Accept: the chosen answers go with this version to every later step. Send back: the next version is written with them. A question left without an answer stays open.":
+    "Принять: выбранные ответы идут с этой версией во все следующие шаги. Вернуть: следующая версия будет написана с ними. Вопрос без ответа остаётся открытым.",
   "A note": "Комментарий",
   "Anything else to change": "Что ещё поменять",
   "What the answers above do not cover": "То, чего не покрывают ответы выше",
   "Send back with the answers": "Вернуть с ответами",
-  "Accept as is": "Принять как есть",
+  "Accept with the chosen answers": "Принять с выбранными ответами",
   "The terminal waiting there picks the decision up and goes on.":
     "Терминал, который там ждёт, подхватит решение и продолжит.",
   "Same as {a} / {c} on the terminal's card.": "То же, что {a} / {c} на карточке в терминале.",
@@ -1326,6 +1326,8 @@ export const RU: Readonly<Record<string, string>> = {
   "The change is in {service}, which has no subtask: accepting adds one, delivered before {asking}.":
     "Изменение — в {service}, у которого нет сабтаска: принятие добавит его, поставка — раньше {asking}.",
   "Waits for a library": "Ждёт библиотеку",
+  "Jarvis prepares answers to {n} from the sources — the gate opens after them":
+    "Jarvis готовит ответы на {n} по источникам — гейт откроется после них",
   "budget judge: +{n} for {agent} — {why}": "судья бюджета: +{n} для {agent} — {why}",
   "budget judge: no more for {agent} — {why}": "судья бюджета: больше не даёт {agent} — {why}",
   "Looks like the agent goes round: more of the same will not help — finish, or redo the step with a note":

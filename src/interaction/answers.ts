@@ -196,6 +196,12 @@ export async function prepareSuggestions(
       .map((a) => `## ${a.type}/${a.name}\n${clip(runtime.artifacts.text(a), max)}`),
   ).join("\n\n");
   const started = Date.now();
+  runtime.events.emit({
+    kind: "answers.preparing",
+    runId: run.id,
+    stepId,
+    payload: { for: `${doc.artifactId}@${doc.version}`, questions: questions.length },
+  });
   try {
     const route = resolveModel(
       runtime.loaded.config,

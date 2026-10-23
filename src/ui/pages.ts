@@ -2405,10 +2405,10 @@ function questionsDockHtml(page: ArtifactPage, extras: ArtifactExtras): Html {
     extras.actions,
     `${runHref(page.run)}/decide`,
     html`<input type="hidden" name="artifact" value="${page.artifact.artifactId}"><input type="hidden" name="version" value="${page.artifact.version}"><input type="hidden" name="lines" value="">
-<span class="sum">${t("Answered questions go back with «Send back» — the next version must follow them; the rest stays open.")}</span>
+<span class="sum">${t("Accept: the chosen answers go with this version to every later step. Send back: the next version is written with them. A question left without an answer stays open.")}</span>
 <details class="note"><summary>+ ${t("A note")}</summary><label class="field grow">${t("Anything else to change")}<textarea name="comment" rows="3" placeholder="${t("What the answers above do not cover")}"></textarea></label></details>
 <div class="actions"><button type="submit" name="decision" value="request_changes" class="btn strong big">${t("Send back with the answers")}</button>
-<button type="submit" name="decision" value="approve" class="btn accept big">${t("Accept as is")}</button>
+<button type="submit" name="decision" value="approve" class="btn accept big">${t("Accept with the chosen answers")}</button>
 <span class="hint">${page.terminal ? t("The terminal waiting there picks the decision up and goes on.") : th("Same as {a} / {c} on the terminal's card.", { a: html`<code>a</code>`, c: html`<code>c</code>` })}</span></div>`,
     html` class="dock" data-decision id="decide-form"`,
   );

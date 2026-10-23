@@ -252,7 +252,8 @@ human:                         # ADR-0019 §9
     sourceMarkers: true                  # // REVIEW: в коде
     removeMarkersAfterApproval: true
   clarification: { multiTurn: true, maxTurns: 8 }
-  suggestAnswers: true                   # перед гейтом — ответы на открытые вопросы документа (один вызов модели)
+  suggestAnswers: true                   # перед гейтом — ответы на открытые вопросы документа (один вызов модели);
+                                         # гейт открывается после них, сбой — гейт без подсказок
   autonomous: false                      # experimental: прогоны без человека по умолчанию (как --autonomous, cli.md)
   arbiter:                               # судья бюджета автономного прогона (cli.md, --autonomous)
     enabled: true

@@ -1062,6 +1062,12 @@ export function feedItem(e: StoredEvent): FeedItem | undefined {
             }),
             "warn",
           );
+    case "answers.preparing":
+      return at(
+        t("Jarvis prepares answers to {n} from the sources — the gate opens after them", {
+          n: plural(typeof p.questions === "number" ? p.questions : 0, "open question"),
+        }),
+      );
     case "answers.failed":
       return at(
         t("no answers prepared for the open questions: {why}", {
