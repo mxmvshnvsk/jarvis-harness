@@ -175,7 +175,7 @@ sources → catalog → research → spec → approve-spec → split → approve
 | specification | research | `repo.read/list/search` | ok |
 | impact | research | чтение репо (в т.ч. `graph.impact`, `graph.neighbors`) | ok, needs_research |
 | plan | research | `repo.read/list/search` | ok, spec_infeasible |
-| implementation | implementation | чтение + `repo.write/edit`, `project.*`, `figma.get` | ok |
+| implementation | implementation | чтение + `repo.write/edit/delete`, `project.*`, `figma.get` | ok |
 | test | implementation | чтение + запись только тестов (`*.test.*`, `*.spec.*`, `__tests__`, `__mocks__`, `__snapshots__`, `test/`, `tests/`), `project.test*` | ok, defects_found |
 | docs | implementation | чтение + запись | ok |
 | telemetry | implementation | чтение + запись | ok, spec_gap |
@@ -219,6 +219,13 @@ sources → catalog → research → spec → approve-spec → split → approve
 пометка: какой вызов уже искал это и что текста здесь нет — искать другое имя или в другом месте. Событие
 `tool.repeat`. Восстанавливается из разговора, как и чтения. В пилоте агент шесть раз искал `slot` в тех же двух
 файлах (`glob` и `path`, `slot` и `[Ss]lot`) — каждый раз пусто.
+
+**Запись по кругу.** Если файл в шаге записан пятый раз (и десятый) или записан обратно в содержимое, которое уже
+было в нём несколько вызовов назад, к ответу записи добавляется пометка: это круг; если шагу нужно то, чего
+инструменты не умеют, — сказать об этом в notes результата, а не обходить. Событие `tool.churn`. Запись пустого
+или `null`-содержимого в существующий файл отвечает, что файл опустошён, а не удалён: удаляет `repo.delete`
+(файл или каталог с `recursive: true`). В пилоте implementation 20 минут «удаляла» каталог, которого не могла
+удалить, записывая в его файлы `""`, `null` и прежнюю заглушку; lint от этого падал, и она чинила и его.
 
 **Конец цикла — `DONE`.** Собрав нужное, агент отвечает одной строкой `DONE` (и, если есть, что осталось
 неизвестным), без документа; сразу за этим Jarvis просит итоговый документ — в JSON-режиме, с этой строкой в

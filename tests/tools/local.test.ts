@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Runtime } from "../../src/app/runtime.ts";
@@ -187,6 +187,28 @@ describe("local tools", () => {
     expect((await tools.invoke("git.diff", { base: "HEAD", path: "src/index.test.ts" })).text).toContain(
       "+new",
     );
+  });
+
+  it("repo.delete removes a file or a folder; an emptied file is said not to be removed", async () => {
+    const { bind } = await setup();
+    const tools = bind();
+    await tools.invoke("repo.write", { path: "src/banner/banner.tsx", content: "export {};\n" });
+    await tools.invoke("repo.write", { path: "src/banner/banner.css", content: "a{}\n" });
+    // pilot: "" and "null" written to «remove» files, round after round
+    const emptied = await tools.invoke("repo.write", { path: "src/banner/banner.tsx", content: "null" });
+    expect(emptied.text).toContain("is emptied, not removed");
+    const folder = await tools.invoke("repo.delete", { path: "src/banner" });
+    expect(folder.ok).toBe(false);
+    expect(folder.error).toContain("pass recursive=true");
+    const gone = await tools.invoke("repo.delete", { path: "src/banner", recursive: true });
+    expect(gone.ok).toBe(true);
+    expect(gone.text).toBe("removed src/banner (2 files)");
+    expect(existsSync(join(sb.project, "src/banner"))).toBe(false);
+    expect((await tools.invoke("repo.delete", { path: "README.md" })).text).toBe("removed README.md");
+    expect((await tools.invoke("repo.delete", { path: "README.md" })).error).toContain("removed already");
+    expect((await tools.invoke("repo.delete", { path: "." })).ok).toBe(false);
+    expect((await tools.invoke("repo.delete", { path: ".env" })).error).toContain("secret location");
+    expect((await tools.invoke("repo.delete", { path: "../x" })).error).toContain("outside the workspace");
   });
 
   it("refuses paths outside the workspace and secret locations, and redacts secrets in output", async () => {

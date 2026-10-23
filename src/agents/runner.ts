@@ -35,6 +35,7 @@ import type { AgentRegistry } from "./definition.ts";
 import { packageForStep } from "./knowledge.ts";
 import { ReadLedger, readKey } from "./rereads.ts";
 import { SearchLedger } from "./searches.ts";
+import { WriteLedger } from "./writes.ts";
 
 /** The agent's "I have what I need": the document is asked for next (system rule in context.ts). */
 export const saidDone = (text: string): boolean => /^\s*\**DONE\b/i.test(text);
@@ -43,7 +44,7 @@ export const saidDone = (text: string): boolean => /^\s*\**DONE\b/i.test(text);
 export const PARALLEL_TOOLS = 6;
 
 /** Tools that change the workspace: an agent with them that only reads is nudged, then stopped. */
-const WRITE_TOOLS = new Set(["repo.write", "repo.edit"]);
+const WRITE_TOOLS = new Set(["repo.write", "repo.edit", "repo.delete"]);
 /** Answers cut at the output limit in a row the loop goes on after, asking for smaller ones. */
 const CUT_SHORT_MAX = 3;
 /** Model calls without an edit before the first nudge (the second at twice, the stop at three times). */
@@ -332,6 +333,7 @@ export class AgentRuntimeRunner implements AgentRunner {
     const reads = ReadLedger.from(transcript);
     reads.seed(baseShown);
     const searches = SearchLedger.from(transcript);
+    const writes = new WriteLedger();
     let toolCalls = restored?.toolCalls ?? 0;
     let modelCalls = restored?.modelCalls ?? 0;
     const emit = (kind: string, payload: Record<string, unknown>) =>
@@ -704,7 +706,23 @@ export class AgentRuntimeRunner implements AgentRunner {
         const sought = searches.answer(call.name, args, call.id, answered.content);
         if (sought.kind !== "first")
           emit("tool.repeat", { capability: call.name, pattern: args.pattern, kind: sought.kind });
-        transcript = [...transcript, { role: "tool", toolCallId: call.id, content: sought.content }];
+        // the same file written round and round: said once, in the write's answer
+        const churn = results[i]?.ok === true ? writes.note(call.name, args, call.id) : undefined;
+        if (churn)
+          emit("tool.churn", {
+            capability: call.name,
+            path: churn.path,
+            writes: churn.writes,
+            ...(churn.back ? { back: churn.back } : {}),
+          });
+        transcript = [
+          ...transcript,
+          {
+            role: "tool",
+            toolCallId: call.id,
+            content: churn ? `${sought.content}\n${churn.text}` : sought.content,
+          },
+        ];
       }
       // after the whole answer: a checkpoint mid-way would keep tool calls without their results
       if (Math.floor(toolCalls / limits.checkpointEvery) > Math.floor(callsBefore / limits.checkpointEvery))

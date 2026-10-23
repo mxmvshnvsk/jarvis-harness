@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import type { Diagnostic } from "../../core/capabilities/contracts.ts";
 import type { ResolvedConfig } from "../../core/config/schema.ts";
@@ -551,10 +551,64 @@ export class LocalToolProvider implements ToolProvider {
             writeFileSync(absolute, content, "utf8");
             this.writes += 1;
             const fixed = await this.fixWritten(rel, absolute, ctx);
+            // pilot: an agent «removed» files by writing "" and "null" into them, round after round
+            const emptied =
+              before !== undefined && /^\s*(null)?\s*$/.test(content)
+                ? `\n(${rel} is emptied, not removed: an empty file stays in the change. To remove a file or a folder, use repo.delete.)`
+                : "";
             return {
               ok: true,
-              text: `wrote ${rel} (${Buffer.byteLength(content)} bytes)${fixed.text}`,
+              text: `wrote ${rel} (${Buffer.byteLength(content)} bytes)${fixed.text}${emptied}`,
               data: { path: rel, ...(fixed.data ? { fix: fixed.data } : {}) },
+            };
+          } catch (error) {
+            return fail(error);
+          }
+        },
+      },
+      {
+        // pilot: «the folder is removed if nothing refers to it» — the agent had no way to remove a file
+        name: "repo.delete",
+        description:
+          "Remove a file, or a folder with everything in it (recursive=true), from the workspace: the change deletes it. Not for emptying a file.",
+        network: "none",
+        access: "write",
+        effect: false,
+        parameters: {
+          type: "object",
+          properties: {
+            path: { type: "string" },
+            recursive: { type: "boolean", description: "a folder: true removes it with everything in it" },
+          },
+          required: ["path"],
+        },
+        handler: async (args, ctx) => {
+          try {
+            const { absolute, relative: rel } = resolveInWorkspace(ctx, str(args, "path"));
+            if (rel === "." || rel === ".git" || rel.startsWith(".git/"))
+              return { ok: false, error: `${rel} cannot be removed: name a file or a folder of the change` };
+            if (!existsSync(absolute))
+              return { ok: false, error: `nothing at ${rel}: it is removed already` };
+            let files = [rel];
+            if (statSync(absolute).isDirectory()) {
+              if (args.recursive !== true)
+                return {
+                  ok: false,
+                  error: `${rel} is a folder: pass recursive=true to remove it with everything in it`,
+                };
+              files = filesUnder(absolute).map((f) => `${rel}/${f}`);
+              const denied = files.find((f) => ctx.pathPolicy.isDenied(f));
+              if (denied) throw new PathDeniedError(denied, "secret location (security.deniedPaths)");
+            }
+            rmSync(absolute, { recursive: true, force: true });
+            this.writes += 1;
+            return {
+              ok: true,
+              text:
+                files.length > 1 || files[0] !== rel
+                  ? `removed ${rel} (${files.length} files)`
+                  : `removed ${rel}`,
+              data: { path: rel, removed: files },
             };
           } catch (error) {
             return fail(error);
@@ -1107,4 +1161,11 @@ export async function workspaceFingerprint(cwd: string): Promise<string | undefi
     }
   }
   return hash.digest("hex");
+}
+
+/** The files under a folder, relative to it (`a/b.ts`). */
+function filesUnder(dir: string, prefix = ""): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+    e.isDirectory() ? filesUnder(join(dir, e.name), `${prefix}${e.name}/`) : [`${prefix}${e.name}`],
+  );
 }

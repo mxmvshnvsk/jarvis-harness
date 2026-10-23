@@ -50,9 +50,9 @@ export function mainCourse(workflow: WorkflowDefinition): StepDefinition[] {
 }
 
 const writers = new Set(
-  BUILTIN_AGENTS.filter((a) => a.capabilities.some((c) => c === "repo.write" || c === "repo.edit")).map(
-    (a) => a.id,
-  ),
+  BUILTIN_AGENTS.filter((a) =>
+    a.capabilities.some((c) => c === "repo.write" || c === "repo.edit" || c === "repo.delete"),
+  ).map((a) => a.id),
 );
 
 /** Whether a step changes the code of its checkout: an agent that writes, or a composite holding one. */
