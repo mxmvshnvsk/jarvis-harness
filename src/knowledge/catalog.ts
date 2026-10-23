@@ -501,7 +501,7 @@ export function catalogDoc(
       ? [
           "## Libraries of the map",
           "",
-          "A library the change needs gets a subtask of its own, like a service: what changes in it, and its new version. The services that use it start once its change is accepted and published (Jarvis orders that from the map): put in each user's task that it moves to the new version and what it uses of it. A user that needs nothing new from it gets no subtask for that reason.",
+          "A library the change needs gets a subtask of its own, like a service: what changes in it, and its new version. Its users are not part of the task for that: only a service that changes for the task anyway gets a subtask, and that subtask moves it to the library's new version and says what it uses of it (Jarvis starts it once the library's change is accepted and published). A user that would only move to the new version gets no subtask: it stays on its version, in notInScope.",
           "",
           ...libraries.map(
             (l) =>
