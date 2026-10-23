@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { basename } from "node:path";
 import { type Activity, activityOf, compactingText, noticeOf } from "../app/activity.ts";
+import { arbiterRole } from "../app/arbiter.ts";
 import { AUTONOMY_DECIDED } from "../app/autonomy.ts";
 import { type BudgetGrant, type BudgetStop, budgetGranted, budgetStopOf } from "../app/budgetStop.ts";
 import { type BudgetWait, budgetWaitOf } from "../app/budgetWait.ts";
@@ -32,6 +33,7 @@ import { type RestartPlan, restartPlanOf } from "../app/restart.ts";
 import { type Resumable, resumableOf } from "../app/resumable.ts";
 import { type RoundFailure, roundsOf, type StopWhy } from "../app/rounds.ts";
 import type { Runtime } from "../app/runtime.ts";
+import { type StallSignals, stallSignalsOf } from "../app/stall.ts";
 import type { RunTokens } from "../app/status.ts";
 import { checksAskOf, pauseAfterRequested } from "../app/steer.ts";
 import {
@@ -245,6 +247,8 @@ export interface BudgetCard {
   readonly changes?: readonly Change[];
   /** Decided since the run stopped (the page, the terminal's card): it goes on, or waits for `continue`. */
   readonly granted?: BudgetGrant;
+  /** What the step's journal shows: more work than the limit, or going round (src/app/stall.ts). */
+  readonly signals?: StallSignals;
 }
 
 export interface OtherCard {
@@ -526,7 +530,14 @@ export async function waitCardOf(runtime: Runtime, run: Run, homeDir: string): P
     if (stop) {
       const changes = run.workspace.mode === "worktree" ? changesIn(run.workspace.path) : undefined;
       const granted = budgetGranted(runtime, run.id);
-      return { kind: "budget", stop, ...(changes ? { changes } : {}), ...(granted ? { granted } : {}) };
+      const signals = stallSignalsOf(runtime, run.id, stop.stepId, stop.iteration);
+      return {
+        kind: "budget",
+        stop,
+        ...(changes ? { changes } : {}),
+        ...(granted ? { granted } : {}),
+        ...(signals.calls > 0 ? { signals } : {}),
+      };
     }
   }
   if (kind === "clarification") {
@@ -828,6 +839,8 @@ export function feedOf(events: readonly StoredEvent[]): FeedItem[] {
 
 export interface RunPage {
   readonly run: Run;
+  /** An autonomous run whose budget judge runs on the worker's model (no roles.arbiter). */
+  readonly arbiterShared?: boolean;
   /** The kind of task the skills were picked by, and what decided it (src/app/taskKind.ts). */
   readonly kind: KindChoice;
   readonly plan: readonly string[];
@@ -1228,8 +1241,19 @@ export function feedItem(e: StoredEvent): FeedItem | undefined {
               ? t("autonomous: the task stays in this service")
               : what === "contract"
                 ? t("autonomous: the contract stays as agreed")
-                : t("autonomous: nobody to decide — the run ends");
-      return at(text, what === "stopped" ? "bad" : "warn");
+                : what === "budget"
+                  ? p.grant === true
+                    ? t("budget judge: +{n} for {agent} — {why}", {
+                        n: String(p.amount ?? "?"),
+                        agent: str(p.agent) ?? "?",
+                        why: str(p.why) ?? "",
+                      })
+                    : t("budget judge: no more for {agent} — {why}", {
+                        agent: str(p.agent) ?? "?",
+                        why: str(p.why) ?? "",
+                      })
+                  : t("autonomous: nobody to decide — the run ends");
+      return at(text, what === "stopped" || (what === "budget" && p.grant !== true) ? "bad" : "warn");
     }
     case "run.delivered":
       return at(`${t("PR opened")}${str(p.url) ? `: ${str(p.url)}` : ""}${by}`, "ok");
@@ -1554,6 +1578,9 @@ export async function runPage(
     .reduce((sum, r) => sum + r.durationMs, 0);
   const feed = feedOf(events);
   return {
+    ...(run.options?.autonomous && runtime.loaded.config.human.arbiter.enabled && !arbiterRole(runtime).own
+      ? { arbiterShared: true }
+      : {}),
     run,
     kind: kindOfTask({ task: run.task, picked: run.options?.kind, workflowKind: workflow?.kind }),
     plan,

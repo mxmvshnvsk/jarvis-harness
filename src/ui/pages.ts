@@ -11,6 +11,7 @@ import type { HealthState, ModelHealth, ModelPerf, ModelsHealth, Unlimited } fro
 import type { PlanProgress } from "../app/planProgress.ts";
 import type { RestartPlan } from "../app/restart.ts";
 import type { RoundFailure } from "../app/rounds.ts";
+import type { StallSignals } from "../app/stall.ts";
 import type { SubtaskView } from "../app/subtasks.ts";
 import type { TimeItem, TimePart, TimeSplit } from "../app/timeSplit.ts";
 import { cdTo, type TryOut, tryCommand } from "../app/tryOut.ts";
@@ -1060,6 +1061,30 @@ function grantText(s: BudgetStop, g: NonNullable<BudgetCard["granted"]>): string
 }
 
 /** The run stopped on a budget: what ran out, then more and go on, or finish with what it has. */
+/**
+ * What the step's journal shows at a budget stop, for the person who decides: more work than the limit,
+ * or the model going round — with the calls made again (src/app/stall.ts).
+ */
+// t("Looks like the agent goes round: more of the same will not help — finish, or redo the step with a note")
+function stallHtml(sig: StallSignals): Html {
+  const pct = Math.round(sig.novelty * 100);
+  const [tone, head] =
+    sig.verdict === "loop"
+      ? [
+          "bad",
+          t(
+            "Looks like the agent goes round: more of the same will not help — finish, or redo the step with a note",
+          ),
+        ]
+      : sig.verdict === "progress"
+        ? ["ok", t("Looks like the task needs more than the limit: the agent keeps finding new things")]
+        : ["info", t("Hard to tell from the journal: some new work, some repeats")];
+  return html`<div class="banner ${tone} stall"><b>${head}</b>
+<span class="hint">${t("{pct}% of the last {n} calls are new · {repeats} repeats and {rereads} re-reads in {calls} calls of the step", { pct, n: sig.recent.length, repeats: sig.repeats, rereads: sig.rereads, calls: sig.calls })}</span>
+${sig.top.length > 0 ? html`<span class="hint">${t("Made again:")} ${sig.top.map((x, i) => html`${i > 0 ? " · " : ""}<code>${x.call}</code> ×${x.times}`)}</span>` : ""}
+<details class="fold"><summary>${t("The last calls")}</summary><ol class="calls">${sig.recent.map((c) => html`<li class="${c.repeat ? "warn" : ""}"><code>${c.capability}</code> ${c.args}${c.ok ? "" : html` <span class="bad">✗</span>`}${c.repeat ? html` <span class="muted">· ${t("again")}</span>` : ""}</li>`)}</ol></details></div>`;
+}
+
 function budgetCardHtml(card: BudgetCard, page: RunPage, actions?: Actions): Html {
   const s = card.stop;
   const unit = unitOf(s.dimension);
@@ -1074,6 +1099,7 @@ function budgetCardHtml(card: BudgetCard, page: RunPage, actions?: Actions): Htm
       : t("the step goes on from its last model call; the cap grows for this run only")
   }</span>
 </div>
+${card.signals ? stallHtml(card.signals) : ""}
 ${
   card.changes && card.changes.length > 0
     ? html`<div class="changed"><span class="hint">${t("Changed in the checkout so far")}</span>${card.changes.slice(0, 12).map(changeLine)}${card.changes.length > 12 ? html`<span class="muted">+${card.changes.length - 12} more</span>` : ""}</div>`
@@ -1525,7 +1551,7 @@ export function runContent(
       html`<span title="${t("the kind of task the skills and standards were picked by")} — ${kindWhy(page.kind)}">${t(KIND_NAME[page.kind.kind])}</span>`,
       ...(r.options?.autonomous
         ? [
-            html`<span class="pill wait" title="${t("No person in the loop: gates pass, a question gets the most cautious assumption, a dead end ends the run")}">${t("autonomous")} · experimental</span>`,
+            html`<span class="pill wait" title="${t("No person in the loop: gates pass, a question gets the most cautious assumption, a dead end ends the run")}">${t("autonomous")} · experimental</span>${page.arbiterShared ? html` <span class="pill plain" title="${t("A separate model is recommended for the budget judge: roles.arbiter.models — the worker's own model judges its own work")}">⚖ ${t("judge on the worker's model")}</span>` : ""}`,
           ]
         : []),
       `run ${shortRunId(r.id)}`,

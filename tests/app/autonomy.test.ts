@@ -146,8 +146,10 @@ describe("an autonomous run", () => {
     });
     const run = createRun(rt, "gated", "ABC-5", AUTO);
     const done = await engine.execute(run.id, owner);
+    // the budget judge weighs it: no model here, so no more — requirements is analysis, the run ends
     expect(done.run.state).toBe("FAILED");
-    expect(done.run.stateReason).toContain("nobody to grant more");
+    expect(done.run.stateReason).toContain("the budget judge said no: the judge could not answer");
+    expect(decided(run.id)).toEqual(["budget"]);
   });
 
   it("takes every round of failed checks before it stops", () => {

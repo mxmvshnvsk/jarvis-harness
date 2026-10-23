@@ -319,11 +319,14 @@ export class AgentRuntimeRunner implements AgentRunner {
     };
     // a used-up limit: finish with what there is (marked incomplete), or — `onLimit: ask`, a person at
     // hand — the run waits for more calls or "finish"; never asks where nobody answers (CI)
+    // an autonomous run asks its budget judge instead (src/app/arbiter.ts): nobody else answers there
+    const judged = isAutonomous(ctx.run) && config.human.arbiter.enabled;
     const ask =
-      (config.agents[def.id]?.onLimit ?? ctx.step.onLimit ?? def.onLimit ?? "finish") === "ask" &&
-      config.interactive !== false &&
-      !isAutonomous(ctx.run) &&
-      !grants.finish;
+      !grants.finish &&
+      (judged ||
+        ((config.agents[def.id]?.onLimit ?? ctx.step.onLimit ?? def.onLimit ?? "finish") === "ask" &&
+          config.interactive !== false &&
+          !isAutonomous(ctx.run)));
     // files read in this step, from the conversation itself (src/agents/rereads.ts)
     const reads = ReadLedger.from(transcript);
     reads.seed(baseShown);

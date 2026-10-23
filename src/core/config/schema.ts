@@ -499,6 +499,19 @@ export const HumanConfigSchema = z.strictObject({
    * the most cautious assumption, a dead end ends the run. `--autonomous` asks it for one run.
    */
   autonomous: z.boolean().default(false),
+  /**
+   * The judge of a budget stop (src/app/arbiter.ts): in an autonomous run it decides whether the agent
+   * gets more — up to `ceiling` times the run's own budget, at most `maxGrantsPerStep` times a step —
+   * or the run ends; for a person it says what the journal shows. Its model: `roles.arbiter`, else the
+   * review role's (a separate model is better: the worker's own judges itself).
+   */
+  arbiter: z
+    .strictObject({
+      enabled: z.boolean().default(true),
+      ceiling: z.number().min(1).max(10).default(2),
+      maxGrantsPerStep: z.int().min(1).max(10).default(3),
+    })
+    .prefault({}),
 });
 export type HumanConfig = z.infer<typeof HumanConfigSchema>;
 

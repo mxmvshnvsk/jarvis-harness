@@ -841,6 +841,20 @@ describe("a stop on a budget, decided on the page", () => {
     expect(page).toContain("+40 tool calls and go on");
     expect(page).toContain("Finish with what it has");
     expect(page).toContain(`action="/runs/${short}/budget"`);
+    // nothing in the journal yet: no reading of it
+    expect(page).not.toContain("banner info stall");
+    // the step went round: the card says so, with the calls made again
+    for (let i = 0; i < 8; i++)
+      rt.events.emit({
+        kind: "tool.call",
+        runId: run.id,
+        stepId: "write",
+        iteration: 1,
+        payload: { capability: "repo.search", args: '{"q":"mask"}', ok: true },
+      });
+    const round = await getPage(`/runs/${short}`);
+    expect(round).toContain("Looks like the agent goes round");
+    expect(round).toContain("<code>repo.search {&quot;q&quot;:&quot;mask&quot;}</code> ×8");
 
     const bad = await post(`/runs/${short}/budget`, { t: ui.token, choice: "more", amount: "-3" });
     expect(bad.location).toBe(`/runs/${short}?notice=amount`);

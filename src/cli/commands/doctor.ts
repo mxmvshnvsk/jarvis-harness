@@ -132,6 +132,17 @@ export async function runDoctor(ctx: CliContext): Promise<DoctorReport> {
   );
 
   if (loaded) {
+    // the budget judge of autonomous runs on the worker's model judges that model's own work
+    if (loaded.config.human.arbiter.enabled && !loaded.config.roles.arbiter)
+      checks.push(
+        check(
+          "arbiter",
+          "warn",
+          "budget judge",
+          "runs on the review role's model, the same family that does the work",
+          "a model of its own for autonomous runs: roles.arbiter.models (a cheap one, or another family)",
+        ),
+      );
     if (!loaded.project) {
       checks.push(
         check(

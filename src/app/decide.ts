@@ -11,7 +11,8 @@ import type { Runtime } from "./runtime.ts";
  * Where a decision was made (ADR-0023 §5): the terminal (`cli`: the card, `jarvis approve`) or the
  * page of `jarvis ui` (`ui`). One function records it whichever window it comes from.
  */
-export type DecisionChannel = "cli" | "ui";
+/** `auto`: decided by Jarvis for an autonomous run (its budget judge). */
+export type DecisionChannel = "cli" | "ui" | "auto";
 
 /** What a run parked at an approval gate waits on: the latest version of the gated artifact. */
 export function awaitedArtifact(

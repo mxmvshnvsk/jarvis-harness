@@ -33,7 +33,7 @@ export const AUTONOMY_DECIDED = "autonomy.decided";
 export function noteAutonomy(
   runtime: Runtime,
   run: Pick<Run, "id" | "owner">,
-  what: "gate" | "assumption" | "scope" | "contract" | "stopped",
+  what: "gate" | "assumption" | "scope" | "contract" | "stopped" | "budget",
   payload: Record<string, unknown>,
   stepId?: string,
 ): void {

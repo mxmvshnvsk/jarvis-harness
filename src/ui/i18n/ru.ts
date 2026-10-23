@@ -1326,6 +1326,22 @@ export const RU: Readonly<Record<string, string>> = {
   "The change is in {service}, which has no subtask: accepting adds one, delivered before {asking}.":
     "Изменение — в {service}, у которого нет сабтаска: принятие добавит его, поставка — раньше {asking}.",
   "Waits for a library": "Ждёт библиотеку",
+  "budget judge: +{n} for {agent} — {why}": "судья бюджета: +{n} для {agent} — {why}",
+  "budget judge: no more for {agent} — {why}": "судья бюджета: больше не даёт {agent} — {why}",
+  "Looks like the agent goes round: more of the same will not help — finish, or redo the step with a note":
+    "Похоже, агент ходит по кругу: ещё ресурсов не помогут — заверши шаг или повтори его с заметкой",
+  "Looks like the task needs more than the limit: the agent keeps finding new things":
+    "Похоже, задаче нужно больше лимита: агент продолжает находить новое",
+  "Hard to tell from the journal: some new work, some repeats":
+    "По журналу не понять: есть и новая работа, и повторы",
+  "{pct}% of the last {n} calls are new · {repeats} repeats and {rereads} re-reads in {calls} calls of the step":
+    "новых — {pct}% из последних {n} вызовов · повторов {repeats}, перечитываний {rereads} на {calls} вызовов шага",
+  "Made again:": "Повторялось:",
+  "The last calls": "Последние вызовы",
+  again: "снова",
+  "A separate model is recommended for the budget judge: roles.arbiter.models — the worker's own model judges its own work":
+    "Для судьи бюджета лучше отдельная модель: roles.arbiter.models — сейчас модель оценивает собственную работу",
+  "judge on the worker's model": "судья на модели исполнителя",
   "The split leaves out tasks of the Story": "Разбиение не покрывает задачи Story",
   "no subtask, while the map has {side} services: {services}":
     "нет сабтаска, хотя в карте есть сервисы стороны {side}: {services}",

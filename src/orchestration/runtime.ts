@@ -1,5 +1,7 @@
 import { reasonOf } from "../app/activity.ts";
+import { ANALYSIS_AGENTS, ARBITER_ACTOR, arbitrate } from "../app/arbiter.ts";
 import { isAutonomous, noteAutonomy } from "../app/autonomy.ts";
+import { type BudgetStop, grantBudget } from "../app/budgetStop.ts";
 import { proposeGlossaryCandidates } from "../app/candidates.ts";
 import { goOnRequested, rerunBackTo } from "../app/decide.ts";
 import { DeliveryError, deliverPr, deliversItself, PR_REQUEST, prFlowOn, prOf } from "../app/deliver.ts";
@@ -285,6 +287,15 @@ export class LocalWorkflowEngine {
           outcome = await this.executeStep(run, workflow, step, iteration, lease, workspace);
         } catch (error) {
           const suspend = this.toSuspension(error, run);
+          // an autonomous run at a budget stop: its judge grants more and the step goes on, or the run ends
+          if (suspend && isAutonomous(run) && suspend.waitingFor?.kind === "budget") {
+            const judged = await this.judgeBudget(run, step, iteration, suspend);
+            if (judged === "go-on") continue;
+            if (judged) {
+              run = judged;
+              break;
+            }
+          }
           if (suspend) {
             run = await this.park(run, step, iteration, suspend, workspace);
             break;
@@ -904,6 +915,67 @@ export class LocalWorkflowEngine {
         this.rt.log.error("candidates.repeated", { runId: run.id, stepId: step.id, ...errorFields(error) });
       }
     }
+  }
+
+  /**
+   * The budget judge of an autonomous run (src/app/arbiter.ts) on a stop: more — recorded as its grant,
+   * the step goes on from its checkpoint; no — an analysis agent's run ends (a gap must not reach the
+   * code), another agent finishes with what it has. Undefined: no judge here, the stop goes as before.
+   */
+  private async judgeBudget(
+    run: Run,
+    step: StepDefinition,
+    iteration: number,
+    suspend: SuspendRun,
+  ): Promise<Run | "go-on" | undefined> {
+    if (!this.rt.loaded.config.human.arbiter.enabled) return undefined;
+    const b = suspend.checkpointState?.budget as Record<string, unknown> | undefined;
+    if (!b) return undefined;
+    const stop: BudgetStop = {
+      scope: b.scope as BudgetStop["scope"],
+      dimension: b.dimension as BudgetStop["dimension"],
+      used: Number(b.used),
+      cap: Number(b.cap),
+      stepId: step.id,
+      iteration,
+      ...(typeof b.agent === "string" ? { agent: b.agent } : {}),
+      suggested: 0,
+    };
+    if (!Number.isFinite(stop.used) || !Number.isFinite(stop.cap)) return undefined;
+    const decision = await arbitrate(this.rt, run, stop);
+    const agent = stop.agent ?? step.agent;
+    noteAutonomy(
+      this.rt,
+      run,
+      "budget",
+      {
+        grant: decision.grant,
+        ...(decision.amount ? { amount: decision.amount } : {}),
+        scope: stop.scope,
+        dimension: stop.dimension,
+        used: stop.used,
+        cap: stop.cap,
+        diagnosis: decision.diagnosis,
+        why: decision.why,
+        by: decision.by,
+        ...(agent ? { agent } : {}),
+      },
+      step.id,
+    );
+    if (decision.grant && decision.amount) {
+      grantBudget(this.rt, run, stop, ARBITER_ACTOR, { more: decision.amount }, "auto");
+      return "go-on";
+    }
+    if (agent && ANALYSIS_AGENTS.has(agent)) {
+      const failed = this.rt.runs.transition(run.id, "FAILED", {
+        reason: `autonomous: ${suspend.reason} — the budget judge said no: ${decision.why}`,
+      });
+      this.emit(failed, "run.state", { state: failed.state, reason: failed.stateReason });
+      return failed;
+    }
+    // another agent: its result from what it has, marked incomplete — the checks after it judge it
+    grantBudget(this.rt, run, stop, ARBITER_ACTOR, { finish: true }, "auto");
+    return "go-on";
   }
 
   private async park(

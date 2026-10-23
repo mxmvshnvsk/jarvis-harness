@@ -879,6 +879,81 @@ context: { maxContext: 8000 }
     ]);
   });
 
+  it("autonomous: the budget judge grants on new work, says no on the judge model's word — impact's run ends", async () => {
+    sb.write(
+      "project/.jarvis/project.yaml",
+      "version: 1\nworkspace: { mode: cwd }\nagents: { impact: { limits: { maxToolCalls: 4 } } }\n",
+    );
+    for (let i = 0; i < 20; i++) sb.write(`project/f${i}.txt`, `file ${i}\n`);
+    rt = await testRuntime(sb, { PATH: process.env.PATH ?? "" });
+    let read = 0;
+    let judged = 0;
+    server.respond((req) => {
+      const system = (req.body.messages as Array<{ content: string }>)[0]?.content ?? "";
+      if (system.includes("the judge of a budget stop")) {
+        judged += 1;
+        return completion(
+          JSON.stringify({
+            grant: false,
+            diagnosis: "stuck",
+            why: "it reads file after file without a plan",
+          }),
+        );
+      }
+      // a new file each call: new work, by the journal
+      return req.body.tools
+        ? toolCallCompletion("repo.read", { path: `f${read++}.txt` })
+        : completion(
+            JSON.stringify({
+              summary: "s",
+              affected: [],
+              dependencies: [],
+              risks: [],
+              unknowns: [],
+              sources: [],
+              outcome: "ok",
+            }),
+          );
+    });
+    const wf = workflowOf({
+      name: "im",
+      entry: "impact",
+      steps: [
+        {
+          id: "impact",
+          kind: "agentic",
+          agent: "impact",
+          outputs: ["impact"],
+          transitions: { onSuccess: "DONE" },
+        },
+      ],
+    });
+    const run = rt.runs.create({
+      task: "ABC-1",
+      workflow: "im",
+      owner: ACTOR,
+      workspace: { mode: "cwd", repoRoot: sb.project, path: sb.project, baseRef: "HEAD" },
+      dataClass: "confidential",
+      options: { autonomous: true },
+    });
+    const result = await engineWith(rt, wf).execute(run.id, { owner: "cli:t" });
+    // the first stop: new work every call — more (half the limit) by the journal, no model
+    const grants = rt.events.list({ runId: run.id, kind: "budget.grant" });
+    expect(grants.map((g) => [g.actor, g.payload?.toolCalls])).toEqual([["service:arbiter", 2]]);
+    // the second: the judge model weighs it and says no — impact is analysis: the run ends
+    expect(judged).toBe(1);
+    expect(result.run.state).toBe("FAILED");
+    expect(result.run.stateReason).toContain(
+      "the budget judge said no: it reads file after file without a plan",
+    );
+    const decided = rt.events.list({ runId: run.id, kind: "autonomy.decided" }).map((e) => e.payload);
+    expect(decided).toMatchObject([
+      { what: "budget", grant: true, amount: 2, by: "signals", diagnosis: "needs-more", agent: "impact" },
+      { what: "budget", grant: false, by: "model", diagnosis: "stuck", agent: "impact" },
+    ]);
+    expect(read).toBe(6);
+  });
+
   it("onLimit: ask — the run waits at the limit with the conversation kept; more goes on, finish ends it", async () => {
     sb.write(
       "project/.jarvis/project.yaml",

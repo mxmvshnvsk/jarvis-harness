@@ -22,6 +22,7 @@ import {
   whereFrom,
 } from "../app/decide.ts";
 import type { Runtime } from "../app/runtime.ts";
+import { stallSignalsOf } from "../app/stall.ts";
 import type { Actor } from "../core/domain/actor.ts";
 import type { ArtifactVersion } from "../core/domain/artifact.ts";
 import type { Run } from "../core/domain/run.ts";
@@ -653,6 +654,25 @@ async function budgetGate(
         : "the step goes on from its last model call; the cap grows for this run only",
     )}`,
   );
+  // what the step's journal shows: more work than the limit, or going round (src/app/stall.ts)
+  const sig = stallSignalsOf(runtime, run.id, stop.stepId, stop.iteration);
+  if (sig.calls > 0) {
+    const mark =
+      sig.verdict === "loop" ? st.bad("↺") : sig.verdict === "progress" ? st.ok("→") : st.muted("?");
+    ctx.out.line(
+      cutStyled(
+        `  ${mark} ${sig.verdict === "loop" ? "looks like it goes round" : sig.verdict === "progress" ? "looks like the task needs more" : "hard to tell"}: ${sig.summary}`,
+        width,
+      ),
+    );
+    if (sig.verdict === "loop" && sig.top.length > 0)
+      ctx.out.line(
+        cutStyled(
+          `    ${st.muted("made again:")} ${sig.top.map((x) => `${x.call} ×${x.times}`).join(" · ")}`,
+          width,
+        ),
+      );
+  }
   if (run.workspace.mode === "worktree") {
     const changes = changesIn(run.workspace.path);
     if (changes && changes.length > 0)

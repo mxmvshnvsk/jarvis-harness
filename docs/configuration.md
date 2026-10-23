@@ -96,6 +96,8 @@ roles:                         # могут быть и в проекте; пр�
   research:       { models: [deepseek-flash] }
   implementation: { models: [qwen-coder, deepseek-flash] }   # порядок = предпочтение
   review:         { models: [deepseek-flash], maxOutput: 4096 }
+  arbiter:        { models: [another-model] } # судья бюджета автономных прогонов; без неё — модель review
+                                               # (doctor и страница рана советуют отдельную: иначе модель судит свою работу)
   compaction:     { models: [deepseek-flash] }   # суммаризация при компакции контекста (ADR-0013); нет роли — модель самого агента
 
 mcp: { servers: {} }           # можно и здесь (личные серверы), обычно — в проекте
@@ -252,6 +254,10 @@ human:                         # ADR-0019 §9
   clarification: { multiTurn: true, maxTurns: 8 }
   suggestAnswers: true                   # перед гейтом — ответы на открытые вопросы документа (один вызов модели)
   autonomous: false                      # experimental: прогоны без человека по умолчанию (как --autonomous, cli.md)
+  arbiter:                               # судья бюджета автономного прогона (cli.md, --autonomous)
+    enabled: true
+    ceiling: 2                           # выданное судьёй — не больше ×2 от бюджета (лимита) в сумме
+    maxGrantsPerStep: 3                  # и не больше трёх выдач на шаг
   checks:
     ask: same-failure                    # когда упавшие проверки останавливают прогон до следующего круга:
                                          # same-failure — упали так же, как в прошлом круге, или тесты не запустились;
