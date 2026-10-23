@@ -1372,7 +1372,7 @@ context: { maxContext: 8000 }
       { agent: "implementation", modelCalls: 36, stopped: true },
     ]);
     const all = JSON.stringify(server.requests.at(-1)?.body.messages);
-    expect(all).toContain("12 model calls and no edit yet");
+    expect(all).toContain("12 model calls and no edit yet. You have read enough: start the first open step");
     expect(all).toContain("36 model calls without a single edit: stop reading");
   });
 

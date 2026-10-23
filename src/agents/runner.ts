@@ -50,6 +50,19 @@ const CUT_SHORT_MAX = 3;
 /** Model calls without an edit before the first nudge (the second at twice, the stop at three times). */
 export const IDLE_CALLS = 12;
 
+/**
+ * The nudge after `idle` model calls without an edit. A round after the first may find its work in the
+ * code already (an earlier round, a person): then the answer is the result, not an edit for its own sake
+ * (pilot: a redo round told «start the first open step» after it had checked the folder was gone).
+ */
+export function idleNudge(idle: number, iteration: number): string {
+  const last =
+    idle >= IDLE_CALLS * 2 ? ` After ${IDLE_CALLS} more calls without an edit the step stops.` : "";
+  return iteration > 1
+    ? `${idle} model calls and no edit yet. Decide now: if what this round is for is already in the code, stop checking and produce the result document, saying so; else make the change it needs.${last}`
+    : `${idle} model calls and no edit yet. You have read enough: start the first open step of the plan now — read only that step's files, edit, verify, mark it with plan.step, then the next step.${last}`;
+}
+
 /** Runs `work` over the items, at most `limit` at a time; settles when all have. */
 export async function inParallel<T>(
   items: readonly T[],
@@ -765,7 +778,7 @@ export class AgentRuntimeRunner implements AgentRunner {
             ...transcript,
             {
               role: "user",
-              content: `${idle} model calls and no edit yet. You have read enough: start the first open step of the plan now — read only that step's files, edit, verify, mark it with plan.step, then the next step.${idle >= IDLE_CALLS * 2 ? ` After ${IDLE_CALLS} more calls without an edit the step stops.` : ""}`,
+              content: idleNudge(idle, ctx.iteration),
             },
           ];
         }
