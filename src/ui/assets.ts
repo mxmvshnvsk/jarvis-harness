@@ -662,6 +662,8 @@ form.clarify>.actions{margin:4px 0}
 .tpop .bar i{display:block;height:100%}
 .tpop .w{background:var(--accent)}.tpop .h{background:var(--warn-dot)}.tpop .b{background:var(--held)}.tpop .s{background:color-mix(in srgb,var(--accent) 40%,var(--chip))}.tpop .p{background:var(--faint)}
 .tpop table{border-collapse:collapse;width:100%}
+.timew.fam .tpop{width:600px;left:auto;right:-12px}.tpop tr.hd td{color:var(--muted);font-size:12px;padding-bottom:4px}.tpop tr.total td{border-top:1px solid var(--line);font-weight:600;padding-top:6px}.timew.fam .tpop td.v{text-align:right;white-space:nowrap;padding-left:12px}
+.sub-now{display:block;margin-top:2px;font-size:12.5px}
 .tpop td{padding:5px 0;vertical-align:top}
 .tpop td.k{display:flex;gap:8px;align-items:center}
 .tpop td.k i{width:10px;height:10px;border-radius:3px;display:inline-block;flex:none}

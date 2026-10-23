@@ -521,6 +521,11 @@ steps:
       ).value;
       expect(body).toContain("A subtask asks to change the contract");
       expect(body).toContain("Agreed: + deliverySlotId, optional");
+      // the list says what the subtask does now; the head, what the whole task spent, row by row
+      expect(body).toContain('<span class="pill wait">waits for you · contract</span>');
+      expect(body).toContain("Σ task: 0 model calls");
+      expect(body).toMatch(/<td class="k">the master&#39;s own steps<\/td>/);
+      expect(body).toMatch(/<a href="\/runs\/[0-9a-f]{8}">1 orders-api<\/a> <span class="muted">WAITING_HUMAN<\/span>/);
       expect(body).toContain("Asks for: + deliverySlotId, required");
       // the subtask's own page sends to the master
       const subBody = runContent(

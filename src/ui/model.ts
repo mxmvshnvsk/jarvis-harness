@@ -913,6 +913,10 @@ export interface RunPage {
   readonly contractItems?: readonly ContractItem[];
   /** A master: its budget, the sum of its subtasks'. */
   readonly masterBudget?: MasterBudget;
+  /** A master: what the task spent, its own steps and each subtask's run (src/ui/pages.ts familyHtml). */
+  readonly family?: FamilySpend;
+  /** A master: what each started subtask does now, by its key. */
+  readonly subtaskNow?: Readonly<Record<string, SubtaskNow>>;
   /** Untrusted content from the internet with no approval since (ADR-0016 §4): effects are held. */
   readonly untrusted?: UntrustedView;
 }
@@ -938,13 +942,144 @@ export interface ContractCheckView {
   }>;
 }
 
+/** What one run spent: model calls and tokens, time working. */
+export interface Spend {
+  readonly calls: number;
+  readonly promptTokens: number;
+  readonly cachedTokens: number;
+  readonly cachedEstimated?: boolean;
+  readonly outputTokens: number;
+  readonly workingMs: number;
+}
+
+/** A task across services: the master's own steps, each subtask's run, and the sum. */
+export interface FamilySpend {
+  readonly total: Spend;
+  readonly parts: ReadonlyArray<{
+    readonly label: string;
+    readonly run?: Run;
+    readonly state?: string;
+    readonly spend: Spend;
+  }>;
+}
+
+/** What a started subtask does now, for the master's list. */
+export interface SubtaskNow {
+  /** The pill: the step it works on, or what it waits for. */
+  readonly pill: string;
+  readonly tone: "info" | "wait" | "plain";
+  /** One line under it: the agent's calls, its tools, its wait. */
+  readonly detail?: string;
+}
+
+export function spendOf(events: readonly StoredEvent[], now: Date, live: boolean): Spend {
+  let calls = 0;
+  let promptTokens = 0;
+  let cachedTokens = 0;
+  let outputTokens = 0;
+  let estimated = false;
+  for (const e of events) {
+    if (e.kind !== "model.call") continue;
+    const p = (e.payload ?? {}) as Record<string, number>;
+    calls += 1;
+    promptTokens += p.promptTokens ?? 0;
+    outputTokens += p.outputTokens ?? 0;
+    cachedTokens += p.cachedTokens || p.cachedEstimated || 0;
+    if (!p.cachedTokens && (p.cachedEstimated ?? 0) > 0) estimated = true;
+  }
+  const time = timeSplitOf(events, now, live);
+  return {
+    calls,
+    promptTokens,
+    cachedTokens,
+    ...(estimated ? { cachedEstimated: true } : {}),
+    outputTokens,
+    workingMs: time?.parts.working.ms ?? 0,
+  };
+}
+
+const plus = (a: Spend, b: Spend): Spend => ({
+  calls: a.calls + b.calls,
+  promptTokens: a.promptTokens + b.promptTokens,
+  cachedTokens: a.cachedTokens + b.cachedTokens,
+  ...(a.cachedEstimated || b.cachedEstimated ? { cachedEstimated: true } : {}),
+  outputTokens: a.outputTokens + b.outputTokens,
+  workingMs: a.workingMs + b.workingMs,
+});
+
+const leaseLiveOf = (run: Run, now: Date) =>
+  run.lease !== undefined && Date.parse(run.lease.until) >= now.getTime();
+
+/** A started subtask now: its step and what its agent does, or what it waits for. */
+function subtaskNowOf(run: Run, events: readonly StoredEvent[], now: Date): SubtaskNow | undefined {
+  const step = `${run.currentStep ?? "?"}${run.currentIteration > 1 ? `#${run.currentIteration}` : ""}`;
+  if (run.state === "WAITING_HUMAN") {
+    const kind = run.waitingFor?.kind;
+    return {
+      pill: t("waits for you · {what}", {
+        what: kind === "approval" ? (run.currentStep ?? "approval") : (kind ?? step),
+      }),
+      tone: "wait",
+      ...(run.waitingFor?.detail ? { detail: run.waitingFor.detail } : {}),
+    };
+  }
+  if (run.state === "WAITING_BUDGET")
+    return {
+      pill: t("paused · {step}", { step }),
+      tone: "plain",
+      detail: t("waits for the quota window or the model"),
+    };
+  if (run.state === "SUSPENDED")
+    return {
+      pill: t("stopped · {step}", { step }),
+      tone: "plain",
+      ...(run.stateReason ? { detail: run.stateReason } : {}),
+    };
+  if (run.state === "CREATED") return { pill: t("starting"), tone: "info" };
+  if (run.state !== "RUNNING") return undefined;
+  if (!leaseLiveOf(run, now))
+    return {
+      pill: t("no process · {step}", { step }),
+      tone: "plain",
+      detail: t("interrupted or crashed: Retry or resume it"),
+    };
+  const a = activityOf(events, now);
+  const s = a?.step;
+  if (!s) return { pill: step, tone: "info" };
+  const parts = [
+    s.agent && s.agent !== s.id ? s.agent : "",
+    s.modelCalls > 0 ? plural(s.modelCalls, "model call") : "",
+    s.toolCalls > 0
+      ? s.maxToolCalls
+        ? t("tools {n}/{max}", { n: s.toolCalls, max: s.maxToolCalls })
+        : plural(s.toolCalls, "tool call")
+      : "",
+    a?.lastTool
+      ? `${t("last:")} ${a.lastTool.capability}${a.lastTool.detail ? ` ${a.lastTool.detail}` : ""}`
+      : "",
+  ].filter(Boolean);
+  return {
+    pill: `${s.id}${s.iteration > 1 ? `#${s.iteration}` : ""}`,
+    tone: "info",
+    ...(parts.length > 0 ? { detail: parts.join(" · ") } : {}),
+  };
+}
+
 /** A task across services on its run's page: the subtask's master, or the master's subtasks. */
 function crossOf(
   runtime: Runtime,
   run: Run,
+  now: Date = new Date(),
 ): Pick<
   RunPage,
-  "subtaskOf" | "subtasks" | "contractCheck" | "contractRequests" | "contractItems" | "masterBudget"
+  | "subtaskOf"
+  | "subtasks"
+  | "contractCheck"
+  | "contractRequests"
+  | "contractItems"
+  | "masterBudget"
+  | "family"
+  | "subtaskNow"
 > {
   const of = masterOf(runtime, run);
   if (of)
@@ -967,8 +1102,25 @@ function crossOf(
   }
   const contractRequests = pendingContractRequests(runtime, run);
   const masterBudget = masterBudgetOf(runtime, run);
+  // what the task spent: the master's own steps and each subtask's run, the sum on the head
+  const own = spendOf(runEvents(runtime, run.id), now, leaseLiveOf(run, now));
+  const parts: Array<FamilySpend["parts"][number]> = [{ label: t("the master's own steps"), spend: own }];
+  const subtaskNow: Record<string, SubtaskNow> = {};
+  for (const v of subtasks) {
+    if (!v.run) continue;
+    const events = runEvents(runtime, v.run.id);
+    parts.push({
+      label: `${v.subtask.key} ${v.subtask.service}`,
+      run: v.run,
+      state: v.state,
+      spend: spendOf(events, now, leaseLiveOf(v.run, now)),
+    });
+    const n = subtaskNowOf(v.run, events, now);
+    if (n) subtaskNow[v.subtask.key] = n;
+  }
+  const family: FamilySpend = { total: parts.map((p) => p.spend).reduce(plus), parts };
   return {
-    ...(subtasks.length > 0 ? { subtasks } : {}),
+    ...(subtasks.length > 0 ? { subtasks, family, subtaskNow } : {}),
     ...(contractCheck ? { contractCheck } : {}),
     ...(contractRequests.length > 0
       ? { contractRequests, contractItems: splitOf(runtime, run)?.contract ?? [] }
@@ -1591,7 +1743,7 @@ export async function runPage(
     kind: kindOfTask({ task: run.task, picked: run.options?.kind, workflowKind: workflow?.kind }),
     plan,
     steps: order.map(row).filter((r) => forThisRun(runtime, run, workflow, r)),
-    ...crossOf(runtime, run),
+    ...crossOf(runtime, run, now),
     tokens,
     workedMs,
     ...((t) => (t ? { time: t } : {}))(timeSplitOf(events, now, leaseLive)),

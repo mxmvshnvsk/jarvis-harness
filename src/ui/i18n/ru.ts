@@ -1326,6 +1326,18 @@ export const RU: Readonly<Record<string, string>> = {
   "The change is in {service}, which has no subtask: accepting adds one, delivered before {asking}.":
     "Изменение — в {service}, у которого нет сабтаска: принятие добавит его, поставка — раньше {asking}.",
   "Waits for a library": "Ждёт библиотеку",
+  "waits for you · {what}": "ждёт тебя · {what}",
+  "paused · {step}": "пауза · {step}",
+  "waits for the quota window or the model": "ждёт окна квоты или модели",
+  "stopped · {step}": "остановлен · {step}",
+  "no process · {step}": "нет процесса · {step}",
+  "interrupted or crashed: Retry or resume it": "прерван или упал: Retry или resume",
+  "tools {n}/{max}": "инструменты {n}/{max}",
+  "the master's own steps": "шаги самого мастера",
+  "What the task spent": "Сколько потратила задача",
+  "the master and its subtasks": "мастер и его сабтаски",
+  working: "в работе",
+  "model calls": "вызовы модели",
   "{step} left {n} uncovered": "{step}: не покрыто — {n}",
   "its own goal, checked against the spec and the task: more calls go to cover them, with the conversation kept; finish takes the document as it is, marked incomplete":
     "цель шага, сверенная со спекой и задачей: ещё вызовы уйдут на покрытие, разговор сохраняется; «закончить» примет документ как есть, с пометкой «неполный»",

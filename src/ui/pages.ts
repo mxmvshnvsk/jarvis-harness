@@ -38,11 +38,13 @@ import type {
   ContractCard,
   ContractSideView,
   EffectCard,
+  FamilySpend,
   FeedItem,
   LoopCard,
   RunPage,
   RunsPage,
   ScopeCard,
+  Spend,
   StepRow,
   StepSkills,
   TestsStop,
@@ -1568,6 +1570,7 @@ export function runContent(
             `${t("in")} ${kilo(tk.promptTokens)}${tk.cachedTokens > 0 ? ` (${tk.cachedEstimated ? "≈ " : ""}${kilo(tk.cachedTokens)} ${t("cached")})` : ""} · ${t("out")} ${kilo(tk.outputTokens)} ${t("tok")}`,
           ]
         : []),
+      ...(page.family && page.family.parts.length > 1 ? [familyHtml(page.family)] : []),
     ],
     " · ",
   );
@@ -1698,10 +1701,21 @@ function subtasksHtml(page: RunPage, actions?: Actions): Html {
   const views = page.subtasks ?? [];
   const done = views.filter((v) => v.state === "COMPLETED" || v.state === "dropped").length;
   const serviceOf = (key: string) => views.find((v) => v.subtask.key === key)?.subtask.service ?? key;
-  const pill = (v: SubtaskView) =>
-    v.state === "blocked"
+  const pill = (v: SubtaskView) => {
+    // what it does now: its step, or what it waits for — not the bare state
+    const n = page.subtaskNow?.[v.subtask.key];
+    if (
+      n &&
+      v.state !== "COMPLETED" &&
+      v.state !== "dropped" &&
+      v.state !== "FAILED" &&
+      v.state !== "CANCELLED"
+    )
+      return html`<span class="pill ${n.tone}">${n.tone === "info" ? html`<span class="spin" aria-hidden="true"></span> ` : ""}${n.pill}</span>`;
+    return v.state === "blocked"
       ? html`<span class="pill plain sub-wait" title="a library of this task is changed first">waits for ${(v.waitsFor ?? []).map(serviceOf).join(", ")}</span>`
       : html`<span class="pill ${v.state === "COMPLETED" ? "ok" : v.state === "FAILED" || v.state === "CANCELLED" ? "bad" : v.state === "WAITING_HUMAN" ? "wait" : v.state === "dropped" || v.state === "queued" ? "plain" : "info"}">${v.state === "WAITING_HUMAN" ? "waits for you" : v.state}</span>`;
+  };
   const act = (key: string, what: "start" | "retry" | "drop" | "publish", label: string, primary = false) =>
     actions
       ? form(
@@ -1726,12 +1740,25 @@ ${page.masterBudget ? masterBudgetHtml(page.masterBudget) : ""}
     (v) => html`<li class="sub-row">
 <span class="meta sub-key">${v.subtask.key}</span>
 <span class="sub-service">${v.run ? html`<a href="/runs/${shortRunId(v.run.id)}">${v.subtask.service}</a>` : html`<b>${v.subtask.service}</b>`}${v.subtask.issue ? html`<span class="meta mono">${v.subtask.issue}</span>` : ""}</span>
-<span class="muted sub-task">${firstLine(v.subtask.task, 140)}${v.run?.currentStep && v.state !== "COMPLETED" ? html` · <span class="meta">${v.run.currentStep}</span>` : ""}</span>
+<span class="muted sub-task">${firstLine(v.subtask.task, 140)}${page.subtaskNow?.[v.subtask.key]?.detail && v.state !== "COMPLETED" ? html`<span class="meta sub-now">${page.subtaskNow[v.subtask.key]?.detail}</span>` : ""}</span>
 <span class="sub-acts">${pill(v)}${v.state === "queued" ? act(v.subtask.key, "start", "Start now") : ""}${v.state === "blocked" ? act(v.subtask.key, "start", "Start now anyway") : ""}${v.published && !v.published.ok ? act(v.subtask.key, "publish", "Run publish-local again", true) : ""}${v.state === "CANCELLED" || v.state === "FAILED" ? act(v.subtask.key, "retry", "Retry") : ""}${v.state !== "COMPLETED" && v.state !== "dropped" ? act(v.subtask.key, "drop", "Drop") : ""}</span>
 ${v.state === "blocked" ? html`<p class="hint sub-pub">Starts when ${(v.waitsFor ?? []).map(serviceOf).join(", ")} is accepted and published, against the new version. «Start now anyway» — against the version it has.</p>` : ""}${published(v)}
 </li>`,
   )}</ul>
 </section>`;
+}
+
+/**
+ * What a task across services spent, on the master's head: the sum of the master's own steps and its
+ * subtasks' runs; on hover (or focus) a row for each (pilot: the head showed only the master's own).
+ */
+// t("What the task spent") t("the master and its subtasks") t("working") t("model calls") t("in") t("out")
+function familyHtml(f: FamilySpend): Html {
+  const tok = (s: Spend) =>
+    `${kilo(s.promptTokens)}${s.cachedTokens > 0 ? ` (${s.cachedEstimated ? "≈ " : ""}${kilo(s.cachedTokens)})` : ""}`;
+  const row = (label: Html | string, s: Spend, cls = "") =>
+    html`<tr class="${cls}"><td class="k">${label}</td><td class="v">${duration(s.workingMs)}</td><td class="v">${String(s.calls)}</td><td class="v">${tok(s)}</td><td class="v">${kilo(s.outputTokens)}</td></tr>`;
+  return html`<span class="timew fam" tabindex="0" aria-describedby="fampop">Σ ${t("task")}: ${plural(f.total.calls, "model call")} · ${t("in")} ${tok(f.total)} · ${t("out")} ${kilo(f.total.outputTokens)} ${t("tok")}<span class="tpop" id="fampop" role="tooltip"><b class="ttl">${t("What the task spent")}</b><span class="note">${t("the master and its subtasks")}</span><table><tr class="hd"><td></td><td class="v">${t("working")}</td><td class="v">${t("model calls")}</td><td class="v">${t("in")}</td><td class="v">${t("out")}</td></tr>${f.parts.map((p) => row(p.run ? html`<a href="/runs/${shortRunId(p.run.id)}">${p.label}</a>${p.state ? html` <span class="muted">${p.state}</span>` : ""}` : p.label, p.spend))}${row(t("Total"), f.total, "total")}</table></span></span>`;
 }
 
 /** The master's budget: what its subtasks spent of the sum of their caps, its own steps apart. */
