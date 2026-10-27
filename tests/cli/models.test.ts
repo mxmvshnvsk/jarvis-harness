@@ -131,6 +131,20 @@ describe("jarvis models", () => {
     );
   });
 
+  it("`jarvis models` alone lists them; doctor's hint for a missing excepted model is about models", async () => {
+    const r = await jarvis(["models"]);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("probe: never");
+    sb.write(
+      "project/.jarvis/project.yaml",
+      "version: 1\nmodelEgressExceptions:\n  - model: absent\n    reason: agreed with security\n",
+    );
+    const doctor = await jarvis(["--json", "doctor"]);
+    const report = JSON.parse(doctor.out) as { checks: { label: string; detail: string; hint?: string }[] };
+    const hint = report.checks.find((c) => c.detail.includes('no model "absent"'))?.hint ?? "";
+    expect(hint).toContain("add the model to ~/.jarvis/config.yaml models");
+  });
+
   it("refuses modelEgressExceptions outside project.yaml", async () => {
     sb.write(
       "home/.jarvis/config.yaml",

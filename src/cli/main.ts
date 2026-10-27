@@ -761,8 +761,8 @@ export function buildProgram(options: RunOptions = {}): Command {
     .command("models")
     .description("configured models and their probed capabilities (ADR-0007)");
   models
-    .command("list")
-    .description("models, egress, pools, window usage and probe state")
+    .command("list", { isDefault: true })
+    .description("models, egress, pools, window usage and probe state (the default: `jarvis models`)")
     .action(async () => {
       await runModelsList(ctxFor());
     });

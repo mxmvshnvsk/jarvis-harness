@@ -225,7 +225,9 @@ export async function runDoctor(ctx: CliContext): Promise<DoctorReport> {
           "warn",
           "egress exception",
           warning,
-          "add the server to ~/.jarvis/config.yaml mcp.servers if the project needs it",
+          warning.startsWith("modelEgressExceptions")
+            ? "add the model to ~/.jarvis/config.yaml models if the project needs it"
+            : "add the server to ~/.jarvis/config.yaml mcp.servers if the project needs it",
         ),
       );
 

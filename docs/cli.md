@@ -150,7 +150,7 @@ MCP-серверы с доступом в сеть, действующие egres
 
 ## Модели и credentials
 
-### `jarvis models list`
+### `jarvis models list` (или просто `jarvis models`)
 
 Модели с egress, ролями, пулами квот, использованием текущего окна (и безлимитными часами пула: `unlimited
 until …` / `unlimited from …`) и состоянием проб.
