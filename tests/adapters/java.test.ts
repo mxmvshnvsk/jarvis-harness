@@ -309,6 +309,9 @@ describe("related tests of a class-taking runner", () => {
     expect(testRunnerOf("./gradlew test")).toBe("gradle");
     expect(testRunnerOf("cd svc && ./gradlew :svc:test")).toBe("gradle");
     expect(testRunnerOf("./gradlew test jacocoTestReport")).toBeUndefined();
+    // build options after the test task (pilot: `-Pversion=0.0.0` for a version read from git)
+    expect(testRunnerOf("./gradlew test -Pversion=0.0.0")).toBe("gradle");
+    expect(testRunnerOf("TZ=Europe/Berlin ./gradlew test -Pversion=0.0.0 --offline")).toBe("gradle");
     expect(testRunnerOf("mvn -q test")).toBe("maven");
     expect(testRunnerOf("yarn jest")).toBe("jest");
     expect(testClassOf("svc/src/test/groovy/a/b/OrderSpecification.groovy")).toBe("a.b.OrderSpecification");

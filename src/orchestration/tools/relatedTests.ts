@@ -15,8 +15,14 @@ export type TestRunner = "jest" | "gradle" | "maven";
 
 export function testRunnerOf(command: string): TestRunner | undefined {
   if (/\bjest\b/.test(command)) return "jest";
-  // the test task last: `--tests` belongs to the task before it
-  if (/(^|[\s/])gradlew?\s/.test(command) && /(\s|:)test\s*$/.test(command)) return "gradle";
+  // the test task last, options after it at most (`-Pversion=0.0.0`): `--tests` belongs to the task
+  // before it, and Gradle reads build options anywhere (pilot: `./gradlew test -Pversion=0.0.0` was not
+  // seen as Gradle — no test selection, and failures there before the change were the run's defects)
+  if (
+    /(^|[\s/])gradlew?\s/.test(command) &&
+    /(\s|:)test(\s+-[^\s-]\S*|\s+--[\w-]+(=\S+)?)*\s*$/.test(command)
+  )
+    return "gradle";
   if (/(^|[\s/])mvnw?\s/.test(command) && /\s(test|verify)(\s|$)/.test(command)) return "maven";
   return undefined;
 }

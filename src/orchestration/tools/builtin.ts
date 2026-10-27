@@ -43,6 +43,21 @@ export const CHECK_LOG = "check-log";
 /** Failed tests kept on a check result: enough to see why, not a report of a broken suite. */
 const MAX_FAILURES = 20;
 
+/**
+ * What a person changes when the build broke on the checkout, not on the code: said with the failure.
+ * Pilot: a Gradle plugin read the version from git, and git in a worktree is no repository to it — three
+ * rounds of verify ran no test at all.
+ */
+export function environmentHint(output: string): string {
+  if (
+    /Bare Repository has neither a working tree|repository not found.*\.git\b|\.git is not a directory/i.test(
+      output,
+    )
+  )
+    return "\n(The build reads git, and a worktree's .git is a file to it: give the build its version in tools.local (e.g. -Pversion=0.0.0), or workspace.checkout: clone for this service. Not the code: a person changes the configuration.)";
+  return "";
+}
+
 /** Repository files named in a text: `src/a.ts`, `src/a.ts:89`, `apps/web/src/x.tsx:12-20`. */
 export function filesNamedIn(text: string, workspace: string): string[] {
   const found = new Set<string>();
@@ -696,7 +711,7 @@ export const BUILTIN_TOOLS: Record<string, DeterministicTool> = {
             {
               kind: "defects_found",
               // what broke, from the whole output — not the runner's last summary lines
-              summary: `${r.check} failed${r.notStarted ? " before any test ran (the build or the environment)" : ""}:\n${r.excerpt ?? (r.tail ?? "").split("\n").filter(Boolean).slice(-3).join(" | ").slice(0, 400)}`,
+              summary: `${r.check} failed${r.notStarted ? " before any test ran (the build or the environment)" : ""}:\n${r.excerpt ?? (r.tail ?? "").split("\n").filter(Boolean).slice(-3).join(" | ").slice(0, 400)}${environmentHint(`${r.excerpt ?? ""}\n${r.tail ?? ""}`)}`,
               sourceRefs: [`check:${r.check}`],
             },
           ];

@@ -200,8 +200,13 @@ function answersOf(rt: StepContext["runtime"], ref: string): string[] {
   try {
     const answers = (JSON.parse(rt.artifacts.text(artifact)) as { clarification?: { answers?: unknown } })
       .clarification?.answers;
+    // the same answer twice is one button (pilot: a question offered «raise the platform» twice)
     return Array.isArray(answers)
-      ? answers.filter((a): a is string => typeof a === "string" && a.trim() !== "").slice(0, 4)
+      ? [
+          ...new Set(
+            answers.filter((a): a is string => typeof a === "string" && a.trim() !== "").map((a) => a.trim()),
+          ),
+        ].slice(0, 4)
       : [];
   } catch {
     return [];
