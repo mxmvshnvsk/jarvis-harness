@@ -2,6 +2,12 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { rootRelative } from "../../core/paths.ts";
 import { checkKnowledge, type KnowledgeCheck, needsAttention } from "../../knowledge/docCheck.ts";
+import {
+  type GlossaryDuplicate,
+  glossaryDuplicates,
+  loadGlossaries,
+  SHARED,
+} from "../../knowledge/glossaries.ts";
 import { knowledgeRootsOf } from "../../knowledge/sources.ts";
 import { git } from "../../tools/local/exec.ts";
 import type { CliContext } from "../context.ts";
@@ -41,14 +47,45 @@ export async function runKnowledgeCheck(ctx: CliContext, options: KnowledgeCheck
         attention += one.docs.filter(needsAttention).length + one.duplicates.length;
       }
     }
-    if (ctx.out.json) ctx.out.result({ services: results }, () => {});
-    if (attention > 0) throw new CliExit(EXIT.error);
+    const glossary = glossaryReport(ctx, loaded.project?.root ?? ctx.cwd, loaded.meta.repos);
+    if (ctx.out.json) ctx.out.result({ services: results, glossary }, () => {});
+    if (attention + glossary.length > 0) throw new CliExit(EXIT.error);
     return;
   }
   const one = await checkOne(ctx, options);
   if (!one) throw new CliExit(EXIT.error);
-  if (ctx.out.json) ctx.out.result(one, () => {});
-  if (one.docs.some(needsAttention) || one.duplicates.length > 0) throw new CliExit(EXIT.error);
+  const glossary = glossaryReport(ctx, loaded.project?.root ?? ctx.cwd, loaded.meta?.repos);
+  if (ctx.out.json) ctx.out.result({ ...one, glossary }, () => {});
+  if (one.docs.some(needsAttention) || one.duplicates.length > 0 || glossary.length > 0)
+    throw new CliExit(EXIT.error);
+}
+
+/**
+ * The same term twice among the glossaries read here (src/knowledge/glossaries.ts): in one glossary —
+ * keep one row; in the shared and a service's — the service's symbols join the shared row; in two
+ * services' — one sense goes to the shared glossary, two are a homonym it says.
+ */
+function glossaryReport(
+  ctx: CliContext,
+  root: string,
+  repos?: Readonly<Record<string, string>>,
+): GlossaryDuplicate[] {
+  const found = glossaryDuplicates(loadGlossaries(root, repos));
+  if (ctx.out.json || found.length === 0) return found;
+  const st = ctx.out.style;
+  ctx.out.line(st.heading("glossary: the same term twice"));
+  for (const d of found) {
+    const where = d.scopes.join(", ");
+    const what =
+      d.scopes.length === 1
+        ? "keep one row"
+        : d.scopes.includes(SHARED)
+          ? "the service's symbols go to the shared row (service:Symbol)"
+          : "one sense — move it to the shared glossary; two — say it is a homonym there";
+    ctx.out.line(`${st.bad("✗")} ${d.term} ${st.muted(`· ${where}`)}: ${what}`);
+  }
+  ctx.out.line();
+  return found;
 }
 
 async function checkOne(

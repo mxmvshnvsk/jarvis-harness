@@ -509,6 +509,8 @@ export interface TermForm {
   readonly symbols: string;
   readonly sources: string;
   readonly definition: string;
+  /** The glossary it goes to (a knowledge repository): `shared` or a service. */
+  readonly scope?: string;
 }
 
 export interface GlossaryPage {
@@ -523,17 +525,38 @@ export interface GlossaryPage {
   readonly error?: string;
   /** Where the selected term's symbols are in the code. */
   readonly where?: readonly SymbolCheck[];
+  /** The glossaries a term can be added to here, the default first (one: no choice). */
+  readonly scopes?: readonly string[];
 }
+
+/** A glossary's name on the page. */
+const scopeLabel = (scope: string) => (scope === "shared" ? t("shared glossary") : scope);
+
+/** The file of the default glossary, as the page says it. */
+const glossaryPathOf = (page: GlossaryPage) =>
+  page.glossary.files.find((f) => f.scope === (page.scopes?.[0] ?? "shared"))?.path ??
+  page.glossary.files[0]?.path ??
+  ".jarvis/knowledge/glossary.md";
 
 function addFormHtml(page: GlossaryPage, actions: Actions): Html {
   const f = page.form ?? { term: "", synonyms: "", symbols: "", sources: "", definition: "" };
   const missing = (page.checks ?? []).filter((c) => !c.found);
-  return html`<details class="panel kadd" id="add"${page.form ? " open" : ""}><summary><b>${t("Add a term")}</b> <span class="hint">— ${th("goes to {file} as a draft; agents use it from the next run", { file: html`<code>.jarvis/knowledge/glossary.md</code>` })}</span></summary>
+  return html`<details class="panel kadd" id="add"${page.form ? " open" : ""}><summary><b>${t("Add a term")}</b> <span class="hint">— ${
+    (page.scopes?.length ?? 0) > 1
+      ? t("goes to the glossary you pick as a draft; agents use it from the next run")
+      : th("goes to {file} as a draft; agents use it from the next run", {
+          file: html`<code>${glossaryPathOf(page)}</code>`,
+        })
+  }</span></summary>
 ${form(
   actions,
   "/knowledge/glossary",
   html`<div class="row kfields">
-<label class="field">${t("Term")}<input type="text" name="term" value="${f.term}" required maxlength="80"></label>
+${
+  (page.scopes?.length ?? 0) > 1
+    ? html`<label class="field">${t("Glossary")}<select name="scope">${(page.scopes ?? []).map((sc) => html`<option value="${sc}"${(f.scope ?? page.scopes?.[0]) === sc ? " selected" : ""}>${scopeLabel(sc)}</option>`)}</select></label>`
+    : ""
+}<label class="field">${t("Term")}<input type="text" name="term" value="${f.term}" required maxlength="80"></label>
 <label class="field grow">${t("Synonyms")} <span class="hint">${t("comma-separated, how people say it")}</span><input type="text" name="synonyms" value="${f.synonyms}" maxlength="400"></label>
 <label class="field">${t("Source")} <span class="hint">${t("optional")}</span><input type="text" name="sources" value="${f.sources}" maxlength="200"></label>
 </div>
@@ -577,26 +600,45 @@ ${notice ?? ""}
 <p class="hint">${th("Business term → synonyms → code symbols. Every search an agent makes is widened by it; Ask (or {cmd}) answers from it. Existing terms are changed in the file; here you add new ones.", { cmd: html`<code>jarvis ask &lt;term&gt;</code>` })}</p>
 ${actions ? addFormHtml(page, actions) : ""}
 <form method="get" action="/knowledge/glossary" class="row kfilter" role="search"><label class="field grow"><span class="sr">${t("Filter")}</span><input type="search" name="q" value="${page.filter ?? ""}" placeholder="${t("Filter terms, synonyms, symbols…")}"></label>${page.problems ? html`<input type="hidden" name="problems" value="1">` : ""}<button type="submit" class="btn">${t("Filter")}</button>
-<a class="btn${page.problems ? " strong" : ""}" href="${page.problems ? "/knowledge/glossary" : "/knowledge/glossary?problems=1"}">${page.problems ? t("All terms") : t("Problems only ({n})", { n: withProblems })}</a>${actions ? fileActions(".jarvis/knowledge/glossary.md", "/knowledge/glossary", actions) : ""}</form>
+<a class="btn${page.problems ? " strong" : ""}" href="${page.problems ? "/knowledge/glossary" : "/knowledge/glossary?problems=1"}">${page.problems ? t("All terms") : t("Problems only ({n})", { n: withProblems })}</a>${actions ? fileActions(glossaryPathOf(page), "/knowledge/glossary", actions) : ""}</form>
 <div class="cols">
 <section class="panel mainc kgloss" aria-label="${t("Terms")}">
 ${
   !page.glossary.exists
-    ? html`<p class="empty">${th("No glossary yet: the first term you add creates {file}.", { file: html`<code>.jarvis/knowledge/glossary.md</code>` })}</p>`
-    : html`<div class="ktable" role="table" aria-label="${t("Glossary")}">
+    ? html`<p class="empty">${th("No glossary yet: the first term you add creates {file}.", { file: html`<code>${glossaryPathOf(page)}</code>` })}</p>`
+    : (
+        () => {
+          const scopes = [...new Set(rows.map((r) => r.scope))];
+          const table = (
+            list: readonly GlossaryRow[],
+          ) => html`<div class="ktable" role="table" aria-label="${t("Glossary")}">
 <div class="kr kh kg" role="row"><span role="columnheader">${t("Term")}</span><span role="columnheader">${t("Synonyms")}</span><span role="columnheader">${t("Symbols / modules")}</span><span role="columnheader">${t("Definition")}</span></div>
-${rows.map(
+${list.map(
   (r) =>
-    html`<a class="kr kg${r.problems.length > 0 ? " warn" : ""}${r.term === s?.term ? " current" : ""}" role="row" href="${href({ term: r.term })}"><span role="cell"><b>${r.term}</b>${r.updated ? html`<span class="meta">${r.updated}</span>` : ""}</span><span role="cell">${r.synonyms.join(", ")}</span><span role="cell" class="meta">${r.symbols.join(", ")}${r.problems.map((p) => html`<span class="kprob">${p}</span>`)}</span><span role="cell" class="hint">${r.definition ?? ""}</span></a>`,
+    html`<a class="kr kg${r.problems.length > 0 ? " warn" : ""}${r.term === s?.term && r.scope === s?.scope ? " current" : ""}" role="row" href="${href({ term: r.term, scope: r.scope })}"><span role="cell"><b>${r.term}</b>${r.updated ? html`<span class="meta">${r.updated}</span>` : ""}</span><span role="cell">${r.synonyms.join(", ")}</span><span role="cell" class="meta">${r.symbols.join(", ")}${r.problems.map((p) => html`<span class="kprob">${p}</span>`)}</span><span role="cell" class="hint">${r.definition ?? ""}</span></a>`,
 )}
-${rows.length === 0 ? html`<p class="empty">${t("No term matches.")}</p>` : ""}
-</div>`
+</div>`;
+          if (rows.length === 0) return html`<p class="empty">${t("No term matches.")}</p>`;
+          if (page.glossary.files.length <= 1) return table(rows);
+          return html`${scopes.map((sc) => {
+            const list = rows.filter((r) => r.scope === sc);
+            const open = sc === "shared" || openGroup(scopes.length, s?.scope === sc) || Boolean(q);
+            return navGroup(
+              scopeLabel(sc),
+              list.length,
+              open,
+              table(list),
+              page.glossary.files.find((f) => f.scope === sc)?.path,
+            );
+          })}`;
+        }
+      )()
 }
 </section>
 <aside class="side kside" aria-label="${t("Where it is used")}">
 ${
   s
-    ? html`<section class="panel kbox"><span class="hint">${t("selected term")}</span><h2>${s.term}</h2>
+    ? html`<section class="panel kbox"><span class="hint">${t("selected term")}${page.glossary.files.length > 1 ? html` · ${scopeLabel(s.scope)}` : ""}</span><h2>${s.term}</h2>
 <p class="hint">${t("a query with it also searches for")}</p><p class="mono">${[...s.synonyms, ...s.symbols].join(" · ") || "—"}</p>
 ${
   page.where && page.where.length > 0
@@ -641,7 +683,15 @@ export interface CandidateView {
     readonly fromBuiltin: boolean;
   };
   /** glossary: the term and the symbols it gets. */
-  readonly glossary?: { readonly term: string; readonly symbols: readonly string[]; readonly known: boolean };
+  readonly glossary?: {
+    readonly term: string;
+    readonly symbols: readonly string[];
+    readonly known: boolean;
+    /** In a knowledge repository: the glossary it is for (`shared` or a service). */
+    readonly scope?: string;
+    /** Another service's glossary has the term: accepting needs one sense or two. */
+    readonly conflict?: string;
+  };
   /** Accepting cannot work, and why (a skill that is not this project's to change). */
   readonly blocked?: string;
 }
@@ -694,8 +744,10 @@ function writesHtml(c: CandidateView): Html {
         to: c.skillEdit.to,
       },
     )}</p>`;
+  if (c.glossary?.conflict)
+    return html`<p class="hint"><b>${th("{service}'s glossary has the term {term} too.", { service: html`<code>${c.glossary.conflict}</code>`, term: html`<b>${c.glossary.term}</b>` })}</b> ${t("The same meaning: it moves to the shared glossary with both services' symbols. Another meaning: a homonym — each service keeps its own row, the shared glossary says where each is.")}</p>`;
   if (c.glossary)
-    return html`<p class="hint">${th(
+    return html`<p class="hint">${c.glossary.scope ? html`<span class="tag">${c.glossary.scope}</span> ` : ""}${th(
       c.glossary.known
         ? "Accepting adds {symbols} to the term {term} in the glossary."
         : "Accepting adds the term {term} with {symbols} to the glossary.",
@@ -734,7 +786,11 @@ ${
                   : ""
               }`
             : ""
-        }<div class="row"><button type="submit" class="btn primary">${t("Accept")}</button></div>`,
+        }${
+          c.glossary?.conflict
+            ? html`<div class="row"><button type="submit" class="btn primary" name="as" value="shared">${t("Same meaning: to the shared glossary")}</button><button type="submit" class="btn" name="as" value="homonym">${t("Another meaning: a homonym")}</button></div>`
+            : html`<div class="row"><button type="submit" class="btn primary">${t("Accept")}</button></div>`
+        }`,
       )
 }
 ${form(

@@ -1,5 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
-import { layoutOf } from "../../core/paths.ts";
+import { loadGlossaries } from "../glossaries.ts";
 
 /**
  * Glossary (ADR-0015 §3): `.jarvis/knowledge/glossary.md`, a markdown table
@@ -13,6 +12,8 @@ export interface GlossaryEntry {
   readonly sources: string[];
   /** Optional sixth column: what the term means, in the project's own words. */
   readonly definition?: string;
+  /** In a knowledge repository: `shared`, or the service whose glossary it is in. */
+  readonly scope?: string;
 }
 
 export function parseGlossary(markdown: string): GlossaryEntry[] {
@@ -41,10 +42,25 @@ export function parseGlossary(markdown: string): GlossaryEntry[] {
   return entries;
 }
 
+/**
+ * The terms a project reads: its glossary; in a knowledge repository the shared one, the service's own
+ * and its libraries' (src/knowledge/glossaries.ts) — each entry with its `scope`.
+ */
 export function loadGlossary(projectRoot: string | undefined): GlossaryEntry[] {
   if (!projectRoot) return [];
-  const file = layoutOf(projectRoot).glossaryFile;
-  return existsSync(file) ? parseGlossary(readFileSync(file, "utf8")) : [];
+  return loadGlossaries(projectRoot);
+}
+
+/**
+ * A symbol of the shared glossary may say whose it is: `orders-api:OrderEntity`. Its service and its
+ * name; a plain symbol has no service.
+ */
+export function symbolOf(raw: string): { readonly service?: string; readonly name: string } {
+  const t = raw.trim();
+  const m = /^([a-z0-9][a-z0-9._-]*):(?!:)(\S.*)$/i.exec(t);
+  return m && !/^[a-z]:[\\/]/i.test(t)
+    ? { service: m[1] as string, name: (m[2] as string).trim() }
+    : { name: t };
 }
 
 export interface Expansion {
@@ -75,7 +91,10 @@ export function expandQuery(
   for (const e of glossary) {
     const hit = [e.term, ...e.synonyms].some((t) => t.length > 0 && matches(t));
     if (!hit) continue;
-    const added = [...e.synonyms, ...e.symbols].filter((t) => t.length > 0 && !terms.has(t.toLowerCase()));
+    // a shared term's symbol says its service (`orders-api:OrderEntity`): the code knows only the name
+    const added = [...e.synonyms, ...e.symbols.map((x) => symbolOf(x).name)].filter(
+      (t) => t.length > 0 && !terms.has(t.toLowerCase()),
+    );
     for (const a of added) terms.add(a.toLowerCase());
     if (added.length > 0) expansions.push({ term: e.term, added });
   }

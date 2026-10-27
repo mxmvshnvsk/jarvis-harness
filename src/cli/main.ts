@@ -1240,7 +1240,11 @@ export function buildProgram(options: RunOptions = {}): Command {
       "replace a document a person wrote at the target (a generated one is replaced anyway)",
       false,
     )
-    .action(async (name: string, opts: { id?: string; replace?: boolean }) => {
+    .option(
+      "--as <how>",
+      "a glossary term another service has: shared (one sense, moves to the shared glossary) or homonym",
+    )
+    .action(async (name: string, opts: { id?: string; replace?: boolean; as?: string }) => {
       await runCandidatesPromote(ctxFor(), name, opts);
     });
   candidates

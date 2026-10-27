@@ -632,6 +632,18 @@ export const RU: Readonly<Record<string, string>> = {
   "not in the code": "в коде нет",
   "Check in the code": "Проверить по коду",
   "Add anyway": "Всё равно добавить",
+  "shared glossary": "общий глоссарий",
+  "goes to the glossary you pick as a draft; agents use it from the next run":
+    "попадёт в выбранный глоссарий черновиком; агенты используют его со следующего запуска",
+  "{service}'s glossary has this term too: say whether it means the same there (it moves to the shared glossary) or something else (a homonym)":
+    "Этот термин есть и в глоссарии {service}: скажите, значит ли он там то же самое (тогда он переедет в общий глоссарий) или другое (омоним)",
+  "The shared glossary has the term: the symbols joined its row, said by service ({scope})":
+    "Термин есть в общем глоссарии: символы добавлены в его строку с префиксом сервиса ({scope})",
+  "{service}'s glossary has the term {term} too.": "Термин {term} есть и в глоссарии {service}.",
+  "The same meaning: it moves to the shared glossary with both services' symbols. Another meaning: a homonym — each service keeps its own row, the shared glossary says where each is.":
+    "Тот же смысл — термин переедет в общий глоссарий с символами обоих сервисов. Другой смысл — омоним: у каждого сервиса своя строка, а общий глоссарий говорит, где какой.",
+  "Same meaning: to the shared glossary": "Тот же смысл: в общий глоссарий",
+  "Another meaning: a homonym": "Другой смысл: омоним",
   "Add to the glossary": "Добавить в глоссарий",
   "{n} not found — fix the spelling, or add as it is":
     "не найдено: {n} — исправьте написание или добавьте как есть",

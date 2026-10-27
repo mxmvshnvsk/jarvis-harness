@@ -3,6 +3,16 @@ import { dirname, join, relative } from "node:path";
 import { layoutOf, rootRelative, versionedAt } from "../core/paths.ts";
 import { type CodeAt, codeAtOf, commitsSinceCode } from "../knowledge/freshness.ts";
 import { parseFrontMatter } from "../knowledge/frontmatter.ts";
+import {
+  glossaryDuplicates,
+  glossaryFilesOf,
+  isHomonym,
+  type ScopedEntry,
+  SHARED,
+  sameTerm,
+  serviceCodeRoots,
+  symbolOf,
+} from "../knowledge/glossaries.ts";
 import { knowledgeFilesIn, SHARED_KNOWLEDGE_PREFIX } from "../knowledge/resolver.ts";
 import { type GlossaryEntry, parseGlossary } from "../knowledge/retrieval/glossary.ts";
 import { splitSections } from "../knowledge/retrieval/index.ts";
@@ -380,7 +390,7 @@ export interface SymbolCheck {
   readonly where?: string;
 }
 
-export interface GlossaryRow extends GlossaryEntry {
+export interface GlossaryRow extends ScopedEntry {
   readonly updated?: string;
   readonly problems: readonly string[];
 }
@@ -389,9 +399,11 @@ export interface GlossaryView {
   readonly exists: boolean;
   readonly rows: readonly GlossaryRow[];
   readonly checked: boolean;
+  /** The glossaries read: the shared one first, then the services' (repository paths). */
+  readonly files: ReadonlyArray<{ readonly scope: string; readonly path: string }>;
 }
 
-const cleanSymbol = (s: string) => s.replace(/^`|`$/g, "").replace(/\(\)$/, "").trim();
+export const cleanSymbol = (s: string) => s.replace(/^`|`$/g, "").replace(/\(\)$/, "").trim();
 const isPackage = (s: string) => /^@[\w.-]+\/[\w.-]+$/.test(s);
 const isFileName = (s: string) =>
   /^[\w.-]+\.(tsx?|jsx?|mjs|cjs|json|s?css|md|ya?ml|cs|py|go|java|kt)$/.test(s);
@@ -507,40 +519,104 @@ function updatedOf(markdown: string): Map<string, string> {
   return out;
 }
 
-export async function glossaryOf(root: string, check = true): Promise<GlossaryView> {
-  const file = layoutOf(root).glossaryFile;
-  if (!existsSync(file)) return { exists: false, rows: [], checked: false };
-  const text = readFileSync(file, "utf8");
-  const entries = parseGlossary(text);
-  const updated = updatedOf(text);
-  const symbols = check
-    ? await checkSymbols(
-        root,
-        entries.flatMap((e) => e.symbols),
-      )
-    : new Map<string, SymbolCheck>();
-  const shared = sharedSynonyms(entries);
-  const rows = entries.map((e): GlossaryRow => {
+export async function glossaryOf(
+  root: string,
+  check = true,
+  repos?: Readonly<Record<string, string>>,
+): Promise<GlossaryView> {
+  const files = glossaryFilesOf(root, repos).filter((g) => existsSync(g.file));
+  if (files.length === 0) return { exists: false, rows: [], checked: false, files: [] };
+  const codes = serviceCodeRoots(root, repos);
+  const meta = layoutOf(root).meta;
+  const all: Array<{ entry: ScopedEntry; updated?: string; codeRoot?: string }> = [];
+  for (const g of files) {
+    const text = readFileSync(g.file, "utf8");
+    const updated = updatedOf(text);
+    for (const e of parseGlossary(text)) {
+      const u = updated.get(e.term);
+      all.push({
+        entry: { ...e, scope: g.scope },
+        ...(u ? { updated: u } : {}),
+        ...(g.codeRoot ? { codeRoot: g.codeRoot } : {}),
+      });
+    }
+  }
+  // each symbol against the code it is in: a service's glossary — its repository; the shared one —
+  // the service a symbol names (`orders-api:OrderEntity`), else the project's own code
+  const whereOf = (x: (typeof all)[number], raw: string): string | undefined => {
+    const { service } = symbolOf(raw);
+    if (x.entry.scope !== SHARED) return x.codeRoot;
+    if (service) return codes[service] ?? (meta?.service === service ? root : undefined);
+    return meta && !meta.service ? undefined : root;
+  };
+  const byRoot = new Map<string, string[]>();
+  for (const x of all)
+    for (const raw of x.entry.symbols) {
+      const at = whereOf(x, raw);
+      if (at) byRoot.set(at, [...(byRoot.get(at) ?? []), symbolOf(raw).name]);
+    }
+  const found = new Map<string, Map<string, SymbolCheck>>();
+  if (check) for (const [at, symbols] of byRoot) found.set(at, await checkSymbols(at, symbols));
+  const entries = all.map((x) => x.entry);
+  const duplicates = glossaryDuplicates(entries);
+  const rows = all.map((x): GlossaryRow => {
+    const e = x.entry;
     const problems: string[] = [];
-    for (const s of e.symbols) {
-      const c = symbols.get(cleanSymbol(s));
-      if (c && !c.found) problems.push(`${cleanSymbol(s)} is not in the code`);
+    const unowned: string[] = [];
+    for (const raw of e.symbols) {
+      const { service, name } = symbolOf(raw);
+      const at = whereOf(x, raw);
+      if (!at) {
+        if (e.scope === SHARED && !service) unowned.push(name);
+        continue;
+      }
+      const c = found.get(at)?.get(cleanSymbol(name));
+      if (c && !c.found)
+        problems.push(`${cleanSymbol(name)} is not in the code${service ? ` of ${service}` : ""}`);
     }
+    if (unowned.length > 0)
+      problems.push(
+        `whose code? say it as service:Symbol — ${unowned.slice(0, 4).join(", ")}${unowned.length > 4 ? ", …" : ""}`,
+      );
+    // the same synonym on two terms of one glossary widens a query to both
     for (const syn of e.synonyms) {
-      const terms = shared.get(syn.toLowerCase());
-      if (terms)
-        problems.push(
-          `«${syn}» is also a synonym of ${terms
-            .filter((t) => t !== e.term)
-            .map((t) => `«${t}»`)
-            .join(", ")}`,
-        );
+      const others = entries.filter(
+        (o) =>
+          o !== e && o.scope === e.scope && o.synonyms.some((z) => z.toLowerCase() === syn.toLowerCase()),
+      );
+      if (others.length > 0)
+        problems.push(`«${syn}» is also a synonym of ${others.map((o) => `«${o.term}»`).join(", ")}`);
     }
-    const u = updated.get(e.term);
-    return { ...e, ...(u ? { updated: u } : {}), problems };
+    // the same term in two glossaries: one in the shared, or a homonym said there
+    const dup = duplicates.find(
+      (d) =>
+        d.scopes.includes(e.scope) &&
+        entries.some((o) => o !== e && sameTerm(e, o) && d.scopes.includes(o.scope)),
+    );
+    if (dup && sameTermElsewhere(e, entries))
+      problems.push(
+        `also in ${dup.scopes
+          .filter((s) => s !== e.scope)
+          .map(scopeName)
+          .join(", ")}: one sense — keep it in the shared glossary; two — a homonym`,
+      );
+    return { ...e, ...(x.updated ? { updated: x.updated } : {}), problems };
   });
-  return { exists: true, rows, checked: check };
+  return {
+    exists: true,
+    rows,
+    checked: check,
+    files: files.map((g) => ({ scope: g.scope, path: rootRelative(root, g.file) })),
+  };
 }
+
+const scopeName = (s: string) => (s === SHARED ? "the shared glossary" : s);
+/** The same term in another glossary — not when the shared glossary says it is a homonym. */
+const sameTermElsewhere = (e: ScopedEntry, entries: readonly ScopedEntry[]) => {
+  const same = entries.filter((o) => o !== e && o.scope !== e.scope && sameTerm(e, o));
+  const homonym = [e, ...same].some(isHomonym);
+  return same.length > 0 && !homonym;
+};
 
 export interface NewTerm {
   readonly term: string;
@@ -558,7 +634,7 @@ Business term → synonyms → code symbols. Jarvis widens searches with this ta
 | --- | --- | --- | --- | --- | --- |
 `;
 
-const cell = (s: string) => s.replace(/\|/g, "/").replace(/\s+/g, " ").trim();
+export const cell = (s: string) => s.replace(/\|/g, "/").replace(/\s+/g, " ").trim();
 
 export class GlossaryTermTaken extends Error {
   constructor(term: string) {
@@ -571,8 +647,13 @@ export class GlossaryTermTaken extends Error {
  * Adds a row to the glossary table (after its last row, in its own column order), dated today.
  * The file stays a draft in the working copy until committed.
  */
-export function addGlossaryTerm(root: string, t: NewTerm, today = new Date()): { readonly line: number } {
-  const file = layoutOf(root).glossaryFile;
+export function addGlossaryTerm(
+  root: string,
+  t: NewTerm,
+  today = new Date(),
+  /** Which glossary: the project's by default (src/app/glossaryPlace.ts decides in a knowledge repository). */
+  file = layoutOf(root).glossaryFile,
+): { readonly line: number } {
   const text = existsSync(file) ? readFileSync(file, "utf8") : HEADER;
   if (parseGlossary(text).some((e) => e.term.toLowerCase() === t.term.trim().toLowerCase()))
     throw new GlossaryTermTaken(t.term.trim());
@@ -613,8 +694,8 @@ export function extendGlossaryTerm(
   term: string,
   symbols: readonly string[],
   today = new Date(),
+  file = layoutOf(root).glossaryFile,
 ): { readonly line: number } {
-  const file = layoutOf(root).glossaryFile;
   const lines = readFileSync(file, "utf8").split("\n");
   const at = lines.findIndex((l) => {
     const cells = l.trim().startsWith("|") ? l.split("|").slice(1, -1) : [];
@@ -629,7 +710,11 @@ export function extendGlossaryTerm(
     .split(/[,;]/)
     .map((s) => cleanSymbol(s.trim().replace(/^`|`$/g, "")))
     .filter(Boolean);
-  const added = symbols.map((s) => cleanSymbol(s)).filter((s) => s && !have.includes(s));
+  // a symbol said with its service (`orders-api:OrderEntity`) is the same symbol as the plain one
+  const names = new Set(have.map((h) => symbolOf(h).name));
+  const added = symbols
+    .map((s) => cleanSymbol(s))
+    .filter((s) => s && !have.includes(s) && !names.has(symbolOf(s).name));
   cells[2] = [cells[2] ?? "", ...added.map((s) => `\`${cell(s)}\``)].filter(Boolean).join(", ");
   if (cells.length >= 5) cells[4] = today.toISOString().slice(0, 10);
   lines[at] = `| ${cells.join(" | ")} |`;

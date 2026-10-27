@@ -272,7 +272,7 @@ export class McpToolProvider implements ToolProvider {
   ): Promise<{ tool: string; sent: Record<string, unknown>; result: McpCallResult }> {
     const cap = planned.profileCap;
     const serverId = planned.serverId;
-    const connection = this.pool.connection(serverId);
+    const _connection = this.pool.connection(serverId);
     const { tool, sent } = await this.prepare(planned, args, marker);
     const read = !cap.effect && cap.access === "read";
     // a server that said "not before": not asked again until then (its limit is spent, not broken)

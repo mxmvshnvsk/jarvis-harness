@@ -9,6 +9,7 @@ import {
   CandidateTargetTaken,
   candidatesOf,
   documentOf,
+  GlossaryConflict,
   promoteCandidate,
   rejectCandidate,
   skillEditOf,
@@ -222,8 +223,12 @@ export async function runCandidatesShow(ctx: CliContext, ref: string): Promise<v
 export async function runCandidatesPromote(
   ctx: CliContext,
   ref: string,
-  options: { id?: string; replace?: boolean },
+  options: { id?: string; replace?: boolean; as?: string },
 ): Promise<void> {
+  if (options.as !== undefined && options.as !== "shared" && options.as !== "homonym") {
+    ctx.out.error(`--as is shared or homonym, not ${options.as}`);
+    throw new CliExit(EXIT.error);
+  }
   const loaded = await loadForCli(ctx);
   const runtime = createRuntime(loaded, { env: ctx.env });
   try {
@@ -242,9 +247,15 @@ export async function runCandidatesPromote(
         actor: resolved.actor,
         id: options.id,
         replace: options.replace,
+        as: options.as as "shared" | "homonym" | undefined,
         channel: "cli",
       });
     } catch (error) {
+      if (error instanceof GlossaryConflict) {
+        ctx.out.error(error.message);
+        ctx.out.line(ctx.out.style.cmd(`jarvis candidates promote ${found.name} --as shared|homonym`));
+        throw new CliExit(EXIT.error);
+      }
       if (error instanceof CandidateNotPromotable) {
         ctx.out.error(error.message);
         throw new CliExit(EXIT.error);

@@ -6,13 +6,13 @@ import type { Actor } from "../core/domain/actor.ts";
 import type { ArtifactVersion } from "../core/domain/artifact.ts";
 import type { Run } from "../core/domain/run.ts";
 import { layoutOf } from "../core/paths.ts";
-import { loadGlossary, parseGlossary } from "../knowledge/retrieval/glossary.ts";
+import { loadGlossary } from "../knowledge/retrieval/glossary.ts";
 import { type GlossaryProposal, proposeGlossary, termLinksIn } from "../knowledge/retrieval/termLinks.ts";
 import { BUILTIN_SKILLS, projectSkillDirOf, type Skill } from "../knowledge/skills.ts";
 import { MODULE_MARKER, markSweeping, ONBOARD_MARKER } from "../onboarding/render.ts";
 import type { Dropped } from "../onboarding/verify.ts";
 import { newRunId, shortRunId } from "../storage/runStore.ts";
-import { addGlossaryTerm, extendGlossaryTerm } from "./knowledgeView.ts";
+import { defaultScopeOf, glossaryFileFor, placeTerm, settleTerm } from "./glossaryPlace.ts";
 import type { Runtime } from "./runtime.ts";
 
 /**
@@ -46,6 +46,8 @@ export interface CandidateDoc {
   finding?: { key: string; runs: string[] };
   /** glossary (ADR-0015 §3): the term and the code symbols a run linked to it. */
   glossary?: GlossaryProposal;
+  /** glossary in a knowledge repository: the glossary the term is for — `shared` or the run's service. */
+  glossaryScope?: string;
 }
 
 export interface Candidate {
@@ -180,7 +182,7 @@ export function targetOf(root: string, c: Candidate, id: string | undefined): st
       ? moduleFileId(c.name.replace(/@.*$/, ""))
       : slug(c.doc.title));
   const layout = layoutOf(root);
-  if (c.doc.kind === "glossary") return layout.glossaryFile;
+  if (c.doc.kind === "glossary") return glossaryFileFor(root, c.doc.glossaryScope ?? defaultScopeOf(root));
   if (c.doc.kind === "standard") return join(layout.jarvisDir, "standards", `${fileId}.md`);
   // a service's knowledge goes to its folder of the knowledge repository (ADR-0025 §1)
   if (c.doc.kind === "knowledge") return join(layout.knowledgeDir, `${fileId}.md`);
@@ -351,6 +353,8 @@ export interface PromoteInput {
   readonly channel?: "cli" | "ui";
   /** How many of the marked generalisations the person said they checked (the page asks for all). */
   readonly checked?: number | undefined;
+  /** A glossary term another service's glossary has: one sense (`shared`) or two (`homonym`). */
+  readonly as?: "shared" | "homonym" | undefined;
 }
 
 export interface Promoted {
@@ -457,17 +461,40 @@ function promoteSkillEdit(runtime: Runtime, input: PromoteInput): Promoted {
   return { file: e.instructions, path, skill: { id: e.skill, ...e.version, fromBuiltin: e.fromBuiltin } };
 }
 
-/** Accepting a glossary candidate: a new row for a new term, the new symbols added to a known one's row. */
+/** A glossary term another service has: whether it is one sense or two is a person's call. */
+export class GlossaryConflict extends Error {
+  readonly term: string;
+  readonly other: string;
+  readonly scope: string;
+  constructor(term: string, other: string, scope: string) {
+    super(
+      `«${term}» is in ${other}'s glossary too: say whether it means the same (--as shared: it moves to the shared glossary) or not (--as homonym: each service keeps its own)`,
+    );
+    this.name = "GlossaryConflict";
+    this.term = term;
+    this.other = other;
+    this.scope = scope;
+  }
+}
+
+/**
+ * Accepting a glossary candidate (src/app/glossaryPlace.ts): a new row for a new term, the new symbols
+ * added to a known one's row — in the shared glossary when it has the term, else in the service's; one
+ * another service has waits for `as`.
+ */
 function promoteGlossary(runtime: Runtime, input: PromoteInput): Promoted {
   const c = input.candidate;
   const g = c.doc.glossary;
   if (!g) throw new CandidateNotPromotable("this glossary candidate carries no term");
-  const file = layoutOf(input.root).glossaryFile;
-  const known = parseGlossary(existsSync(file) ? readFileSync(file, "utf8") : "").some(
-    (e) => e.term.toLowerCase() === g.term.toLowerCase(),
-  );
-  if (known) extendGlossaryTerm(input.root, g.term, g.symbols);
-  else addGlossaryTerm(input.root, { term: g.term, synonyms: [], symbols: g.symbols, sources: g.sources });
+  const scope = c.doc.glossaryScope ?? defaultScopeOf(input.root);
+  const t = { term: g.term, synonyms: [], symbols: g.symbols, sources: g.sources };
+  let placed = placeTerm(input.root, t, scope, { taken: "extend" });
+  if ("conflict" in placed) {
+    if (!input.as) throw new GlossaryConflict(placed.conflict.term, placed.conflict.scope, scope);
+    placed = settleTerm(input.root, t, scope, placed.conflict.scope, input.as);
+  }
+  if ("conflict" in placed) throw new GlossaryConflict(placed.conflict.term, placed.conflict.scope, scope);
+  const { file } = placed;
   const path = relative(input.root, file).split("\\").join("/");
   runtime.artifacts.approve({
     runId: c.artifact.runId,
@@ -477,7 +504,8 @@ function promoteGlossary(runtime: Runtime, input: PromoteInput): Promoted {
     actor: input.actor,
     decision: "approve",
     comment: [
-      `${known ? "added symbols to" : "added"} «${g.term}» in ${path}`,
+      `${placed.placed === "extended" ? "added symbols to" : "added"} «${placed.term}» in ${path}`,
+      input.as ? `${input.as === "shared" ? "one sense: moved to the shared glossary" : "a homonym"}` : "",
       input.channel ? `from the ${input.channel === "ui" ? "page" : "terminal"}` : "",
     ]
       .filter(Boolean)
@@ -487,7 +515,7 @@ function promoteGlossary(runtime: Runtime, input: PromoteInput): Promoted {
     kind: "knowledge.promoted",
     runId: c.artifact.runId,
     actor: `${input.actor.kind}:${input.actor.id}`,
-    payload: { artifact: c.artifact.artifactId, file: path, term: g.term },
+    payload: { artifact: c.artifact.artifactId, file: path, term: placed.term, scope: placed.scope },
   });
   return { file, path };
 }
@@ -539,6 +567,9 @@ export function proposeGlossaryCandidates(runtime: Runtime, run: Run): ArtifactV
       from: p.from.join(", "),
       status: "proposed",
       glossary: g,
+      ...(layoutOf(run.workspace.repoRoot).meta
+        ? { glossaryScope: defaultScopeOf(run.workspace.repoRoot) }
+        : {}),
     };
     out.push(
       runtime.artifacts.put({

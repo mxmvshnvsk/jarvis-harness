@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { layoutOf, rootRelative } from "../core/paths.ts";
 import { codeAtOf, commitsSinceCode } from "../knowledge/freshness.ts";

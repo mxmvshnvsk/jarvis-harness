@@ -17,6 +17,7 @@ import {
   candidatesOf,
   contentOf,
   existingAt,
+  GlossaryConflict,
   promoteCandidate,
   rejectCandidate,
   skillEditOf,
@@ -56,10 +57,15 @@ import {
 } from "../app/deliver.ts";
 import { resolveEffect, unresolvedEffectOf } from "../app/effects.ts";
 import { finalizedOf, finalizeRun } from "../app/finalize.ts";
+import {
+  checkScopedSymbols,
+  defaultScopeOf,
+  conflictOf as glossaryConflictOf,
+  glossaryScopesOf,
+  placeTerm,
+} from "../app/glossaryPlace.ts";
 import { continuedBy } from "../app/handoff.ts";
 import {
-  addGlossaryTerm,
-  checkSymbols,
   docsOf,
   GlossaryTermTaken,
   type GlossaryView,
@@ -126,8 +132,8 @@ import { isConflictChoice, resolveConflict } from "../interaction/conflict.ts";
 import { addNote } from "../interaction/notes.ts";
 import { answerFromKnowledge, plan } from "../knowledge/ask.ts";
 import { catalogOf, namedServices } from "../knowledge/catalog.ts";
+import { glossaryFilesOf, loadGlossaries, SHARED } from "../knowledge/glossaries.ts";
 import { loadKnowledgeDocs } from "../knowledge/resolver.ts";
-import { loadGlossary } from "../knowledge/retrieval/glossary.ts";
 import type { RetrievalResult } from "../knowledge/retrieval/retriever.ts";
 import { refreshIndex, search } from "../knowledge/retrieval/service.ts";
 import { loadSkills } from "../knowledge/skills.ts";
@@ -995,7 +1001,8 @@ ${candidateReviewHtml(c, run, run.workspace.repoRoot, actions, { back: `/runs/${
       queued: html`<div class="banner ok">${t("{n} queued — they run one after another", { n: plural(Number(count) || 1, "research") })}</div>`,
       unqueued: html`<div class="banner ok">${t("Taken out of the queue")}</div>`,
       resumed: html`<div class="banner ok">${t("Resumed — it goes on in the background from where it stopped")}</div>`,
-      "term-added": html`<div class="banner ok">${t("Added to the glossary as a draft — the next run's searches widen with it")}</div>`,
+      "term-added": html`<div class="banner ok">${t("Added to the glossary as a draft — the next run's searches widen with it")}${file && file !== SHARED ? html` <code>${file}</code>` : ""}</div>`,
+      "term-extended": html`<div class="banner ok">${th("The shared glossary has the term: the symbols joined its row, said by service ({scope})", { scope: html`<code>${file}</code>` })}</div>`,
       "no-file": html`<div class="banner bad">${t("Not a knowledge file of this repository")}</div>`,
       "no-path": html`<div class="banner bad">${t("Not a folder of a module here — pick one in the tree or from the path's suggestions")}</div>`,
       "no-parts": html`<div class="banner bad">${t("Pick at least one part")}</div>`,
@@ -1015,6 +1022,7 @@ ${candidateReviewHtml(c, run, run.workspace.repoRoot, actions, { back: `/runs/${
       "candidate-added": html`<div class="banner ok">${th("Proposed {name} — it waits under {candidates}, or in the terminal: {cmd}", { name: html`<code>${file}</code>`, candidates: html`<a href="/knowledge/candidates">${t("Candidates")}</a>`, cmd: html`<code>jarvis candidates promote ${file}</code>` })}</div>`,
       "candidate-rejected": html`<div class="banner ok">${th("Rejected {name} — nothing written; the decision is kept", { name: html`<code>${file}</code>` })}</div>`,
       "candidate-skill": html`<div class="banner ok">${th("Added to the skill in {file} (v{v}) — not committed yet", { file: html`<code>${file}</code>`, v: r.url.searchParams.get("v") ?? "?" })}</div>`,
+      "glossary-conflict": html`<div class="banner bad">${th("{service}'s glossary has this term too: say whether it means the same there (it moves to the shared glossary) or something else (a homonym)", { service: html`<code>${file}</code>` })}</div>`,
       "candidate-blocked": html`<div class="banner bad">${t("Not accepted: {why}", { why: file })}</div>`,
       "candidate-invalid": html`<div class="banner bad">${t("Not proposed: {why}", { why: file || t("pick a kind") })}</div>`,
       actor: html`<div class="banner bad">${t("Cannot determine who decides: set JARVIS_ACTOR, actor.id or git config user.email (ADR-0006)")}</div>`,
@@ -1276,7 +1284,19 @@ ${candidateReviewHtml(c, run, run.workspace.repoRoot, actions, { back: `/runs/${
       } else if (c.doc.kind === "glossary") {
         const g = c.doc.glossary;
         extra = g
-          ? { glossary: { term: g.term, symbols: g.symbols, known: g.existing } }
+          ? (() => {
+              const scope = c.doc.glossaryScope ?? defaultScopeOf(dir);
+              const other = glossaryConflictOf(dir, { term: g.term, synonyms: [] }, scope);
+              return {
+                glossary: {
+                  term: g.term,
+                  symbols: g.symbols,
+                  known: g.existing,
+                  ...(layoutOf(dir).meta ? { scope } : {}),
+                  ...(other ? { conflict: other } : {}),
+                },
+              };
+            })()
           : { blocked: "this glossary candidate carries no term" };
       } else {
         const file = targetOf(dir, c, undefined);
@@ -1329,7 +1349,7 @@ ${candidateReviewHtml(c, run, run.workspace.repoRoot, actions, { back: `/runs/${
       docs: safe(() => loadKnowledgeDocs(r).length + serviceDocCount(r)),
       standards: safe(() => loadStandards(r).length),
       skills: safe(() => loadSkills(r).length),
-      terms: safe(() => loadGlossary(root).length),
+      terms: safe(() => loadGlossaries(root as string, runtime.loaded.meta?.repos).length),
       candidates: safe(() => otherCandidates().filter((c) => !c.decision).length),
       ...(runtime.loaded.meta ? { services: Object.keys(runtime.loaded.meta.repos).length } : {}),
     };
@@ -1337,11 +1357,14 @@ ${candidateReviewHtml(c, run, run.workspace.repoRoot, actions, { back: `/runs/${
   let glossaryCache: { key: string; view: Promise<GlossaryView> } | undefined;
   const glossaryView = async (): Promise<GlossaryView> => {
     const dir = root as string;
-    const file = layoutOf(dir).glossaryFile;
+    const repos = runtime.loaded.meta?.repos;
     const head = (await git(["rev-parse", "HEAD"], dir)).stdout.trim();
-    const st = existsSync(file) ? statSync(file) : undefined;
-    const key = `${head}|${st?.mtimeMs ?? 0}|${st?.size ?? 0}`;
-    if (glossaryCache?.key !== key) glossaryCache = { key, view: glossaryOf(dir) };
+    const stamps = glossaryFilesOf(dir, repos).map((g) => {
+      const st = existsSync(g.file) ? statSync(g.file) : undefined;
+      return `${g.scope}:${st?.mtimeMs ?? 0}:${st?.size ?? 0}`;
+    });
+    const key = `${head}|${stamps.join("|")}`;
+    if (glossaryCache?.key !== key) glossaryCache = { key, view: glossaryOf(dir, true, repos) };
     return glossaryCache.view;
   };
   /** A knowledge page: its content, then the drafts strip (every page commits the same way). */
@@ -1571,8 +1594,14 @@ ${candidateReviewHtml(c, run, run.workspace.repoRoot, actions, { back: `/runs/${
     if (at === "/knowledge/glossary") {
       const glossary = await glossaryView();
       const term = q("term");
-      const selected = term ? glossary.rows.find((x) => x.term === term) : undefined;
-      const where = selected ? [...(await checkSymbols(root, selected.symbols)).values()] : undefined;
+      const scope = q("scope");
+      const selected = term
+        ? (glossary.rows.find((x) => x.term === term && (!scope || x.scope === scope)) ??
+          glossary.rows.find((x) => x.term === term))
+        : undefined;
+      const where = selected
+        ? await checkScopedSymbols(root, selected.scope, selected.symbols, runtime.loaded.meta?.repos)
+        : undefined;
       const add = q("add");
       const content = glossaryContent(
         {
@@ -1581,6 +1610,7 @@ ${candidateReviewHtml(c, run, run.workspace.repoRoot, actions, { back: `/runs/${
           ...(selected ? { selected } : {}),
           ...(where ? { where } : {}),
           problems: q("problems") === "1",
+          scopes: glossaryScopesOf(root),
           ...(q("q") ? { filter: q("q") as string } : {}),
           ...(add
             ? { form: { term: add.slice(0, 80), synonyms: "", symbols: "", sources: "", definition: "" } }
@@ -1626,6 +1656,9 @@ ${candidateReviewHtml(c, run, run.workspace.repoRoot, actions, { back: `/runs/${
         actor: who,
         ...(/^[a-z0-9][a-z0-9._-]{0,59}$/.test(fileId) ? { id: fileId } : {}),
         replace: form.get("replace") === "1",
+        ...(form.get("as") === "shared" || form.get("as") === "homonym"
+          ? { as: form.get("as") as "shared" | "homonym" }
+          : {}),
         channel: "ui",
       });
       return redirect(
@@ -1637,6 +1670,8 @@ ${candidateReviewHtml(c, run, run.workspace.repoRoot, actions, { back: `/runs/${
       );
     } catch (error) {
       if (error instanceof CandidateTargetTaken) return redirect(r, to("taken"));
+      if (error instanceof GlossaryConflict)
+        return redirect(r, to("glossary-conflict", `&file=${encodeURIComponent(error.other)}`));
       if (error instanceof CandidateNotPromotable)
         return redirect(r, to("candidate-blocked", `&file=${encodeURIComponent(error.message)}`));
       throw error;
@@ -1689,8 +1724,9 @@ ${candidateReviewHtml(c, run, run.workspace.repoRoot, actions, { back: `/runs/${
       symbols: (form.get("symbols") ?? "").trim().slice(0, 400),
       sources: (form.get("sources") ?? "").trim().slice(0, 200),
       definition: (form.get("definition") ?? "").trim().slice(0, 600),
+      scope: (form.get("scope") ?? "").trim() || defaultScopeOf(dir),
     };
-    const checks = [...(await checkSymbols(dir, list("symbols"))).values()];
+    const checks = await checkScopedSymbols(dir, values.scope, list("symbols"), runtime.loaded.meta?.repos);
     const again = async (error?: string) =>
       knowledgePage(
         r,
@@ -1700,6 +1736,7 @@ ${candidateReviewHtml(c, run, run.workspace.repoRoot, actions, { back: `/runs/${
             counts: countsOf(),
             glossary: await glossaryView(),
             problems: false,
+            scopes: glossaryScopesOf(dir),
             form: values,
             checks,
             ...(error ? { error } : {}),
@@ -1711,20 +1748,34 @@ ${candidateReviewHtml(c, run, run.workspace.repoRoot, actions, { back: `/runs/${
     const doing = form.get("do");
     if (!values.term) return again("Say the term");
     if (doing === "check" || (doing === "add" && checks.some((c) => !c.found))) return again();
+    const scopes = glossaryScopesOf(dir);
+    if (!scopes.includes(values.scope)) return again(`No such glossary: ${values.scope}`);
     try {
-      addGlossaryTerm(dir, {
-        term: values.term,
-        synonyms: list("synonyms"),
-        symbols: list("symbols"),
-        sources: list("sources"),
-        ...(values.definition ? { definition: values.definition } : {}),
-      });
+      const placed = placeTerm(
+        dir,
+        {
+          term: values.term,
+          synonyms: list("synonyms"),
+          symbols: list("symbols"),
+          sources: list("sources"),
+          ...(values.definition ? { definition: values.definition } : {}),
+        },
+        values.scope,
+        { taken: "throw" },
+      );
+      if ("conflict" in placed)
+        return again(
+          `«${placed.conflict.term}» is in ${placed.conflict.scope}'s glossary: the same meaning — add it to the shared glossary with symbols said by service (${placed.conflict.scope}:Symbol); another — say it is a homonym in the shared glossary first`,
+        );
+      glossaryCache = undefined;
+      return redirect(
+        r,
+        `/knowledge/glossary?term=${encodeURIComponent(placed.term)}&scope=${encodeURIComponent(placed.scope)}&notice=${placed.placed === "extended" ? "term-extended" : "term-added"}&file=${encodeURIComponent(placed.scope)}`,
+      );
     } catch (error) {
       if (!(error instanceof GlossaryTermTaken)) throw error;
       return again(error.message);
     }
-    glossaryCache = undefined;
-    return redirect(r, `/knowledge/glossary?term=${encodeURIComponent(values.term)}&notice=term-added`);
   };
 
   /**
