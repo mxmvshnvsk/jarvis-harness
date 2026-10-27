@@ -639,8 +639,9 @@ ${
     ? html`<div class="emode" role="radiogroup"><label><input type="radio" name="from-mode" value="start"> ${t("From the start")}</label><label><input type="radio" name="from-mode" value="step" checked> ${t("From a step of an earlier run")}</label></div>`
     : ""
 }
-${earlier.map(runHtml)}
+<div class="eruns">${earlier.map(runHtml)}
 ${first ? html`<label class="muted enote"><span>${t("For the first step: what to do differently")} <span class="hint">(${t("optional")})</span></span><textarea name="restart-note" rows="2" maxlength="4000"></textarea></label><p class="hint">${t("A new run in a fresh checkout of the current code: what was done before the step goes in with its approvals and does not run again.")}</p>` : ""}
+</div>
 </div>`;
 }
 
