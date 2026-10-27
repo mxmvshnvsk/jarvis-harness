@@ -121,14 +121,17 @@ describe("Services in jarvis ui", () => {
     // the knowledge repository lists its services' documents, each under its service
     expect(overview.text).toContain('>Documents <span class="muted">1</span>');
     const docs = await page("/knowledge/docs");
-    expect(docs.text).toContain("<h3>orders-api</h3>");
+    // a folder per service, folded or not, apart from its files
+    expect(docs.text).toMatch(
+      /<details class="kgrp" open><summary><span class="kgname">orders-api<\/span><span class="kcount">1<\/span><\/summary>/,
+    );
     expect(docs.text).toContain("<span>architecture.md</span>");
     // standards and skills by stack folder
     const std = await page("/knowledge/standards");
     expect(std.text).toMatch(
-      /<h3>backend\/ <span class="hint">java<\/span> <span class="hint">1<\/span><\/h3>/,
+      /<span class="kgname">backend\/<\/span><span class="hint kghint">java<\/span><span class="kcount">1<\/span>/,
     );
-    expect(std.text).toContain("<h3>Every stack");
+    expect(std.text).toContain('<span class="kgname">Every stack</span>');
     const map = await page("/knowledge/services");
     expect(map.status).toBe(200);
     // the top bar: Services of the map, current here; Knowledge not

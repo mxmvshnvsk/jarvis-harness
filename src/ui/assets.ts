@@ -707,7 +707,8 @@ form.clarify>.actions{margin:4px 0}
 a.kr:hover{background:var(--sunken)}
 .kr.warn{background:var(--focus-row)}
 .kr.current{background:var(--accent-soft);box-shadow:inset 3px 0 0 var(--accent)}
-.kr.kg{grid-template-columns:170px minmax(0,1fr) minmax(0,1.2fr) minmax(0,1.4fr)}
+.kr.kg{grid-template-columns:minmax(0,1.3fr) minmax(0,1fr) minmax(0,1.3fr) minmax(0,1.4fr)}
+.kr.kg>span{min-width:0;overflow-wrap:anywhere}
 /* Knowledge → Services */
 .banner.wait{background:var(--wait-bg);color:var(--wait)}
 .sv-todo{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px}
@@ -769,6 +770,16 @@ p.sv-pair{margin:0;font-size:14px}
 .kdoccols.kstd{grid-template-columns:minmax(0,1fr) minmax(0,1.5fr)}
 .ktree,.klist{padding:10px 8px;display:flex;flex-direction:column;gap:2px}
 .ktree h3,.klist h3{margin:10px 10px 4px;font-size:12px;font-weight:500;color:var(--muted)}
+.kgrp>summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:8px;min-height:36px;padding:6px 10px;border-radius:6px;font-family:var(--sans);font-size:13px;font-weight:600;color:var(--ink);user-select:none}
+.kgrp>summary::-webkit-details-marker{display:none}
+.kgrp>summary::before{content:"";flex:none;width:0;height:0;border-left:5px solid var(--muted);border-top:4px solid transparent;border-bottom:4px solid transparent;transition:transform .12s}
+.kgrp[open]>summary::before{transform:rotate(90deg)}
+.kgrp>summary:hover{background:var(--sunken)}
+.kgname{min-width:0;overflow-wrap:anywhere}
+.kghint{font-weight:400;min-width:0;overflow-wrap:anywhere}
+.kcount{margin-left:auto;flex:none;font-size:11px;font-weight:500;color:var(--muted);background:var(--chip);border-radius:10px;padding:1px 8px}
+.kgbody{margin:2px 0 6px 14px;padding-left:8px;border-left:1px solid var(--line-soft);display:flex;flex-direction:column;gap:2px}
+.kgbody>.kgrp>summary{font-weight:500;color:var(--ink-2)}
 .ktree ul{list-style:none;margin:0;padding:0}
 .ktree a,.kli{display:flex;justify-content:space-between;align-items:center;gap:8px;min-height:40px;padding:6px 10px;border-radius:6px;color:var(--ink-2);text-decoration:none;font-family:var(--mono);font-size:13px;overflow-wrap:anywhere}
 .kli{font-family:var(--sans);font-size:14px;min-height:48px}

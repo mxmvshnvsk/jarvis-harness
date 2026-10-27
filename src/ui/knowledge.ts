@@ -236,6 +236,19 @@ export interface DocsPage {
   readonly architecture: boolean;
 }
 
+/**
+ * A folder of a side list (Documents, Standards, Skills, Candidates): a header that does not look like
+ * its items — a caret, the name, a count — folded or unfolded. Open: the one with the selected item,
+ * and all of them when there are few (pilot: 38 services' documents in one long list, the folder names
+ * set like the files).
+ */
+function navGroup(title: Html | string, count: number, open: boolean, body: Html, hint?: string): Html {
+  return html`<details class="kgrp"${open ? " open" : ""}><summary><span class="kgname">${title}</span>${hint ? html`<span class="hint kghint">${hint}</span>` : ""}<span class="kcount">${String(count)}</span></summary><div class="kgbody">${body}</div></details>`;
+}
+
+/** Few folders are all open; many — only the one with the selected item. */
+const openGroup = (groups: number, hasSelected: boolean) => groups <= 4 || hasSelected;
+
 function docGroups(docs: readonly DocView[]): Array<{ title: string; docs: DocView[] }> {
   const services = [...new Set(docs.flatMap((d) => (d.service ? [d.service] : [])))].sort();
   const own = docs.filter((d) => !d.source && !d.service);
@@ -265,13 +278,37 @@ export function docsContent(page: DocsPage, actions?: Actions, notice?: Html): H
 ${notice ?? ""}
 <div class="kdoccols">
 <nav class="panel ktree" aria-label="${t("Documents")}">
-${docGroups(page.docs).map(
-  (g) =>
-    html`<h3>${g.title}</h3><ul>${g.docs.map(
-      (x) =>
-        html`<li><a href="${docHref(x.path)}"${x.path === d?.path ? html` aria-current="page"` : ""}><span>${docLabel(x)}</span>${x.staleCommits ? html`<span class="pill wait">${t("stale")}</span>` : x.generated ? html`<span class="pill plain">${t("gen")}</span>` : ""}</a></li>`,
-    )}</ul>`,
-)}
+${(() => {
+  const groups = docGroups(page.docs);
+  const item = (x: DocView) =>
+    html`<li><a href="${docHref(x.path)}"${x.path === d?.path ? html` aria-current="page"` : ""}><span>${docLabel(x).replace(/^module-/, "")}</span>${x.staleCommits ? html`<span class="pill wait">${t("stale")}</span>` : x.generated ? html`<span class="pill plain">${t("gen")}</span>` : ""}</a></li>`;
+  return groups.map((g) => {
+    // a service's module maps fold into their own folder
+    const modules = g.docs.filter((x) => /(^|\/)module-[^/]*$/.test(docLabel(x)));
+    const rest = g.docs.filter((x) => !modules.includes(x));
+    const body = html`<ul>${rest.map(item)}</ul>${
+      modules.length > 0 && rest.length > 0
+        ? navGroup(
+            t("modules"),
+            modules.length,
+            modules.some((x) => x.path === d?.path) || modules.length <= 6,
+            html`<ul>${modules.map(item)}</ul>`,
+          )
+        : modules.length > 0
+          ? html`<ul>${modules.map(item)}</ul>`
+          : ""
+    }`;
+    return navGroup(
+      g.title,
+      g.docs.length,
+      openGroup(
+        groups.length,
+        g.docs.some((x) => x.path === d?.path),
+      ),
+      body,
+    );
+  });
+})()}
 </nav>
 ${
   d
@@ -338,12 +375,20 @@ ${notice ?? ""}
 ${filter(undefined, `All ${page.standards.length}`)}${filter("required", `Required ${page.standards.filter((x) => x.severity === "required").length}`)}${filter("recommended", `Recommended ${page.standards.filter((x) => x.severity === "recommended").length}`)}</div>
 <div class="kdoccols kstd">
 <nav class="panel klist" aria-label="${t("Standards")}">
-${byStack(list, (x) => ({ group: x.group, stacks: x.scope.stacks })).map(
-  (g) =>
-    html`<h3>${g.title}${g.stacks ? html` <span class="hint">${g.stacks}</span>` : ""} <span class="hint">${String(g.items.length)}</span></h3>${g.items.map(
+${byStack(list, (x) => ({ group: x.group, stacks: x.scope.stacks })).map((g, _i, all) =>
+  navGroup(
+    g.title,
+    g.items.length,
+    openGroup(
+      all.length,
+      g.items.some((x) => x.id === s?.id),
+    ),
+    html`${g.items.map(
       (x) =>
         html`<a class="kli" href="/knowledge/standards?id=${encodeURIComponent(x.id)}${page.severity ? `&severity=${page.severity}` : ""}"${x.id === s?.id ? html` aria-current="page"` : ""}><span><code>${x.id}</code><span class="hint">${x.title}</span></span><span class="kmeta">${sevPill(x.severity)}<span class="meta">${x.verification.kind}</span>${x.findings.length > 0 ? html`<span class="meta">${t("{n} found", { n: x.findings.length })}</span>` : ""}</span></a>`,
     )}`,
+    g.stacks,
+  ),
 )}
 ${list.length === 0 ? html`<p class="empty">${th("No standards here: {dir} is empty.", { dir: html`<code>.jarvis/standards/</code>` })}</p>` : ""}
 </nav>
@@ -413,12 +458,20 @@ ${notice ?? ""}
 <p class="hint">${th("How to do one kind of work. An agent call gets the best matching ones in full ({setting}); the rest are listed as available on request.", { setting: html`<code>context.maxSkills</code>` })}</p>
 <div class="kdoccols kstd">
 <nav class="panel klist" aria-label="${t("Skills")}">
-${groups.map(
-  (g) =>
-    html`<h3>${g.title}${g.stacks ? html` <span class="hint">${g.stacks}</span>` : ""}</h3>${g.items.map(
+${groups.map((g) =>
+  navGroup(
+    g.title,
+    g.items.length,
+    openGroup(
+      groups.length,
+      g.items.some((x) => v !== undefined && key(x) === key(v)),
+    ),
+    html`${g.items.map(
       (s) =>
         html`<a class="kli${s.overridden ? " off" : ""}" href="/knowledge/skills?id=${encodeURIComponent(key(s))}"${v && key(v) === key(s) ? html` aria-current="page"` : ""}><span><code>${s.skill.id}</code><span class="hint">${s.skill.title ?? ""}</span></span><span class="kmeta">${s.origin === "source" || s.origin === "user" ? html`<span class="pill plain" title="${t(ORIGIN[s.origin][1])}">${t(ORIGIN[s.origin][0])}</span>` : ""}${s.overridden ? html`<span class="pill plain">${t("overridden")}</span>` : ""}${s.overrides ? html`<span class="pill info">${t("overrides built-in")}</span>` : ""}${s.usage ? html`<span class="meta">${plural(s.usage.runs, "run")}</span>` : ""}</span></a>`,
     )}`,
+    g.stacks,
+  ),
 )}
 </nav>
 ${
@@ -701,10 +754,24 @@ ${notice ?? ""}
 ${page.decided > 0 ? html`<a class="btn small${page.all ? " strong" : ""}" href="/knowledge/candidates${page.all ? "" : "?all=1"}">${page.all ? t("Open only") : t("With decided ({n})", { n: page.decided })}</a>` : ""}</div>
 <div class="kdoccols kstd">
 <nav class="panel klist" aria-label="${t("Candidates")}">
-${page.list.map(
-  (x) =>
-    html`<a class="kli${x.decision ? " off" : ""}" href="${candidateHref(x, page.all)}"${x.id === c?.id ? html` aria-current="page"` : ""}><span><code>${x.name}</code><span class="hint">${x.title}</span></span><span class="kmeta">${kindPill(x.kind)}${decisionPill(x.decision)}</span></a>`,
-)}
+${(() => {
+  const kinds = [...new Set(page.list.map((x) => x.kind))];
+  return kinds.map((k) => {
+    const items = page.list.filter((x) => x.kind === k);
+    return navGroup(
+      kindPill(k),
+      items.length,
+      openGroup(
+        kinds.length,
+        items.some((x) => x.id === c?.id),
+      ),
+      html`${items.map(
+        (x) =>
+          html`<a class="kli${x.decision ? " off" : ""}" href="${candidateHref(x, page.all)}"${x.id === c?.id ? html` aria-current="page"` : ""}><span><code>${x.name}</code><span class="hint">${x.title}</span></span><span class="kmeta">${decisionPill(x.decision)}</span></a>`,
+      )}`,
+    );
+  });
+})()}
 ${page.list.length === 0 ? html`<p class="empty">${t("Nothing waits: review and runs propose candidates as they find things; you can propose one on the Overview.")}</p>` : ""}
 </nav>
 ${
