@@ -128,6 +128,14 @@ describe("profiles", () => {
     expect(filterBySchema({ id: "42", n: " 7 ", key: "12" }, schema)).toEqual({ id: 42, n: 7, key: "12" });
     expect(filterBySchema({ id: "PR-1" }, schema)).toEqual({ id: "PR-1" });
   });
+
+  it('filterBySchema says a list the way the tool takes it (pilot: fields "*all" refused as not an array)', () => {
+    const arrays = { properties: { fields: { type: "array", items: { type: "string" } } } };
+    expect(filterBySchema({ fields: "*all" }, arrays)).toEqual({ fields: ["*all"] });
+    expect(filterBySchema({ fields: "summary, status" }, arrays)).toEqual({ fields: ["summary", "status"] });
+    const text = { properties: { fields: { type: "string" } } };
+    expect(filterBySchema({ fields: ["summary", "status"] }, text)).toEqual({ fields: "summary,status" });
+  });
 });
 
 describe("Bitbucket Server (@nexus2520/bitbucket-mcp-server)", () => {

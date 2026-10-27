@@ -110,6 +110,19 @@ describe("the Story's Jira tasks for a task across services", () => {
     expect(storyTasksText(doc as never)).toContain("- ABC-17 (Front Task) — front: Remove the banner");
   });
 
+  it("a server that refuses the fields as asked is asked again without them (pilot: Expected array)", async () => {
+    const asked: Array<Record<string, unknown>> = [];
+    const doc = await readStoryTasks(runtime, master.task, async (_name, args) => {
+      asked.push(args);
+      return args.fields
+        ? { ok: false, text: "Input validation error: Expected array, received string at fields" }
+        : { ok: true, text: JSON.stringify(STORY) };
+    });
+    expect(doc?.story).toBe("ABC-21");
+    expect(asked[0]).toEqual({ key: expect.any(String), fields: "*all" });
+    expect(asked[1]).toEqual({ key: expect.any(String) });
+  });
+
   it("each subtask its task: as the split named it, else by its service's side; the key first in its run's task", async () => {
     const doc = await readStoryTasks(runtime, master.task, async () => ({
       ok: true,

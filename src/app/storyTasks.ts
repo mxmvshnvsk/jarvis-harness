@@ -27,6 +27,17 @@ export interface StoryTasksDoc {
 
 type Invoke = (name: string, args: Record<string, unknown>) => Promise<{ ok: boolean; text: string }>;
 
+/**
+ * An issue with all its fields (its links among them); a server that refuses the fields as asked is
+ * asked again without them. Pilot: a Data Center server refused `fields: "*all"` and the Story was
+ * never read — its tasks, their keys and the Story's branch were lost to the subtasks without a word.
+ */
+async function whole(invoke: Invoke, key: string): Promise<{ ok: boolean; text: string } | undefined> {
+  const all = await invoke("jira.get", { key, fields: "*all" }).catch(() => undefined);
+  if (all?.ok) return all;
+  return invoke("jira.get", { key }).catch(() => undefined);
+}
+
 /** The Story of the task (itself, or the one it is in) and the Story's tasks with their sides. */
 export async function readStoryTasks(
   runtime: Runtime,
@@ -36,7 +47,7 @@ export async function readStoryTasks(
   const cfg = runtime.loaded.config.relatedWork;
   const key = task.match(/\b[A-Z][A-Z0-9]+-\d+\b/)?.[0];
   if (!key) return undefined;
-  const got = await invoke("jira.get", { key, fields: "*all" }).catch(() => undefined);
+  const got = await whole(invoke, key);
   if (!got?.ok) return undefined;
   const isStory = cfg.story.types.some(
     (t) => t.toLowerCase() === (issueFacts(got.text).type ?? "").toLowerCase(),
@@ -45,7 +56,7 @@ export async function readStoryTasks(
   if (!story) return undefined;
   let text = got.text;
   if (!isStory) {
-    const s = await invoke("jira.get", { key: story, fields: "*all" }).catch(() => undefined);
+    const s = await whole(invoke, story);
     if (!s?.ok) return undefined;
     text = s.text;
   }

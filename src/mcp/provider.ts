@@ -411,7 +411,7 @@ export function filterBySchema(
   );
 }
 
-/** A model often sends "42" where the tool declares a number: convert a numeric string, leave the rest. */
+/** A model often sends "42" where the tool declares a number, a list as text: as the tool takes it; the rest as is. */
 function coerce(value: unknown, prop: unknown): unknown {
   const type = (prop as { type?: unknown } | undefined)?.type;
   if (
@@ -421,6 +421,16 @@ function coerce(value: unknown, prop: unknown): unknown {
   ) {
     return Number(value);
   }
+  // a list said as text ("*all", "summary,status") where the tool takes an array, and the other way:
+  // pilot — the Data Center Jira server refused `fields: "*all"` (Expected array), and a Story's tasks
+  // were never read: the subtasks got no Jira keys and no Story branch
+  if (type === "array" && typeof value === "string")
+    return value
+      .split(",")
+      .map((x) => x.trim())
+      .filter(Boolean);
+  if (type === "string" && Array.isArray(value) && value.every((x) => typeof x === "string"))
+    return value.join(",");
   return value;
 }
 
