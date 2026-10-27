@@ -564,17 +564,72 @@ function whenShort(iso: string, now: number): string {
  * a step (src/app/restart.ts) — offered, not picked: the new task starts from the beginning otherwise.
  */
 export function restartHintHtml(run: Run, plan: RestartPlan, actions: Actions): Html {
-  const short = shortRunId(run.id);
-  const kept = plan.steps.slice(
-    0,
-    plan.steps.findIndex((s) => s.id === plan.startAt),
-  );
-  const approved = kept.filter((s) => s.approved && s.kind !== "approval").map((s) => s.id);
-  const gates = kept.filter((s) => s.kind === "approval" && s.approved).length;
-  const what = kept
-    .filter((s) => s.kind !== "approval")
-    .map((s) => (approved.includes(s.id) ? `${s.id} (${t("approved")})` : s.id));
-  return html`<div class="banner info"><b>${run.state === "FAILED" ? t("A failed {workflow} of this task", { workflow: run.workflow }) : t("A cancelled {workflow} of this task", { workflow: run.workflow })}</b> (<a href="/runs/${short}">${short}</a>${run.currentStep ? `, ${t("stopped at {step}", { step: run.currentStep })}` : ""}) ${th("can start again from {step}: {kept} go in", { step: html`<b>${plan.startAt}</b>`, kept: what.join(", ") })}${gates > 0 ? `, ${t("{n} kept", { n: plural(gates, "approval") })}` : ""}. ${form(actions, `/runs/${short}/restart`, html`<input type="hidden" name="step" value="${plan.startAt}"><button type="submit" class="btn">${t("Start again from {step}", { step: plan.startAt })}</button>`, ' style="display:inline"')}</div>`;
+  return restartChoiceHtml([{ run, plan }], actions);
+}
+
+/** A run of the same task that ran here before, and what a new one may take on of it. */
+export interface EarlierRun {
+  readonly run: Run;
+  /** None: nothing it did can be taken on (it stopped at its first step, or wrote code first). */
+  readonly plan?: RestartPlan;
+}
+
+/** The step to start from by default: right after the last approval, past any gate. */
+function recommendedOf(plan: RestartPlan): string | undefined {
+  const at = plan.steps.findIndex((s) => s.id === plan.startAt);
+  return plan.steps.slice(Math.max(at, 0)).find((s) => s.startable && s.kind !== "approval")?.id;
+}
+
+const STEP_ICON = (s: RestartPlan["steps"][number], run: Run) =>
+  s.approved ? "✓✓" : s.done ? "✓" : run.currentStep === s.id ? "■" : "·";
+
+/**
+ * Under "New task": the earlier runs of the same task here, the newest open — each with its steps and
+ * the ones a new run may start from (as «Start again from» on the run's page; a gate is not a start: the
+ * step before it is). Part of the New task form: «From a step of an earlier run» and a step make the
+ * button start there (`jarvis restart <run> --from <step>`).
+ */
+export function restartChoiceHtml(earlier: readonly EarlierRun[], _actions?: Actions): Html {
+  const withPlan = earlier.filter((e) => e.plan);
+  // nothing any of them did can be taken on: the task simply starts, nothing to say
+  if (withPlan.length === 0) return html``;
+  const first = withPlan[0];
+  const runHtml = (e: EarlierRun, i: number) => {
+    const r = e.run;
+    const short = shortRunId(r.id);
+    const plan = e.plan;
+    const rec = plan ? recommendedOf(plan) : undefined;
+    const choices = plan ? plan.steps.filter((s, k) => k > 0 && s.startable && s.kind !== "approval") : [];
+    const state = r.state === "FAILED" ? t("failed") : r.state === "COMPLETED" ? t("done") : t("cancelled");
+    return html`<details class="erun"${i === 0 ? " open" : ""}>
+<summary><span class="edot ${r.state.toLowerCase()}" aria-hidden="true"></span><a href="/runs/${short}"><b>${short}</b></a> <span class="muted">${state}${r.currentStep && r.state !== "COMPLETED" ? html` ${t("at")} <b>${r.currentStep}</b>` : ""} · ${wallClock(r.updatedAt).slice(0, 5)} ${r.updatedAt.slice(0, 10)}</span>${rec ? html`<span class="pill info">${t("can start from {step}", { step: rec })}</span>` : html`<span class="pill plain">${t("nothing to take on")}</span>`}<span class="car" aria-hidden="true">▾</span></summary>
+${plan ? html`<ol class="esteps">${plan.steps.map((s) => html`<li class="${s.approved ? "approved" : s.done ? "done" : r.currentStep === s.id ? "stopped" : "none"}${s.kind === "approval" ? " gate" : ""}"><span aria-hidden="true">${STEP_ICON(s, r)}</span>${s.id}</li>`)}</ol>` : ""}
+${
+  choices.length > 0 && plan
+    ? html`<fieldset class="choose echoose"><legend>${t("Start this task from")}</legend>${choices.map(
+        (s) => {
+          const before = plan.steps.slice(0, plan.steps.indexOf(s)).filter((k) => k.kind !== "approval");
+          const approved = before.filter((k) => k.approved).map((k) => k.id);
+          const why = before.some((k) => k.approved)
+            ? t("right after the last approval")
+            : t("where it stopped");
+          return html`<label class="eopt${s.id === rec ? " rec" : ""}"><input type="radio" name="restart" value="${short}:${s.id}" data-step="${s.id}"${e === first && s.id === rec ? " checked" : ""}><span><b>${s.id}</b> <span class="muted">— ${before.map((k) => k.id).join(", ")} ${t("go in")}${approved.length > 0 ? ` (${approved.join(", ")} ${t("approved")})` : ""}</span></span>${s.id === rec ? html`<span class="hint">${why}</span>` : ""}</label>`;
+        },
+      )}</fieldset>`
+    : html`<p class="hint">${t("Nothing it did can be taken on: the task runs from the start.")}</p>`
+}
+</details>`;
+  };
+  return html`<div class="from earlier" data-earlier data-go-label="${t("Start from {step}")}">
+<b>${t("This task ran here before")} · ${plural(earlier.length, "run")}</b>
+${
+  first
+    ? html`<div class="emode" role="radiogroup"><label><input type="radio" name="from-mode" value="start"> ${t("From the start")}</label><label><input type="radio" name="from-mode" value="step" checked> ${t("From a step of an earlier run")}</label></div>`
+    : ""
+}
+${earlier.map(runHtml)}
+${first ? html`<label class="muted enote"><span>${t("For the first step: what to do differently")} <span class="hint">(${t("optional")})</span></span><textarea name="restart-note" rows="2" maxlength="4000"></textarea></label><p class="hint">${t("A new run in a fresh checkout of the current code: what was done before the step goes in with its approvals and does not run again.")}</p>` : ""}
+</div>`;
 }
 
 /**

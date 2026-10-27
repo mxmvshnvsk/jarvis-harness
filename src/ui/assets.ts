@@ -642,6 +642,12 @@ form.clarify>.actions{margin:4px 0}
 .addnote[open]>form{display:flex;flex-direction:column;gap:8px;margin-top:8px}
 .addnote textarea{padding:8px 10px;border-radius:6px;resize:vertical;min-height:64px}
 .startfrom:empty{display:none}
+.earlier{gap:10px}.emode{display:flex;gap:8px;flex-wrap:wrap}.emode label{display:flex;gap:6px;align-items:center;border:1px solid var(--line);border-radius:8px;padding:6px 10px;cursor:pointer;font-size:14px}.emode label:has(input:checked){border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
+.erun{border-top:1px solid var(--line-soft);padding-top:8px}.erun>summary{display:flex;gap:8px;align-items:center;flex-wrap:wrap;cursor:pointer;list-style:none}.erun>summary::-webkit-details-marker{display:none}.erun>summary .car{margin-left:auto;color:var(--muted)}
+.edot{width:9px;height:9px;border-radius:50%;background:var(--wait);flex:none}.edot.failed{background:var(--bad)}.edot.completed{background:var(--ok-ink)}
+.esteps{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 4px;padding:0;list-style:none}.esteps li{display:flex;gap:5px;align-items:center;font:12px/1 var(--mono);padding:5px 8px;border-radius:7px;background:var(--chip);color:var(--ink-2)}.esteps li.approved{background:var(--ok-bg);color:var(--ok-ink)}.esteps li.stopped{background:var(--wait-bg);color:var(--wait)}.esteps li.none{opacity:.5}.esteps li.gate{border-radius:999px}
+.echoose{display:flex;flex-direction:column;gap:4px;border:0;padding:0;margin:0}.echoose legend{font-size:13px;color:var(--muted);margin-bottom:4px}.eopt{display:flex;gap:8px;align-items:flex-start;padding:6px 8px;border-radius:8px;cursor:pointer;font-size:14px;line-height:20px;overflow-wrap:anywhere}.eopt input{margin-top:3px;flex:none}.eopt.rec{background:var(--accent-soft)}.eopt .hint{margin-left:auto;white-space:nowrap;padding-left:8px}@media (max-width:760px){.eopt{flex-wrap:wrap}.eopt .hint{margin-left:24px;white-space:normal;padding-left:0}}
+.enote{display:flex;flex-direction:column;gap:4px;font-size:14px}.enote textarea{padding:8px 10px;border-radius:6px;resize:vertical}
 .from{border:1px solid var(--line);border-radius:8px;padding:12px 14px;display:flex;flex-direction:column;gap:6px;background:var(--ground)}
 .from .check{margin:0}
 .from .sub{margin:0 0 0 22px;font-size:13px;line-height:19px}

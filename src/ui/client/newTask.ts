@@ -76,6 +76,20 @@ export function initNewTask(): void {
     if (why && whyEl) whyEl.textContent = `— ${decodeURIComponent(why)}`;
   };
 
+  // «From a step of an earlier run»: the button says where the new run starts
+  const go = form.querySelector<HTMLButtonElement>("[data-go]");
+  const goText = go?.textContent ?? "";
+  const goLabel = () => {
+    if (!go) return;
+    const earlier = form.querySelector<HTMLElement>("[data-earlier]");
+    const mode = radios("from-mode").find((r) => r.checked)?.value;
+    const step = radios("restart").find((r) => r.checked)?.dataset.step;
+    go.textContent =
+      earlier && mode === "step" && step
+        ? (earlier.dataset.goLabel ?? "{step}").replace("{step}", step)
+        : goText;
+  };
+
   let timer: ReturnType<typeof setTimeout> | undefined;
   let asked = "";
   const look = () => {
@@ -97,6 +111,7 @@ export function initNewTask(): void {
       })
       .then((text) => {
         if (asked === q && startFrom) startFrom.innerHTML = text;
+        goLabel();
       })
       .catch(() => {});
   };
@@ -144,7 +159,14 @@ export function initNewTask(): void {
     if (!t) return;
     // arrows move the choice and keep the list open; a click or Enter closes it
     if (t.name === "repo") choosePlace(t, false);
-    else if (t.name === "workflow" || t.name === "kind") {
+    else if (t.name === "restart" || t.name === "from-mode") {
+      // a step picked: the start is that step; «From the start» unpicks nothing, it only switches
+      if (t.name === "restart") {
+        const step = radios("from-mode").find((r) => r.value === "step");
+        if (step) step.checked = true;
+      }
+      goLabel();
+    } else if (t.name === "workflow" || t.name === "kind") {
       sync();
       look();
     }

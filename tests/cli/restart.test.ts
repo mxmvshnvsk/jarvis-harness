@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { Writable } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createEngine } from "../../src/app/engine.ts";
@@ -6,8 +8,10 @@ import { mainCourse, writesCode } from "../../src/app/restart.ts";
 import { createRuntime } from "../../src/app/runtime.ts";
 import { run } from "../../src/cli/main.ts";
 import { loadConfig } from "../../src/core/config/load.ts";
+import type { Launcher } from "../../src/ui/launcher.ts";
 import { runPage } from "../../src/ui/model.ts";
-import { restartHintHtml, runContent } from "../../src/ui/pages.ts";
+import { restartChoiceHtml, runContent } from "../../src/ui/pages.ts";
+import { startUiServer } from "../../src/ui/server.ts";
 import { loadWorkflows } from "../../src/workflows/load.ts";
 import { type Sandbox, sandbox } from "../helpers/tmp.ts";
 
@@ -151,13 +155,25 @@ describe("jarvis restart", () => {
       expect(html).toContain('<input type="radio" name="step" value="impact" checked>');
       expect(html).toContain('name="note"');
       expect(html).toContain("— research, spec go in (spec approved)");
-      // New task for the same issue: offered, not picked
+      // New task for the same issue: its earlier runs, the newest open; a gate is no start
       const hint = String(
-        restartHintHtml(cancelled, page.restart as NonNullable<typeof page.restart>, { token: "t" }),
+        restartChoiceHtml([{ run: cancelled, plan: page.restart as NonNullable<typeof page.restart> }]),
       );
-      expect(hint).toContain(
-        "can start again from <b>impact</b>: research, spec (approved) go in, 1 approval kept",
-      );
+      expect(hint).toContain("This task ran here before");
+      expect(hint).toContain(`value="${cancelled.id.slice(4, 12)}:impact" data-step="impact" checked`);
+      expect(hint).toContain("— research, spec go in (spec approved)");
+      expect(hint).not.toContain(':approve-spec"');
+      expect(hint).toContain('name="from-mode" value="step" checked');
+      // none to take anything on from: nothing is said; beside one that has, it says so
+      expect(String(restartChoiceHtml([{ run: cancelled }]))).toBe("");
+      expect(
+        String(
+          restartChoiceHtml([
+            { run: cancelled, plan: page.restart as NonNullable<typeof page.restart> },
+            { run: cancelled },
+          ]),
+        ),
+      ).toContain("nothing to take on");
     } finally {
       rt.close();
     }
@@ -268,6 +284,83 @@ describe("jarvis redo", () => {
         "one restart only",
       ]);
     } finally {
+      rt.close();
+    }
+  });
+
+  it("New task: a step of an earlier run of the same task starts it there (a gate is no start)", async () => {
+    // the same steps as the page's Specification: a project's spec.yaml stands for the built-in one
+    sb.write(
+      "project/.jarvis/workflows/spec.yaml",
+      readFileSync(join(sb.project, ".jarvis", "workflows", "staged.yaml"), "utf8").replace(
+        "name: staged",
+        "name: spec",
+      ),
+    );
+    const first = await jarvis(["work", "ABC-42", "--workflow", "spec"]);
+    expect(first.code).toBe(10);
+    const id = ((await runs())[0]?.run.id ?? "").slice(4, 12);
+    expect((await jarvis(["approve", id, "--resume"])).code).toBe(10);
+    expect((await jarvis(["cancel", id])).code).toBe(0);
+    const loaded = await loadConfig({ cwd: sb.project, homeDir: sb.home, env: {} });
+    const rt = createRuntime(loaded, { env: {} });
+    const asked: Array<{ run: string; step: string; note?: string }> = [];
+    const launcher = {
+      restartRun: (from: { id: string }, step: string, note?: string) => {
+        asked.push({ run: from.id, step, ...(note ? { note } : {}) });
+        return { id: "l1" };
+      },
+      list: () => [],
+      tend: () => {},
+      drives: () => false,
+    } as unknown as Launcher;
+    const ui = await startUiServer({
+      runtime: rt,
+      engine: createEngine(rt),
+      port: 0,
+      homeDir: sb.home,
+      projectRoot: sb.project,
+      pollMs: 30,
+      mcpCheckEveryMs: 0,
+      actor: async () => ({ kind: "user" as const, id: "me@corp", verified: false }),
+      launcher,
+    });
+    try {
+      const cookie = `jarvis_ui_${ui.port}=${encodeURIComponent(ui.token)}`;
+      const box = await (
+        await fetch(
+          `http://127.0.0.1:${ui.port}/runs/from?${new URLSearchParams({ task: "ABC-42", workflow: "spec", repo: sb.project })}`,
+          { headers: { cookie } },
+        )
+      ).text();
+      expect(box).toContain("This task ran here before");
+      expect(box).toContain(`value="${id}:impact" data-step="impact" checked`);
+      expect(box).not.toContain(`value="${id}:approve-spec"`);
+      const post = (fields: Record<string, string>) =>
+        fetch(`http://127.0.0.1:${ui.port}/runs/new`, {
+          method: "POST",
+          redirect: "manual",
+          headers: {
+            cookie,
+            origin: `http://127.0.0.1:${ui.port}`,
+            "content-type": "application/x-www-form-urlencoded",
+          },
+          body: new URLSearchParams({
+            t: ui.token,
+            task: "ABC-42",
+            workflow: "spec",
+            repo: sb.project,
+            ...fields,
+          }),
+        });
+      const gate = await post({ "from-mode": "step", restart: `${id}:approve-spec` });
+      expect(gate.status, await gate.clone().text()).toBe(303);
+      expect(gate.headers.get("location")).toContain("notice=cannot-continue");
+      const ok = await post({ "from-mode": "step", restart: `${id}:impact`, "restart-note": "smaller" });
+      expect(ok.headers.get("location")).toBe("/launches/l1");
+      expect(asked).toEqual([{ run: expect.stringContaining(id), step: "impact", note: "smaller" }]);
+    } finally {
+      await ui.close();
       rt.close();
     }
   });

@@ -632,6 +632,24 @@ export const RU: Readonly<Record<string, string>> = {
   "not in the code": "в коде нет",
   "Check in the code": "Проверить по коду",
   "Add anyway": "Всё равно добавить",
+  "This task ran here before": "Эта задача уже запускалась здесь",
+  "From the start": "С начала",
+  "From a step of an earlier run": "С шага прошлого прогона",
+  "can start from {step}": "можно начать с {step}",
+  "nothing to take on": "нечего взять",
+  "Start this task from": "Начать задачу с",
+  "go in": "войдут",
+  "right after the last approval": "сразу после последнего одобрения",
+  "where it stopped": "где он остановился",
+  "Nothing it did can be taken on: the task runs from the start.":
+    "Из сделанного ничего не взять: задача пойдёт с начала.",
+  "For the first step: what to do differently": "Для первого шага: что сделать иначе",
+  "A new run in a fresh checkout of the current code: what was done before the step goes in with its approvals and does not run again.":
+    "Новый прогон в свежей копии текущего кода: сделанное до шага войдёт вместе с одобрениями и заново не пойдёт.",
+  "Start from {step}": "Начать с {step}",
+  done: "завершён",
+  cancelled: "отменён",
+  at: "на",
   "shared glossary": "общий глоссарий",
   "goes to the glossary you pick as a draft; agents use it from the next run":
     "попадёт в выбранный глоссарий черновиком; агенты используют его со следующего запуска",
@@ -935,12 +953,6 @@ export const RU: Readonly<Record<string, string>> = {
   "model {model} is a cloud model, allowed by an exception: {reason}":
     "модель {model} облачная, разрешена в порядке исключения: {reason}",
   approved: "одобрено",
-  "A failed {workflow} of this task": "Упавший {workflow} этой задачи",
-  "A cancelled {workflow} of this task": "Отменённый {workflow} этой задачи",
-  "stopped at {step}": "остановился на {step}",
-  "can start again from {step}: {kept} go in": "можно перезапустить с {step}: {kept} переносятся",
-  "{n} kept": "{n} сохраняются",
-  "Start again from {step}": "Перезапустить с {step}",
   "No finished research of {key} in this repository — {workflow} runs from the start.":
     "Законченного research по {key} в этом репозитории нет — {workflow} пойдёт с начала.",
   "No finished research of this task in this repository — {workflow} runs from the start.":

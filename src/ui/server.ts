@@ -184,6 +184,7 @@ import {
   type ArtifactExtras,
   artifactContent,
   type Chrome,
+  type EarlierRun,
   errorContent,
   forbiddenPage,
   launchContent,
@@ -196,7 +197,7 @@ import {
   modelsPopover,
   modelsSummary,
   repoPicker,
-  restartHintHtml,
+  restartChoiceHtml,
   runContent,
   runsContent,
   startFromHtml,
@@ -1902,34 +1903,34 @@ ${candidateReviewHtml(c, run, run.workspace.repoRoot, actions, { back: `/runs/${
    */
   const restartHintOf = (task: string, workflow: string, repo: string): Html | string => {
     if (!actions || !options.launcher || !task.trim()) return "";
-    const restarted = new Set(
-      runtime.events
-        .list({ kind: "run.created", limit: 100_000 })
-        .map((e) => (e.payload as { restartOf?: string } | undefined)?.restartOf)
-        .filter((x): x is string => typeof x === "string"),
-    );
-    const stopped = runtime.runs
-      .list({ state: ["CANCELLED", "FAILED"], limit: 200 })
+    return restartChoiceHtml(earlierRunsOf(task, workflow, repo), actions);
+  };
+
+  /** The runs of the same task and workflow here that do not run any more, newest first (a few). */
+  const earlierRunsOf = (task: string, workflow: string, repo: string): EarlierRun[] => {
+    const def = (() => {
+      try {
+        return engine.workflow(workflow);
+      } catch {
+        return undefined;
+      }
+    })();
+    if (!def) return [];
+    return runtime.runs
+      .list({ state: ["CANCELLED", "FAILED", "COMPLETED"], limit: 300 })
       .filter(
         (r) =>
           r.workspace.repoRoot === repo &&
           r.workflow === workflow &&
           !r.options?.parent &&
-          !restarted.has(r.id) &&
           sameTask(task, r.task),
       )
-      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-    for (const r of stopped) {
-      let def: ReturnType<typeof engine.workflow> | undefined;
-      try {
-        def = engine.workflow(r.workflow);
-      } catch {
-        def = undefined;
-      }
-      const plan = def ? restartPlanOf(runtime, r, def) : undefined;
-      if (plan) return restartHintHtml(r, plan, actions);
-    }
-    return "";
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+      .slice(0, 5)
+      .map((r) => {
+        const plan = restartPlanOf(runtime, r, def);
+        return plan ? { run: r, plan } : { run: r };
+      });
   };
 
   /** `GET /runs/from?task=&workflow=&repo=`: the box under "New task" (src/app/continuation.ts). */
@@ -2027,6 +2028,34 @@ ${candidateReviewHtml(c, run, run.workspace.repoRoot, actions, { back: `/runs/${
     if (!task || !workflow) return redirect(r, "/?notice=no-task#new");
     if (!knownRepos().includes(repo) || !existsSync(repo)) return redirect(r, "/?notice=no-repo#new");
     if (!inKnowledge && workflow === "sdd-cross") return redirect(r, "/?notice=cross-elsewhere#new");
+    // «From a step of an earlier run»: that run started again from the step (`jarvis restart --from`)
+    const restartRef = form.get("restart");
+    if (form.get("from-mode") === "step" && restartRef) {
+      const [ref, step] = restartRef.split(":");
+      const earlier = ref ? resolveRun(ref) : undefined;
+      const def = earlier
+        ? (() => {
+            try {
+              return engine.workflow(earlier.workflow);
+            } catch {
+              return undefined;
+            }
+          })()
+        : undefined;
+      const plan =
+        earlier && def && !earlier.options?.parent ? restartPlanOf(runtime, earlier, def) : undefined;
+      const ok =
+        earlier &&
+        earlier.workflow === workflow &&
+        earlier.workspace.repoRoot === repo &&
+        ["CANCELLED", "FAILED", "COMPLETED"].includes(earlier.state) &&
+        plan?.steps.some((s) => s.id === step && s.startable && s.kind !== "approval");
+      if (!ok || !earlier || !step) return redirect(r, "/?notice=cannot-continue#new");
+      return redirect(
+        r,
+        `/launches/${launcher.restartRun(earlier, step, (form.get("restart-note") ?? "").trim().slice(0, 4000)).id}`,
+      );
+    }
     const fromRef = form.get("from");
     if (fromRef) {
       // started from a finished research (the box under the form): `jarvis continue <run>`
