@@ -237,7 +237,8 @@ export interface DocsPage {
 }
 
 function docGroups(docs: readonly DocView[]): Array<{ title: string; docs: DocView[] }> {
-  const own = docs.filter((d) => !d.source);
+  const services = [...new Set(docs.flatMap((d) => (d.service ? [d.service] : [])))].sort();
+  const own = docs.filter((d) => !d.source && !d.service);
   const arch = own.filter((d) =>
     d.tags.some((t) => t === "architecture" || t === "module" || t === "conventions"),
   );
@@ -246,8 +247,16 @@ function docGroups(docs: readonly DocView[]): Array<{ title: string; docs: DocVi
     { title: t("Architecture and modules"), docs: arch },
     { title: t("Project"), docs: rest },
     { title: "documentation/ · read-only", docs: docs.filter((d) => d.source) },
+    // the knowledge repository itself: each service's documents under its name
+    ...services.map((name) => ({ title: name, docs: docs.filter((d) => d.service === name) })),
   ].filter((g) => g.docs.length > 0);
 }
+
+/** A document's name in a list: its path without the folder the group already says. */
+const docLabel = (x: DocView) =>
+  x.service
+    ? x.path.replace(new RegExp(`^.*?services/${x.service.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/`), "")
+    : x.path.replace(/^\.jarvis\/knowledge\//, "").replace(/^documentation\//, "");
 
 export function docsContent(page: DocsPage, actions?: Actions, notice?: Html): Html {
   const d = page.selected;
@@ -260,7 +269,7 @@ ${docGroups(page.docs).map(
   (g) =>
     html`<h3>${g.title}</h3><ul>${g.docs.map(
       (x) =>
-        html`<li><a href="${docHref(x.path)}"${x.path === d?.path ? html` aria-current="page"` : ""}><span>${x.path.replace(/^\.jarvis\/knowledge\//, "").replace(/^documentation\//, "")}</span>${x.staleCommits ? html`<span class="pill wait">${t("stale")}</span>` : x.generated ? html`<span class="pill plain">${t("gen")}</span>` : ""}</a></li>`,
+        html`<li><a href="${docHref(x.path)}"${x.path === d?.path ? html` aria-current="page"` : ""}><span>${docLabel(x)}</span>${x.staleCommits ? html`<span class="pill wait">${t("stale")}</span>` : x.generated ? html`<span class="pill plain">${t("gen")}</span>` : ""}</a></li>`,
     )}</ul>`,
 )}
 </nav>
@@ -285,6 +294,29 @@ ${d.staleCommits ? html`<section class="panel kbox warn"><h2>${t("May be stale")
 
 /* ---- standards ---- */
 
+/**
+ * Standards and skills by stack (pilot: a knowledge repository's backend and frontend rules in one
+ * list): by the folder they lie in (`java/`, `frontend/`), else by the stacks they name, else for every
+ * stack; the stacks a group is for beside its name.
+ */
+export function byStack<T>(
+  items: readonly T[],
+  of: (x: T) => { group?: string | undefined; stacks: readonly string[] },
+): Array<{ title: string; stacks?: string; items: T[] }> {
+  const groups = new Map<string, { title: string; stacks?: string; items: T[] }>();
+  for (const x of items) {
+    const { group, stacks } = of(x);
+    const folder = group?.split("/")[0];
+    const named = stacks.length > 0 ? stacks.join(", ") : undefined;
+    const key = folder ? `1${folder}` : named ? `2${named}` : "3";
+    const title = folder ? `${folder}/` : (named ?? t("Every stack"));
+    const g = groups.get(key) ?? { title, ...(folder && named ? { stacks: named } : {}), items: [] };
+    g.items.push(x);
+    groups.set(key, g);
+  }
+  return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([, g]) => g);
+}
+
 export interface StandardsPage {
   readonly counts: KnowledgeCounts;
   readonly standards: readonly StandardView[];
@@ -306,9 +338,12 @@ ${notice ?? ""}
 ${filter(undefined, `All ${page.standards.length}`)}${filter("required", `Required ${page.standards.filter((x) => x.severity === "required").length}`)}${filter("recommended", `Recommended ${page.standards.filter((x) => x.severity === "recommended").length}`)}</div>
 <div class="kdoccols kstd">
 <nav class="panel klist" aria-label="${t("Standards")}">
-${list.map(
-  (x) =>
-    html`<a class="kli" href="/knowledge/standards?id=${encodeURIComponent(x.id)}${page.severity ? `&severity=${page.severity}` : ""}"${x.id === s?.id ? html` aria-current="page"` : ""}><span><code>${x.id}</code><span class="hint">${x.title}</span></span><span class="kmeta">${sevPill(x.severity)}<span class="meta">${x.verification.kind}</span>${x.findings.length > 0 ? html`<span class="meta">${t("{n} found", { n: x.findings.length })}</span>` : ""}</span></a>`,
+${byStack(list, (x) => ({ group: x.group, stacks: x.scope.stacks })).map(
+  (g) =>
+    html`<h3>${g.title}${g.stacks ? html` <span class="hint">${g.stacks}</span>` : ""} <span class="hint">${String(g.items.length)}</span></h3>${g.items.map(
+      (x) =>
+        html`<a class="kli" href="/knowledge/standards?id=${encodeURIComponent(x.id)}${page.severity ? `&severity=${page.severity}` : ""}"${x.id === s?.id ? html` aria-current="page"` : ""}><span><code>${x.id}</code><span class="hint">${x.title}</span></span><span class="kmeta">${sevPill(x.severity)}<span class="meta">${x.verification.kind}</span>${x.findings.length > 0 ? html`<span class="meta">${t("{n} found", { n: x.findings.length })}</span>` : ""}</span></a>`,
+    )}`,
 )}
 ${list.length === 0 ? html`<p class="empty">${th("No standards here: {dir} is empty.", { dir: html`<code>.jarvis/standards/</code>` })}</p>` : ""}
 </nav>
@@ -359,9 +394,18 @@ const ORIGIN: Record<SkillView["origin"], [string, string]> = {
 
 export function skillsContent(page: SkillsPage, actions?: Actions, notice?: Html): Html {
   const v = page.selected;
-  const groups = (["project", "source", "user", "builtin"] as const)
-    .map((o) => ({ o, list: page.skills.filter((s) => s.origin === o) }))
-    .filter((g) => g.list.length > 0);
+  // by stack, as the folders say; the built-ins apart
+  const groups = [
+    ...byStack(
+      page.skills.filter((x) => x.origin !== "builtin"),
+      (x) => ({ group: x.skill.group, stacks: x.skill.appliesTo.stacks }),
+    ),
+    {
+      title: t("Built-in"),
+      stacks: t("ship with jarvis; a project skill with the same id wins"),
+      items: page.skills.filter((x) => x.origin === "builtin"),
+    },
+  ].filter((g) => g.items.length > 0);
   const key = (s: SkillView) => `${s.skill.id}${s.overridden ? "@builtin" : ""}`;
   const k = v?.skill;
   return html`${knowledgeTabs("skills", page.counts)}
@@ -371,9 +415,9 @@ ${notice ?? ""}
 <nav class="panel klist" aria-label="${t("Skills")}">
 ${groups.map(
   (g) =>
-    html`<h3>${t(ORIGIN[g.o][0])} <span class="hint">${t(ORIGIN[g.o][1])}</span></h3>${g.list.map(
+    html`<h3>${g.title}${g.stacks ? html` <span class="hint">${g.stacks}</span>` : ""}</h3>${g.items.map(
       (s) =>
-        html`<a class="kli${s.overridden ? " off" : ""}" href="/knowledge/skills?id=${encodeURIComponent(key(s))}"${v && key(v) === key(s) ? html` aria-current="page"` : ""}><span><code>${s.skill.id}</code><span class="hint">${s.skill.title ?? ""}</span></span><span class="kmeta">${s.overridden ? html`<span class="pill plain">${t("overridden")}</span>` : ""}${s.overrides ? html`<span class="pill info">${t("overrides built-in")}</span>` : ""}${s.usage ? html`<span class="meta">${plural(s.usage.runs, "run")}</span>` : ""}</span></a>`,
+        html`<a class="kli${s.overridden ? " off" : ""}" href="/knowledge/skills?id=${encodeURIComponent(key(s))}"${v && key(v) === key(s) ? html` aria-current="page"` : ""}><span><code>${s.skill.id}</code><span class="hint">${s.skill.title ?? ""}</span></span><span class="kmeta">${s.origin === "source" || s.origin === "user" ? html`<span class="pill plain" title="${t(ORIGIN[s.origin][1])}">${t(ORIGIN[s.origin][0])}</span>` : ""}${s.overridden ? html`<span class="pill plain">${t("overridden")}</span>` : ""}${s.overrides ? html`<span class="pill info">${t("overrides built-in")}</span>` : ""}${s.usage ? html`<span class="meta">${plural(s.usage.runs, "run")}</span>` : ""}</span></a>`,
     )}`,
 )}
 </nav>

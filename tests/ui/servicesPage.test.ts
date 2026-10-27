@@ -64,6 +64,9 @@ beforeEach(async () => {
     "shop-knowledge/project.yaml",
     "version: 1\nservices:\n  orders-api:\n    kind: backend\n    tools:\n      local:\n        tests: ./gradlew test\n  notifications-worker: {}\n",
   );
+  sb.write("shop-knowledge/standards/backend/_scope.yaml", "stacks: [java]\n");
+  sb.write("shop-knowledge/standards/backend/be-01.md", "---\nid: be-01\ntitle: Backend rule\n---\nRule.\n");
+  sb.write("shop-knowledge/standards/any.md", "---\nid: any\ntitle: Any rule\n---\nRule.\n");
   sb.write(
     "shop-knowledge/knowledge/services/orders-api/architecture.md",
     "# orders-api\n\nTakes and tracks orders.\n\n## Modules\n",
@@ -115,8 +118,17 @@ describe("Services in jarvis ui", () => {
   it("the tab, the map and a service's page", async () => {
     const overview = await page("/knowledge");
     expect(overview.text).toContain('href="/knowledge/services">Services <span class="muted">2</span>');
-    // the services' documents are not the overview's: an empty table says where they are
-    expect(overview.text).toContain("documents are under Modules, by its folders");
+    // the knowledge repository lists its services' documents, each under its service
+    expect(overview.text).toContain('>Documents <span class="muted">1</span>');
+    const docs = await page("/knowledge/docs");
+    expect(docs.text).toContain("<h3>orders-api</h3>");
+    expect(docs.text).toContain("<span>architecture.md</span>");
+    // standards and skills by stack folder
+    const std = await page("/knowledge/standards");
+    expect(std.text).toMatch(
+      /<h3>backend\/ <span class="hint">java<\/span> <span class="hint">1<\/span><\/h3>/,
+    );
+    expect(std.text).toContain("<h3>Every stack");
     const map = await page("/knowledge/services");
     expect(map.status).toBe(200);
     // the top bar: Services of the map, current here; Knowledge not

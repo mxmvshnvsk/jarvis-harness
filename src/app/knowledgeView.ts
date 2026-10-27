@@ -113,6 +113,8 @@ export interface DocView {
   readonly staleCommits?: number;
   /** A map's code: the commit and branch it was made from (front matter). */
   readonly codeAt?: CodeAt;
+  /** In the knowledge repository itself: the service whose document it is. */
+  readonly service?: string;
   readonly usage?: Usage;
 }
 
@@ -142,24 +144,50 @@ function sectionsOf(body: string): DocView["sections"] {
   return splitSections(body).map((s) => ({ heading: s.heading ?? "(top)", chars: s.body.length }));
 }
 
+/** The knowledge repository itself: how many documents its services have (the tab's count). */
+export function serviceDocCount(roots: KnowledgeRoots): number {
+  const root = roots.projectRoot;
+  const meta = root ? layoutOf(root).meta : undefined;
+  if (!meta || meta.service) return 0;
+  const services = join(meta.knowledgeRoot, "services");
+  if (!existsSync(services)) return 0;
+  return readdirSync(services)
+    .filter((n) => statSync(join(services, n)).isDirectory())
+    .reduce((sum, n) => sum + knowledgeFilesIn(join(services, n)).length, 0);
+}
+
 /** `.jarvis/knowledge/*.md` (not the glossary) and the `knowledge.sources` documents, skills aside. */
-export async function docsOf(roots: KnowledgeRoots, usage?: ReadonlyMap<string, Usage>): Promise<DocView[]> {
+export async function docsOf(
+  roots: KnowledgeRoots,
+  usage?: ReadonlyMap<string, Usage>,
+  /** The knowledge repository itself: its services' repositories, to list their documents too. */
+  serviceRepos?: Readonly<Record<string, string>>,
+): Promise<DocView[]> {
   const root = roots.projectRoot;
   if (!root) return [];
   const out: Array<Omit<DocView, "edited" | "staleCommits">> = [];
   const layout = layoutOf(root);
   // a service's documents and, in a knowledge repository, the shared ones (ADR-0025 §4)
-  const dirs: Array<readonly [string, string]> = [[layout.knowledgeDir, ""]];
+  const dirs: Array<readonly [string, string, string?]> = [[layout.knowledgeDir, ""]];
   if (layout.meta?.service) dirs.push([layout.meta.knowledgeRoot, SHARED_KNOWLEDGE_PREFIX]);
-  const files = dirs.flatMap(([dir, prefix]) =>
+  // the knowledge repository itself: every service's documents, each under its name (pilot: the tab
+  // said 0 in a repository of 38 services' documents)
+  if (layout.meta && !layout.meta.service) {
+    const services = join(layout.meta.knowledgeRoot, "services");
+    if (existsSync(services))
+      for (const name of readdirSync(services).sort())
+        if (statSync(join(services, name)).isDirectory()) dirs.push([join(services, name), "", name]);
+  }
+  const files = dirs.flatMap(([dir, prefix, service]) =>
     existsSync(dir)
       ? knowledgeFilesIn(dir, { skipServices: dir === layout.meta?.knowledgeRoot }).map((f) => ({
           file: join(dir, f),
           name: `${prefix}${f}`,
+          ...(service ? { service } : {}),
         }))
       : [],
   );
-  for (const { file, name } of files) {
+  for (const { file, name, service } of files as Array<{ file: string; name: string; service?: string }>) {
     const raw = readFileSync(file, "utf8");
     const { data, body } = parseFrontMatter(raw);
     const f = name;
@@ -176,6 +204,7 @@ export async function docsOf(roots: KnowledgeRoots, usage?: ReadonlyMap<string, 
       body: body.replace(/^<!--[\s\S]*?-->\n?/gm, "").trim(),
       sections: sectionsOf(body),
       ...(codeAtOf(raw) ? { codeAt: codeAtOf(raw) as CodeAt } : {}),
+      ...(service ? { service } : {}),
       ...(u ? { usage: u } : {}),
     });
   }
@@ -212,14 +241,19 @@ export async function docsOf(roots: KnowledgeRoots, usage?: ReadonlyMap<string, 
     if (!facts) {
       facts = (async () => {
         const last = await lastCommit(at.cwd, at.path);
+        // a service's document in the knowledge repository: its code is the service's repository
+        const svcRepo = d.service ? serviceRepos?.[d.service] : undefined;
+        const codeRoot = d.service ? (svcRepo && existsSync(svcRepo) ? svcRepo : undefined) : root;
         // a map made from a known commit: stale by the code since then, committed or not
         const code = d.source ? undefined : d.codeAt;
-        const fromCode = code ? await commitsSinceCode(root, code.commit, d.paths) : undefined;
+        const fromCode =
+          code && codeRoot ? await commitsSinceCode(codeRoot, code.commit, d.paths) : undefined;
         if (!last) return fromCode ? { staleCommits: fromCode } : undefined;
-        const since = at.cwd === root ? { hash: last.hash } : { date: last.date };
-        const stale = d.source
-          ? undefined
-          : (fromCode ?? (code ? undefined : await commitsSince(root, since, d.paths)));
+        const since = at.cwd === codeRoot ? { hash: last.hash } : { date: last.date };
+        const stale =
+          d.source || !codeRoot
+            ? undefined
+            : (fromCode ?? (code ? undefined : await commitsSince(codeRoot, since, d.paths)));
         return { edited: last.date, ...(stale ? { staleCommits: stale } : {}) };
       })();
       if (gitFacts.size > 5000) gitFacts.clear();

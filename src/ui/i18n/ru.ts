@@ -593,6 +593,7 @@ export const RU: Readonly<Record<string, string>> = {
   "read in place; the id is the file name": "читаются на месте; id — имя файла",
   Yours: "Ваши",
   "Built-in": "Встроенные",
+  "Every stack": "Для всех стеков",
   "ship with jarvis; a project skill with the same id wins":
     "идут с jarvis; скилл проекта с тем же id главнее",
   "How to do one kind of work. An agent call gets the best matching ones in full ({setting}); the rest are listed as available on request.":

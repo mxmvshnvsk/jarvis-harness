@@ -64,6 +64,7 @@ import {
   GlossaryTermTaken,
   type GlossaryView,
   glossaryOf,
+  serviceDocCount,
   skillsOf,
   standardsOf,
   usageOf,
@@ -1166,7 +1167,7 @@ ${candidateReviewHtml(c, run, run.workspace.repoRoot, actions, { back: `/runs/${
       const known =
         inside(layout.jarvisDir) ||
         (layout.meta ? inside(layout.meta.knowledgeRoot) : false) ||
-        (await docsOf(roots())).some((d) => d.path === file) ||
+        (await docsOf(roots(), undefined, runtime.loaded.meta?.repos)).some((d) => d.path === file) ||
         skillsOf(roots()).some((x) => x.path === file);
       if (!known || !existsSync(joinPath(root, file))) return redirect(r, backTo("no-file"));
       const editor = options.open?.(root, [{ path: joinPath(root, file) }]);
@@ -1325,7 +1326,7 @@ ${candidateReviewHtml(c, run, run.workspace.repoRoot, actions, { back: `/runs/${
       }
     };
     return {
-      docs: safe(() => loadKnowledgeDocs(r).length),
+      docs: safe(() => loadKnowledgeDocs(r).length + serviceDocCount(r)),
       standards: safe(() => loadStandards(r).length),
       skills: safe(() => loadSkills(r).length),
       terms: safe(() => loadGlossary(root).length),
@@ -1390,7 +1391,7 @@ ${candidateReviewHtml(c, run, run.workspace.repoRoot, actions, { back: `/runs/${
       const content = overviewContent(
         {
           counts,
-          docs: await docsOf(roots(), usage()),
+          docs: await docsOf(roots(), usage(), runtime.loaded.meta?.repos),
           glossaryProblems: glossary.rows.filter((x) => x.problems.length > 0).length,
           toResearch,
           candidates,
@@ -1436,7 +1437,7 @@ ${candidateReviewHtml(c, run, run.workspace.repoRoot, actions, { back: `/runs/${
       );
     }
     if (at === "/knowledge/docs") {
-      const docs = await docsOf(roots(), usage());
+      const docs = await docsOf(roots(), usage(), runtime.loaded.meta?.repos);
       const want = q("doc");
       // by path, or by name (`?doc=architecture.md` — wherever the project keeps its knowledge)
       const selected = want ? docs.find((d) => d.path === want || d.name === want) : docs[0];
