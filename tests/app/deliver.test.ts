@@ -9,6 +9,7 @@ import { recordDecision } from "../../src/app/decide.ts";
 import {
   DeliveryError,
   deliverPr,
+  deliveryChainOf,
   linkOf,
   PR_REQUEST,
   pendingPrRequest,
@@ -185,6 +186,40 @@ function remoteHead(branch: string): string {
     stdio: ["ignore", "pipe", "pipe"],
   }).trim();
 }
+
+describe("where the code goes, on the implementation's gate", () => {
+  it("base, the run's branch, the branch pushed by the team's format, the PR's target", async () => {
+    await setup('delivery:\n  branch: "feature/{key}"\n');
+    const run = await runOf();
+    const chain = deliveryChainOf(rt, run);
+    expect(chain).toMatchObject({
+      base: { ref: run.workspace.baseRef },
+      work: run.workspace.branch,
+      source: "feature/ABC-42",
+      target: "default",
+      targetFrom: "default",
+      remote: "origin",
+      prFlow: true,
+    });
+    // a task in a Story the run started from: the PR goes into the Story's branch
+    const inStory = {
+      ...run,
+      workspace: { ...run.workspace, story: { key: "ABC-21", branch: "feature/ABC-21", based: true } },
+    };
+    expect(deliveryChainOf(rt, inStory)).toMatchObject({
+      story: { key: "ABC-21", branch: "feature/ABC-21", based: true },
+      target: "feature/ABC-21",
+      targetFrom: "story",
+    });
+    // the format wants a key the task has not: said, and the run's own branch goes
+    const noKey = { ...run, task: "order totals" };
+    const said = deliveryChainOf(rt, noKey);
+    expect(said?.source).toBe(run.workspace.branch);
+    expect(said?.sourceNote).toBeDefined();
+    // without the PR flow: Apply or «Create PR» by hand
+    expect(deliveryChainOf(rt, { ...run, options: { prFlow: false } })?.prFlow).toBe(false);
+  });
+});
 
 describe("jarvis apply --pr", () => {
   it("the PR flow (delivery.flow, on by default): the run puts up its PR itself when its work is done", async () => {

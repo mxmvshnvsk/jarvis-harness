@@ -4,6 +4,7 @@ import { type BudgetWait, whenText as whenTextEn } from "../app/budgetWait.ts";
 import { isStale, issueKeyOf, type StartPoint } from "../app/continuation.ts";
 import type { ContractChangeRequest } from "../app/contractChange.ts";
 import type { DtoCheck } from "../app/contractFields.ts";
+import type { DeliveryChain } from "../app/deliver.ts";
 import { duration as durationEn } from "../app/journey.ts";
 import type { MasterBudget } from "../app/masterBudget.ts";
 import type { McpHealth, McpServerHealth } from "../app/mcpHealth.ts";
@@ -1359,10 +1360,43 @@ function approvalCardHtml(card: ApprovalCard, page: RunPage, actions?: Actions):
 </div>
 ${briefHtml(card)}
 ${card.decision ? html`<div class="banner ok">${decisionText(card)}</div><div class="actions">${goesOn(page, actions)}</div>` : ""}
+${card.chain ? chainHtml(card.chain) : ""}
 ${card.tryOut && !card.decision ? tryLine(card.tryOut) : ""}
 <div class="actions"><a class="btn primary big" href="${artifactHref(page.run, card.artifact)}">${t("Review the {type}", { type: card.type })}</a></div>
 ${card.decision ? "" : terminalHint(card, page.terminal, page.run)}
 </section>`;
+}
+
+/**
+ * The implementation gate: where the work grew from and where it goes — base → the run's branch →
+ * the branch pushed → the PR's target (src/app/deliver.ts deliveryChainOf).
+ */
+export function chainHtml(c: DeliveryChain): Html {
+  const node = (label: string, ref: Html | string, note?: Html | string) =>
+    html`<li><span class="hint">${label}</span><code>${ref}</code>${note ? html`<span class="hint">${note}</span>` : ""}</li>`;
+  const target =
+    c.targetFrom === "default"
+      ? html`${t("the default branch of {remote}", { remote: c.remote })}`
+      : c.target;
+  return html`<div class="chain" aria-label="${t("Where the code goes")}"><b>${t("Where the code goes")}</b><ol>
+${node(
+  t("grew from"),
+  c.base.ref,
+  html`${c.base.commit ? html`@${c.base.commit.slice(0, 8)} ` : ""}${
+    c.story
+      ? c.story.based
+        ? t("the branch of the Story {key}{made}", {
+            key: c.story.key,
+            made: c.story.created ? ` — ${t("made for this task")}` : "",
+          })
+        : t("the Story {key} has no branch {branch} here yet", { key: c.story.key, branch: c.story.branch })
+      : ""
+  }`,
+)}
+${c.work ? node(t("its branch"), c.work, t("in the run's checkout")) : ""}
+${c.prFlow ? node(t("pushed as"), c.source ?? c.work ?? "?", c.sourceNote) : ""}
+${c.prFlow ? node(t("PR into"), target, c.targetFrom === "story" ? t("the Story's branch") : c.targetFrom === "config" ? html`<code>delivery.target</code>` : "") : html`<li><span class="hint full">${t("no PR from the run: Apply takes it into your branch, or «Create PR» on the page")}</span></li>`}
+</ol></div>`;
 }
 
 /** Cancel, in two clicks (no dialogs): as `jarvis cancel` — at once when idle, else at the next safe point. */

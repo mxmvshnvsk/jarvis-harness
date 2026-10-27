@@ -35,6 +35,32 @@ describe("coverage of an analysis", () => {
     expect(coverageGaps(ctxWith({}), "impact", doc)).toBeUndefined();
   });
 
+  it("a subtask answers for the requirements its split gave it, not the other services'", () => {
+    const split = {
+      subtasks: [
+        { key: "1", service: "shop-lib", task: "t", requirements: ["R2"] },
+        { key: "2", service: "shop-web", task: "t", requirements: ["R1", "R12"] },
+      ],
+      contract: [],
+    };
+    const sub = {
+      run: { id: "run_2", task: "remove the banner", options: { parent: { runId: "run_m", key: "2" } } },
+      runtime: {
+        runs: { get: (id: string) => (id === "run_m" ? { id } : undefined) },
+        artifacts: {
+          listLatest: (_id: string, type: string) => (type === "spec" || type === "split" ? [{ type }] : []),
+          text: (a: { type: string }) => JSON.stringify(a.type === "spec" ? spec : split),
+        },
+      },
+    } as never;
+    const doc = {
+      affected: [{ path: "src/banner.tsx", kind: "code", reason: "r", requirements: ["R1", "R12"] }],
+      elsewhere: [],
+    };
+    // R2 is the library's: not a gap of the front's subtask
+    expect(coverageGaps(sub, "impact", doc)).toEqual([]);
+  });
+
   it("plan: every requirement has a step, every code path of the impact is in one", () => {
     const impact = {
       affected: [

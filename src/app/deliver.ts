@@ -142,6 +142,68 @@ export function prFlowOn(runtime: Runtime, run: Run): boolean {
   );
 }
 
+/**
+ * Where the run's work comes from and where it goes, for the implementation's gate: the base it started
+ * from (a Story's branch, the PR target's, the checkout's), the run's own branch, the branch pushed by
+ * the team's format and the PR's target. Read from the run and the configuration, nothing pushed or
+ * fetched. Pilot: approving the code, the person could not tell which branch it grew from and where its
+ * PR would go — a task of a Story sent to the default branch looked the same as one sent to the Story's.
+ */
+export interface DeliveryChain {
+  /** What the run started from: a ref as given (`origin/feature/ABC-21`) and its commit. */
+  readonly base: { readonly ref: string; readonly commit?: string };
+  /** The Story the task is in: its branch, and whether the run started from it (else not there yet). */
+  readonly story?: Run["workspace"]["story"];
+  /** The run's own branch, in its checkout. */
+  readonly work?: string;
+  /** The branch pushed for the PR (`delivery.branch`), else the run's own. */
+  readonly source?: string;
+  /** Why the team's format gave no branch (it needs the issue key the task has not). */
+  readonly sourceNote?: string;
+  /** The PR's target; `default` — the remote's default branch, as it is when the PR is made. */
+  readonly target: string;
+  readonly targetFrom: "story" | "config" | "default";
+  readonly remote: string;
+  /** The run puts up its PR itself after this gate; else Apply or «Create PR» by hand. */
+  readonly prFlow: boolean;
+}
+
+export function deliveryChainOf(runtime: Runtime, run: Run): DeliveryChain | undefined {
+  const ws = run.workspace;
+  if (ws.mode !== "worktree") return undefined;
+  const config = runtime.loaded.config.delivery;
+  const docs = documentsOf(runtime, run);
+  let source: string | undefined;
+  let sourceNote: string | undefined;
+  try {
+    source = branchOf(config, {
+      task: run.task,
+      title: docs.title ?? subjectOf(run.task),
+      ...(run.options?.kind ? { kind: run.options.kind } : {}),
+      files: [],
+      runId: run.id,
+    });
+  } catch (error) {
+    if (!(error instanceof FormatError)) throw error;
+    sourceNote = error.message;
+  }
+  const target = ws.story?.based
+    ? { target: ws.story.branch, targetFrom: "story" as const }
+    : config.target
+      ? { target: config.target, targetFrom: "config" as const }
+      : { target: "default", targetFrom: "default" as const };
+  return {
+    base: { ref: ws.baseRef, ...(ws.baseCommit ? { commit: ws.baseCommit } : {}) },
+    ...(ws.story ? { story: ws.story } : {}),
+    ...(ws.branch ? { work: ws.branch } : {}),
+    ...((source ?? ws.branch) ? { source: (source ?? ws.branch) as string } : {}),
+    ...(sourceNote ? { sourceNote } : {}),
+    ...target,
+    remote: config.remote,
+    prFlow: prFlowOn(runtime, run),
+  };
+}
+
 /** The context of the change in a word, as the run's implementation named it (`{scope}`). */
 export function scopeNamed(runtime: Runtime, runId: string): string | undefined {
   const a = runtime.artifacts.listLatest(runId, "implementation")[0];

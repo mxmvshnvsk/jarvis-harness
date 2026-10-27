@@ -22,7 +22,7 @@ import {
   rerunRequested,
   waitingCard,
 } from "../app/decide.ts";
-import { prOf } from "../app/deliver.ts";
+import { type DeliveryChain, deliveryChainOf, prOf } from "../app/deliver.ts";
 import { unresolvedEffectOf } from "../app/effects.ts";
 import { finalizedOf } from "../app/finalize.ts";
 import { continuedBy } from "../app/handoff.ts";
@@ -242,6 +242,8 @@ export interface ApprovalCard {
   readonly decision?: Decision;
   /** The implementation gate: one line into the checkout and to start the project (src/app/tryOut.ts). */
   readonly tryOut?: TryOut;
+  /** The implementation gate: the branch it grew from, its own, the one pushed and the PR's target. */
+  readonly chain?: DeliveryChain;
 }
 
 /** A stop on a budget (src/app/budgetStop.ts): more and go on, or finish the step with what it has. */
@@ -594,6 +596,7 @@ export async function waitCardOf(runtime: Runtime, run: Run, homeDir: string): P
       awaited.type === "implementation"
         ? tryOutOf(runtime, run, { homeDir, changed: files.map((f) => f.path) })
         : undefined;
+    const chain = awaited.type === "implementation" ? deliveryChainOf(runtime, run) : undefined;
     return {
       kind: "approval",
       type: awaited.type,
@@ -602,6 +605,7 @@ export async function waitCardOf(runtime: Runtime, run: Run, homeDir: string): P
       ...(files.length > 0 ? { files } : {}),
       ...(decision ? { decision } : {}),
       ...(tryOut ? { tryOut } : {}),
+      ...(chain ? { chain } : {}),
     };
   }
   return { kind: "other", what: kind ?? "a decision" };

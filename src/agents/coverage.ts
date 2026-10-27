@@ -1,3 +1,4 @@
+import { splitOf } from "../app/subtasks.ts";
 import type { StepContext } from "../orchestration/types.ts";
 
 /**
@@ -37,11 +38,27 @@ function latestJson(ctx: Pick<StepContext, "runtime" | "run">, type: string): Do
   }
 }
 
+/**
+ * The spec's requirements this run answers for: all of them, or — a subtask of a task across services —
+ * those its split gave it. Pilot: each subtask got the master's whole spec, and its impact and plan were
+ * sent back for «no path» to the other services' requirements (the front's for a library's field) —
+ * extra rounds and a person asked for more calls, for work that was another subtask's.
+ */
 function specRequirements(ctx: Pick<StepContext, "runtime" | "run">): Array<{ id: string; text: string }> {
-  return arr(latestJson(ctx, "spec")?.requirements).flatMap((r) => {
+  const all = arr(latestJson(ctx, "spec")?.requirements).flatMap((r) => {
     const o = r as Doc;
     return typeof o.id === "string" ? [{ id: o.id, text: typeof o.text === "string" ? o.text : "" }] : [];
   });
+  const parent = ctx.run.options?.parent;
+  if (!parent) return all;
+  const master = ctx.runtime.runs.get(parent.runId);
+  const own = master
+    ? splitOf(ctx.runtime, master)?.subtasks.find((x) => x.key === parent.key)?.requirements
+    : undefined;
+  if (!own || own.length === 0) return all;
+  const mine = new Set(own);
+  const kept = all.filter((r) => mine.has(r.id));
+  return kept.length > 0 ? kept : all;
 }
 
 const cut = (s: string, n = 90) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
