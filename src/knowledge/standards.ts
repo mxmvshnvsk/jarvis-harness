@@ -1,8 +1,9 @@
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
 import { z } from "zod";
 import type { KnowledgeSource } from "../core/config/schema.ts";
 import { layoutOf } from "../core/paths.ts";
+import { type FolderScope, folderScopeOf, nestedScope, withFolderScope } from "./folderScope.ts";
 import { parseFrontMatter } from "./frontmatter.ts";
 import { reportProblem } from "./problems.ts";
 
@@ -83,6 +84,10 @@ export interface Standard extends z.infer<typeof StandardFrontMatterSchema> {
   readonly file: string;
   /** project | user (user-level standards are never `required`, ADR-0020 §5). */
   readonly level: "project" | "user";
+  /** The subfolder it lies in (`backend`, `frontend/web`), if not at the top. */
+  readonly group?: string;
+  /** A folder's `_scope.yaml` says whom it is for (it may still apply everywhere, on purpose). */
+  readonly folderScoped?: boolean;
 }
 
 export class StandardLoadError extends Error {
@@ -111,20 +116,49 @@ export function parseStandard(file: string, text: string, level: Standard["level
   return { ...parsed.data, severity, rule: body.trim(), file, level };
 }
 
+/**
+ * The standards of a folder and its subfolders (by stack: `backend/`, `frontend/`, `common/`), each
+ * folder's `_scope.yaml` filling what a standard's own scope leaves empty (src/knowledge/folderScope.ts).
+ * An id met twice is kept once, and said.
+ */
 function readDir(dir: string, level: Standard["level"]): Standard[] {
   if (!existsSync(dir)) return [];
-  return readdirSync(dir)
-    .filter((f) => f.endsWith(".md") && f !== "README.md")
-    .sort()
-    .flatMap((f) => {
+  const out: Standard[] = [];
+  const seen = new Map<string, string>();
+  const walk = (at: string, group: string, inherited: FolderScope | undefined, depth: number) => {
+    const own = folderScopeOf(at);
+    const folder = nestedScope(inherited, own);
+    const entries = readdirSync(at).sort();
+    for (const f of entries) {
+      const file = join(at, f);
+      if (statSync(file).isDirectory()) {
+        if (depth < 3 && !f.startsWith(".") && !f.startsWith("_"))
+          walk(file, group ? `${group}/${f}` : f, folder, depth + 1);
+        continue;
+      }
+      if (!f.endsWith(".md") || f === "README.md" || f.startsWith("_")) continue;
       // one broken standard is passed over (and said), not every step of the project failed
       try {
-        return [parseStandard(join(dir, f), readFileSync(join(dir, f), "utf8"), level)];
+        const parsed = parseStandard(file, readFileSync(file, "utf8"), level);
+        const before = seen.get(parsed.id);
+        if (before) {
+          reportProblem(file, `id "${parsed.id}" is taken by ${before}: this one is passed over`);
+          continue;
+        }
+        seen.set(parsed.id, file);
+        out.push({
+          ...parsed,
+          scope: withFolderScope(parsed.scope, folder),
+          ...(group ? { group } : {}),
+          ...(folder ? { folderScoped: true } : {}),
+        });
       } catch (error) {
-        reportProblem(join(dir, f), error instanceof Error ? error.message : String(error));
-        return [];
+        reportProblem(file, error instanceof Error ? error.message : String(error));
       }
-    });
+    }
+  };
+  walk(dir, "", undefined, 0);
+  return out;
 }
 
 export interface KnowledgeRoots {

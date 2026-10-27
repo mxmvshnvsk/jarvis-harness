@@ -8,7 +8,7 @@ import type { Run } from "../core/domain/run.ts";
 import { layoutOf } from "../core/paths.ts";
 import { loadGlossary, parseGlossary } from "../knowledge/retrieval/glossary.ts";
 import { type GlossaryProposal, proposeGlossary, termLinksIn } from "../knowledge/retrieval/termLinks.ts";
-import { BUILTIN_SKILLS, type Skill } from "../knowledge/skills.ts";
+import { BUILTIN_SKILLS, projectSkillDirOf, type Skill } from "../knowledge/skills.ts";
 import { MODULE_MARKER, markSweeping, ONBOARD_MARKER } from "../onboarding/render.ts";
 import type { Dropped } from "../onboarding/verify.ts";
 import { newRunId, shortRunId } from "../storage/runStore.ts";
@@ -185,7 +185,9 @@ export function targetOf(root: string, c: Candidate, id: string | undefined): st
   // a service's knowledge goes to its folder of the knowledge repository (ADR-0025 §1)
   if (c.doc.kind === "knowledge") return join(layout.knowledgeDir, `${fileId}.md`);
   // a skill improvement edits that skill's instructions (skillEditOf)
-  return join(layout.jarvisDir, "skills", c.doc.skill ?? fileId, "instructions.md");
+  return c.doc.skill
+    ? join(projectSkillDirOf(root, c.doc.skill), "instructions.md")
+    : join(layout.jarvisDir, "skills", fileId, "instructions.md");
 }
 
 /** A candidate that cannot be written where it would go (a skill improvement without its skill). */
@@ -220,7 +222,7 @@ export function skillEditOf(root: string, doc: CandidateDoc): SkillEdit {
     throw new CandidateNotPromotable(
       "this skill improvement names no skill (proposed before improvements named theirs): reject it; review proposes it again",
     );
-  const dir = join(layoutOf(root).jarvisDir, "skills", doc.skill);
+  const dir = projectSkillDirOf(root, doc.skill);
   const instructions = join(dir, "instructions.md");
   const addition = (doc.proposal ?? doc.rationale).trim();
   const edit = (before: string, from: number, fromBuiltin: boolean): SkillEdit => ({

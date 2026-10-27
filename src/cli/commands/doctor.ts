@@ -6,6 +6,9 @@ import { ConfigError, isSecretRef, type LoadedConfig, parseSecretRef } from "../
 import { missingChecks } from "../../core/config/requiredChecks.ts";
 import { EnvSecretResolver } from "../../core/config/secrets.ts";
 import { jarvisHome } from "../../core/paths.ts";
+import { loadSkills } from "../../knowledge/skills.ts";
+import { knowledgeRootsOf } from "../../knowledge/sources.ts";
+import { loadStandards } from "../../knowledge/standards.ts";
 import { McpPool, ToolsCache } from "../../mcp/client/pool.ts";
 import { McpToolProvider, type ServerReport } from "../../mcp/provider.ts";
 import { ProbeStore, probeDrift, probeIsStale } from "../../models/probe.ts";
@@ -23,6 +26,7 @@ import { hasRipgrep } from "../../tools/local/exec.ts";
 import type { CliContext } from "../context.ts";
 import { CliExit, EXIT, padEnd } from "../output.ts";
 import { loadForCli } from "./config.ts";
+import { unscopedShared } from "./knowledge.ts";
 import { logDirSummary } from "./logs.ts";
 
 export type CheckStatus = "ok" | "warn" | "fail";
@@ -230,6 +234,35 @@ export async function runDoctor(ctx: CliContext): Promise<DoctorReport> {
             : "add the server to ~/.jarvis/config.yaml mcp.servers if the project needs it",
         ),
       );
+
+    // a knowledge repository of many services: shared rules that name no stack reach every one of them
+    if (loaded.meta && Object.keys(loaded.meta.repos).length > 1 && loaded.project) {
+      const roots = knowledgeRootsOf(loaded, loaded.project.root);
+      const unscoped = unscopedShared(loaded, [
+        ...loadStandards(roots).map((x) => ({
+          id: x.id,
+          level: x.level,
+          stacks: x.scope.stacks,
+          folderScoped: x.folderScoped,
+        })),
+        ...loadSkills(roots).map((x) => ({
+          id: x.id,
+          level: x.level,
+          stacks: x.appliesTo.stacks,
+          folderScoped: x.folderScoped,
+        })),
+      ]);
+      if (unscoped.length > 0)
+        checks.push(
+          check(
+            "knowledge.unscoped",
+            "warn",
+            "stacks",
+            `${unscoped.length} standard(s)/skill(s) name no stack and reach every service: ${unscoped.slice(0, 6).join(", ")}${unscoped.length > 6 ? ", …" : ""}`,
+            "put them in a folder with _scope.yaml ({ stacks: [java] }), or in common/ with an empty one to mean «everyone»; jarvis standards list --service <name> shows what a service gets",
+          ),
+        );
+    }
 
     const models = Object.keys(loaded.config.models).length;
     const pools = Object.keys(loaded.config.quotaPools).length;

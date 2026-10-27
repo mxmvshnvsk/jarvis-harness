@@ -3,6 +3,7 @@ import { basename, dirname, join } from "node:path";
 import { parse } from "yaml";
 import { z } from "zod";
 import { layoutOf } from "../core/paths.ts";
+import { type FolderScope, folderScopeOf, nestedScope, withFolderScope } from "./folderScope.ts";
 import { reportProblem } from "./problems.ts";
 import { loadSourceDocuments, skillIdOf } from "./sources.ts";
 import type { KnowledgeRoots } from "./standards.ts";
@@ -51,6 +52,10 @@ export interface Skill extends SkillManifest {
    * picked by kind, stack or paths — listed in every agent's catalog, given when a step names it.
    */
   readonly catalogOnly?: boolean;
+  /** The subfolder of the skills folder it lies in (`backend`, `frontend`), if not at the top. */
+  readonly group?: string;
+  /** A folder's `_scope.yaml` says whom it is for. */
+  readonly folderScoped?: boolean;
 }
 
 export class SkillLoadError extends Error {
@@ -83,17 +88,48 @@ function readSkill(dir: string, level: Skill["level"]): Skill {
  */
 function readSkillsDir(dir: string, level: Skill["level"]): Skill[] {
   if (!existsSync(dir)) return [];
-  return readdirSync(dir)
-    .filter((d) => statSync(join(dir, d)).isDirectory() && existsSync(join(dir, d, "skill.yaml")))
-    .sort()
-    .flatMap((d) => {
-      try {
-        return [readSkill(join(dir, d), level)];
-      } catch (error) {
-        reportProblem(join(dir, d), error instanceof Error ? error.message : String(error));
-        return [];
+  const out: Skill[] = [];
+  const seen = new Set<string>();
+  // a folder of skills by stack (`backend/`, `frontend/`): its `_scope.yaml` fills what a skill leaves empty
+  const walk = (at: string, group: string, inherited: FolderScope | undefined, depth: number) => {
+    const folder = nestedScope(inherited, folderScopeOf(at));
+    for (const d of readdirSync(at).sort()) {
+      const sub = join(at, d);
+      if (d.startsWith(".") || d.startsWith("_") || !statSync(sub).isDirectory()) continue;
+      if (!existsSync(join(sub, "skill.yaml"))) {
+        if (depth < 3) walk(sub, group ? `${group}/${d}` : d, folder, depth + 1);
+        continue;
       }
-    });
+      try {
+        const skill = readSkill(sub, level);
+        if (seen.has(skill.id)) {
+          reportProblem(sub, `id "${skill.id}" is taken by another skill: this one is passed over`);
+          continue;
+        }
+        seen.add(skill.id);
+        out.push({
+          ...skill,
+          appliesTo: withFolderScope(skill.appliesTo, folder) as Skill["appliesTo"],
+          ...(group ? { group } : {}),
+          ...(folder ? { folderScoped: true } : {}),
+        });
+      } catch (error) {
+        reportProblem(sub, error instanceof Error ? error.message : String(error));
+      }
+    }
+  };
+  walk(dir, "", undefined, 0);
+  return out;
+}
+
+/**
+ * The folder of a project skill by its id, in whichever subfolder it lies (`skills/backend/queue`);
+ * one that is not there yet goes at the top (`skills/<id>`).
+ */
+export function projectSkillDirOf(root: string, id: string): string {
+  const top = join(layoutOf(root).jarvisDir, "skills");
+  const found = readSkillsDir(top, "project").find((s) => s.id === id)?.dir;
+  return found ?? join(top, id);
 }
 
 export const BUILTIN_SKILLS: readonly Skill[] = [

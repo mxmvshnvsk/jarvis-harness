@@ -138,7 +138,13 @@ deterministic check send the implementation back when violated; semantic ones ar
     ---
     Library code writes through the logger, never to the console.
 
-\`jarvis standards list\` and \`jarvis standards check\` show what applies and what is violated.
+Folders by stack are read too: \`java/\`, \`frontend/\`, \`common/\`. A folder's \`_scope.yaml\`
+(\`stacks: [java]\`, also \`paths\`, \`kinds\`, \`agents\`) fills what a standard's own scope leaves
+empty, so a rule put in \`java/\` never reaches the frontend; \`common/\` with an empty \`_scope.yaml\`
+means «everyone» on purpose. Ids stay unique across folders.
+
+\`jarvis standards list [--service <name>]\` and \`jarvis standards check\` show what applies and what is
+violated.
 `;
 
 export const SKILLS_README = `# Skills
@@ -153,7 +159,10 @@ built-in \`sdd-implementation\`, \`unit-testing\` and \`refactor\` by id.
     requiredStandards: [STD-REACT-*]
     verification: [project.tests, project.lint]
 
-\`jarvis skills list\` shows the selection for this project.
+Skills may lie in folders by stack (\`java/kafka/\`, \`frontend/redux-saga/\`); a folder's
+\`_scope.yaml\` (\`stacks: [react]\`) fills what a skill's \`appliesTo\` leaves empty.
+
+\`jarvis skills list [--service <name>]\` shows the selection for this project or a service.
 `;
 
 export const GITIGNORE_ENTRIES = ["# jarvis runtime state (ADR-0001 §3)", ".jarvis/runs/", ".jarvis/cache/"];

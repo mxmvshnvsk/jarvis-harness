@@ -1163,8 +1163,9 @@ export function buildProgram(options: RunOptions = {}): Command {
   standards
     .command("list")
     .description("standards with scope, severity and verification kind")
-    .action(async () => {
-      await runStandardsList(ctxFor());
+    .option("--service <name>", "in a knowledge repository: what this service gets, by its stack")
+    .action(async (opts: { service?: string }) => {
+      await runStandardsList(ctxFor(), opts);
     });
   standards
     .command("check")
@@ -1179,7 +1180,8 @@ export function buildProgram(options: RunOptions = {}): Command {
     .command("list")
     .description("built-in, project and user skills; which ones a generic change would select")
     .option("--agent <id>", "resolve for this agent", "implementation")
-    .action(async (opts: { agent: string }) => {
+    .option("--service <name>", "in a knowledge repository: what this service gets, by its stack")
+    .action(async (opts: { agent: string; service?: string }) => {
       await runSkillsList(ctxFor(), opts);
     });
 
