@@ -147,7 +147,8 @@ describe("jarvis onboard", () => {
     // without --refresh nothing is regenerated
     const again = await jarvis(["onboard", "--no-graph", "--json"]);
     const actions = (JSON.parse(again.out).files as Array<{ action: string }>).map((f) => f.action);
-    expect(actions).toEqual(["kept (edited by a human)", "kept (edited by a human)"]);
+    // the person's file is theirs; jarvis's still is — kept until asked
+    expect(actions).toEqual(["kept (edited by a human)", "kept (--refresh regenerates it)"]);
   });
 
   it("--dry-run writes nothing", async () => {

@@ -58,7 +58,13 @@ export interface OnboardOptions {
   readonly stale?: boolean;
 }
 
-type FileAction = "created" | "refreshed" | "kept (edited by a human)" | "would create" | "would refresh";
+type FileAction =
+  | "created"
+  | "refreshed"
+  | "kept (edited by a human)"
+  | "kept (--refresh regenerates it)"
+  | "would create"
+  | "would refresh";
 
 export async function runOnboard(ctx: CliContext, options: OnboardOptions): Promise<void> {
   const loaded = await loadForCli(ctx);
@@ -126,9 +132,10 @@ export async function runOnboard(ctx: CliContext, options: OnboardOptions): Prom
     const path = join(knowledgeDir, name);
     let action: FileAction;
     if (!existsSync(path)) action = options.dryRun ? "would create" : "created";
-    else if (options.refresh && readFileSync(path, "utf8").includes(ONBOARD_MARKER))
-      action = options.dryRun ? "would refresh" : "refreshed";
-    else action = "kept (edited by a human)";
+    else if (!readFileSync(path, "utf8").includes(ONBOARD_MARKER)) action = "kept (edited by a human)";
+    // still jarvis's (the marker is there): regenerated only when asked
+    else if (options.refresh) action = options.dryRun ? "would refresh" : "refreshed";
+    else action = "kept (--refresh regenerates it)";
     if (!options.dryRun && (action === "created" || action === "refreshed")) {
       mkdirSync(knowledgeDir, { recursive: true });
       writeFileSync(path, content, "utf8");
