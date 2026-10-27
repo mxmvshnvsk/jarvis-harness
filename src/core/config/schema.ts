@@ -695,11 +695,11 @@ export const RelatedWorkConfigSchema = z.strictObject({
   story: z
     .strictObject({
       /** The issue types that are Stories. */
-      types: z.array(z.string().min(1)).default(["Story"]),
+      types: z.array(z.string().min(1)).default(["Story", "User Story"]),
       /** The link's name from the Story's side ("includes"). */
-      includes: z.array(z.string().min(1)).default(["Включает в себя", "includes"]),
+      includes: z.array(z.string().min(1)).default(["Включает в себя", "includes", "is parent task of"]),
       /** The link's name from the task's side ("is included in"). */
-      includedIn: z.array(z.string().min(1)).default(["Включена в", "is included in"]),
+      includedIn: z.array(z.string().min(1)).default(["Включена в", "is included in", "is subtask of"]),
       /** The Story's branch, `{key}` its issue key: the same in every repository. */
       branch: z.string().min(1).default("feature/{key}"),
       /** The run of a task in a Story starts from the Story's branch and its PR goes into it, when the repository has the branch. */

@@ -110,6 +110,42 @@ describe("the Story's Jira tasks for a task across services", () => {
     expect(storyTasksText(doc as never)).toContain("- ABC-17 (Front Task) — front: Remove the banner");
   });
 
+  it("the issue inside a server's envelope (pilot: {success, data} of the Data Center server)", async () => {
+    const doc = await readStoryTasks(runtime, master.task, async () => ({
+      ok: true,
+      text: JSON.stringify({ success: true, data: STORY }),
+    }));
+    expect(doc?.story).toBe("ABC-21");
+    expect(doc?.tasks.map((t) => t.key)).toEqual(["ABC-19", "ABC-17"]);
+  });
+
+  it("a User Story with its tasks under the Gantt hierarchy (pilot: «is parent task of»)", async () => {
+    const link = (key: string, type: string) => ({
+      type: { name: "multi-level hierarchy [GANTT]", inward: "is subtask of", outward: "is parent task of" },
+      outwardIssue: { key, fields: { issuetype: { name: type }, summary: `${type} work` } },
+    });
+    const userStory = {
+      key: "ABC-21",
+      fields: {
+        issuetype: { name: "User Story" },
+        summary: "Turn off the gift",
+        issuelinks: [link("ABC-17", "Front Task"), link("ABC-19", "Middle Task"), link("ABC-7", "Analytics")],
+      },
+    };
+    const doc = await readStoryTasks(runtime, master.task, async () => ({
+      ok: true,
+      text: JSON.stringify({ success: true, data: userStory }),
+    }));
+    expect(doc).toMatchObject({
+      story: "ABC-21",
+      tasks: [
+        { key: "ABC-17", side: "front" },
+        { key: "ABC-19", side: "back" },
+        { key: "ABC-7", type: "Analytics" },
+      ],
+    });
+  });
+
   it("a server that refuses the fields as asked is asked again without them (pilot: Expected array)", async () => {
     const asked: Array<Record<string, unknown>> = [];
     const doc = await readStoryTasks(runtime, master.task, async (_name, args) => {

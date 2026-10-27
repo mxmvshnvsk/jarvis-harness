@@ -36,10 +36,9 @@ relatedWork:                   # ADR-0026: ветки и PR смежных за�
   prefixes: { java: back, back: back, middle: back, js: front, front: front }   # префикс в названии ([Java] …, регистр любой) → сторона, когда тип её не говорит (Change)
   # base: dev                  # с чем сравнивать ветку; по умолчанию — ветка по умолчанию репозитория
   story:                       # Story между эпиком и задачами; задача без такой связи работает как раньше
-    types: [Story]
-    includes: ["Включает в себя", includes]      # имя связи со стороны Story
-    includedIn: ["Включена в", "is included in"] # со стороны задачи
-    # другие команды: types: [Story, User Story], includes: [..., "is parent task of"], includedIn: [..., "is subtask of"];
+    types: [Story, User Story]
+    includes: ["Включает в себя", includes, "is parent task of"]        # имя связи со стороны Story
+    includedIn: ["Включена в", "is included in", "is subtask of"]       # со стороны задачи; «is … of» — иерархия Gantt/Structure
     # задача по нескольким сервисам (sdd-cross), которая сама Story или в ней: подзадачи привязываются к Jira-задачам
     # Story по стороне сервиса (frontend — Front Task, остальные — Middle/Back) и работают под их ключами —
     # ветка, коммиты, PR в ветку Story; привязку видно в разбиении и в списке подзадач

@@ -79,10 +79,30 @@ const body = (text: string): string => text.replace(/^\[[a-zA-Z.]+\] ok\n/, "");
 
 function json(text: string): unknown {
   try {
-    return JSON.parse(body(text));
+    return unwrap(JSON.parse(body(text)));
   } catch {
     return undefined;
   }
+}
+
+/**
+ * A server's envelope around the issue: `{"success": true, "data": {…}}` (the Data Center Jira server),
+ * `{"result": {…}}`. Pilot: the issue's type and links sat under `data`, read as missing — the Story
+ * was not seen and its tasks were never read.
+ */
+function unwrap(v: unknown): unknown {
+  let at = v;
+  for (let i = 0; i < 3; i++) {
+    if (!at || typeof at !== "object" || Array.isArray(at)) return at;
+    const o = at as Record<string, unknown>;
+    const inner = o.data ?? o.result;
+    const envelope = Object.keys(o).every((k) =>
+      ["success", "data", "result", "error", "status", "message"].includes(k),
+    );
+    if (!envelope || !inner || typeof inner !== "object") return at;
+    at = inner;
+  }
+  return at;
 }
 
 /** Every object in a JSON value, with the key it was found under. */
