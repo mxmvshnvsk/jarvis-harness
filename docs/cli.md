@@ -61,7 +61,7 @@ knowledge/, standards/, skills/ с README, записи в `.gitignore`). Сущ
 - пишет `.jarvis/knowledge/architecture.md` и `conventions.md` — короткие фактические заготовки с маркером
   `<!-- jarvis:onboard … -->`. Файл, которого нет, создаётся; существующий не трогается. `--refresh`
   перегенерирует только файлы, где маркер ещё на месте (отредактированные человеком остаются:
-  `kept (edited by a human)`).
+  `kept (edited by a human)`; без `--refresh` файл с маркером — `kept (--refresh regenerates it)`).
 - JVM (Gradle/Maven): модуль — пакет сразу под базовым пакетом source set (`src/main/java/<база>/service`), а не
   весь `src/main`; в таблице модулей — их зависимости внутри дерева и несколько библиотек (JDK не считается).
   `conventions.md` — тесты по source set: как названы (`*Test`, `*Specification`), какие фреймворки
