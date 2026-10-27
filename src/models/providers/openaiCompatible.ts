@@ -42,6 +42,10 @@ interface ChatResponse {
     completion_tokens?: number;
     prompt_tokens_details?: { cached_tokens?: number };
     prompt_cache_hit_tokens?: number;
+    /** Gateways that say it their way (a proxy in front of the model): read as well. */
+    cached_tokens?: number;
+    cache_read_input_tokens?: number;
+    input_tokens_details?: { cached_tokens?: number };
   };
 }
 
@@ -421,7 +425,13 @@ export class OpenAiCompatibleAdapter implements ProviderAdapter {
       arguments: c.function?.arguments ?? "{}",
     }));
     const usage = parsed.usage ?? {};
-    const cached = usage.prompt_tokens_details?.cached_tokens ?? usage.prompt_cache_hit_tokens ?? 0;
+    const cached =
+      usage.prompt_tokens_details?.cached_tokens ??
+      usage.prompt_cache_hit_tokens ??
+      usage.cached_tokens ??
+      usage.cache_read_input_tokens ??
+      usage.input_tokens_details?.cached_tokens ??
+      0;
     const rateLimit = rateLimitFromHeaders(response.headers);
     return {
       text: choice.message.content ?? "",
@@ -436,6 +446,7 @@ export class OpenAiCompatibleAdapter implements ProviderAdapter {
       ...(rateLimit ? { rateLimit } : {}),
       ...(sse ? { streamed: true } : {}),
       ...(firstTokenMs !== undefined ? { firstTokenMs } : {}),
+      ...(parsed.usage ? { wireUsage: parsed.usage as Record<string, unknown> } : {}),
     };
   }
 }

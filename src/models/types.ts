@@ -93,6 +93,8 @@ export interface ProviderResult {
   readonly rateLimit?: RateLimitInfo;
   readonly streamed?: boolean;
   readonly firstTokenMs?: number;
+  /** The provider's `usage` as it came (the debug log): where a gateway says its cache, if not where we read it. */
+  readonly wireUsage?: Readonly<Record<string, unknown>>;
 }
 
 /** How far a streamed answer has come: characters of the answer and of the model's reasoning. */

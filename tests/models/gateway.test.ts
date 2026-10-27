@@ -74,6 +74,18 @@ describe("ModelGateway", () => {
     expect(JSON.stringify(events.events)).not.toContain("secret-token");
   });
 
+  it("reads the cache a gateway reports its own way", async () => {
+    for (const [usage, cached] of [
+      [{ prompt_tokens: 100, completion_tokens: 1, prompt_cache_hit_tokens: 64 }, 64],
+      [{ prompt_tokens: 100, completion_tokens: 1, cached_tokens: 32 }, 32],
+      [{ prompt_tokens: 100, completion_tokens: 1, cache_read_input_tokens: 16 }, 16],
+      [{ prompt_tokens: 100, completion_tokens: 1, input_tokens_details: { cached_tokens: 8 } }, 8],
+    ] as const) {
+      server.queue(completion("ok", { usage }));
+      expect((await gateway().call(ask)).usage.cachedTokens).toBe(cached);
+    }
+  });
+
   it("applies the role output reserve and never exceeds the model maximum", async () => {
     server.queue(completion("x"));
     await gateway().call({ ...ask, role: "review" });

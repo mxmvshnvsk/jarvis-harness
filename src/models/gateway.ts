@@ -327,6 +327,7 @@ export class ModelGateway implements ModelCaller {
             finishReason: response.finishReason,
             latencyMs: response.latencyMs,
             usage: response.usage,
+            ...(result.wireUsage ? { wireUsage: result.wireUsage } : {}),
             text: response.text,
             toolCalls: response.toolCalls,
           });
