@@ -541,12 +541,12 @@ export async function glossaryOf(
       });
     }
   }
-  // each symbol against the code it is in: a service's glossary — its repository; the shared one —
-  // the service a symbol names (`orders-api:OrderEntity`), else the project's own code
+  // each symbol against the code it is in: the service it names (`orders-api:OrderEntity`), in any
+  // glossary; else a service's glossary — its repository; the shared one — the project's own code
   const whereOf = (x: (typeof all)[number], raw: string): string | undefined => {
     const { service } = symbolOf(raw);
-    if (x.entry.scope !== SHARED) return x.codeRoot;
     if (service) return codes[service] ?? (meta?.service === service ? root : undefined);
+    if (x.entry.scope !== SHARED) return x.codeRoot;
     return meta && !meta.service ? undefined : root;
   };
   const byRoot = new Map<string, string[]>();

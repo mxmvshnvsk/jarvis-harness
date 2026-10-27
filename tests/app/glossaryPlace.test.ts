@@ -1,8 +1,10 @@
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { conflictOf, glossaryScopesOf, placeTerm, settleTerm } from "../../src/app/glossaryPlace.ts";
+import { glossaryOf } from "../../src/app/knowledgeView.ts";
 import { forgetLayouts, metaProjectPaths, rememberLayout } from "../../src/core/paths.ts";
 import { glossaryDuplicates, loadGlossaries, symbolOf, termKey } from "../../src/knowledge/glossaries.ts";
 
@@ -143,5 +145,23 @@ describe("placing a term", () => {
     expect(glossaryDuplicates(loadGlossaries(meta))).toEqual([
       { term: "Order", scopes: ["shared", "shop-web"] },
     ]);
+  });
+
+  it("a symbol said by service is looked for in that service's code, in any glossary", async () => {
+    const repo = (dir: string, files: Record<string, string>) => {
+      execFileSync("git", ["init", "-q"], { cwd: dir });
+      for (const [f, text] of Object.entries(files)) writeFileSync(join(dir, f), text);
+      execFileSync("git", ["add", "."], { cwd: dir });
+    };
+    repo(orders, { "Invoice.ts": "export class Invoice {}\n" });
+    repo(shop, { "Cart.ts": "export class CartStore {}\n" });
+    write(
+      ["services", "shop-web", "glossary.md"],
+      "| Cart |  | `CartStore`, `orders-api:Invoice`, `Ghost` |  | 2026-01-01 |  |\n",
+    );
+    const view = await glossaryOf(meta, true, { "orders-api": orders, "shop-web": shop });
+    const cart = view.rows.find((r) => r.term === "Cart");
+    expect(cart?.problems.join(" ")).toContain("Ghost");
+    expect(cart?.problems.join(" ")).not.toMatch(/Invoice|CartStore/);
   });
 });
