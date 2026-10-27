@@ -1,15 +1,16 @@
-import { existsSync } from "node:fs";
-import { join } from "node:path";
+import {
+  type DriftItem,
+  driftLine,
+  knowledgeFileOf,
+  openDrift,
+  versionedPathOf,
+} from "../app/knowledgeDrift.ts";
 import { staleCommitsOf } from "../app/knowledgeView.ts";
 import { type KindChoice, kindOfTask } from "../app/taskKind.ts";
 import { detectStackScopes, effectiveStacks, stacksForPaths } from "../capabilities/detector.ts";
 import type { TaskKind } from "../core/domain/run.ts";
-import { layoutOf, rootRelative } from "../core/paths.ts";
-import {
-  type EngineeringContextPackage,
-  resolvePackage,
-  SHARED_KNOWLEDGE_PREFIX,
-} from "../knowledge/resolver.ts";
+import { rootRelative } from "../core/paths.ts";
+import { type EngineeringContextPackage, resolvePackage } from "../knowledge/resolver.ts";
 import { loadGlossary, matchTerms } from "../knowledge/retrieval/glossary.ts";
 import { rankKnowledge, refreshIndex } from "../knowledge/retrieval/service.ts";
 import { skillRef } from "../knowledge/skills.ts";
@@ -162,22 +163,25 @@ export async function packageForStep(
   options: { paths?: readonly string[] } = {},
 ): Promise<EngineeringContextPackage> {
   const pkg = await packageRanked(ctx, agentId, options.paths);
-  // a document whose code moved on since its last edit is said to be so (it was only on the UI's page)
+  // a document whose code moved on since its last edit is said to be so (it was only on the UI's page),
+  // and so is what runs found it says that the code does not
   const root = ctx.workspace.ref.path;
-  const layout = layoutOf(root);
-  const fileOf = (name: string) =>
-    name.startsWith(SHARED_KNOWLEDGE_PREFIX) && layout.meta
-      ? join(layout.meta.knowledgeRoot, name.slice(SHARED_KNOWLEDGE_PREFIX.length))
-      : existsSync(join(layout.knowledgeDir, name))
-        ? join(layout.knowledgeDir, name)
-        : join(root, name);
+  let drift = new Map<string, DriftItem[]>();
+  try {
+    drift = openDrift(ctx.runtime);
+  } catch {
+    // the candidates cannot be read: the documents go as they are
+  }
   const knowledge = await Promise.all(
     pkg.knowledge.map(async (d, i) => {
-      if (i >= STALE_CHECKED || d.scope.paths.length === 0) return d;
-      const n = await staleCommitsOf(root, rootRelative(root, fileOf(d.name)), d.scope.paths, d.sha).catch(
+      const file = knowledgeFileOf(root, d.name);
+      const found = drift.size > 0 ? drift.get(versionedPathOf(root, file)) : undefined;
+      const marked = found && found.length > 0 ? { ...d, drift: found.slice(0, 8).map(driftLine) } : d;
+      if (i >= STALE_CHECKED || d.scope.paths.length === 0) return marked;
+      const n = await staleCommitsOf(root, rootRelative(root, file), d.scope.paths, d.sha).catch(
         () => undefined,
       );
-      return n && n > 0 ? { ...d, staleCommits: n } : d;
+      return n && n > 0 ? { ...marked, staleCommits: n } : marked;
     }),
   );
   return { ...pkg, knowledge };

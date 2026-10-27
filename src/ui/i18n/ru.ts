@@ -1652,6 +1652,9 @@ export const RU: Readonly<Record<string, string>> = {
   standard: "стандарт",
   knowledge: "знание",
   "skill-improvement": "улучшение скилла",
+  "knowledge-fix": "правка доки",
+  "Runs found {file} says what the code does not. Accepting writes each finding into it next to what it corrects — the code wins until the module is mapped again ({cmd} picks it up now).":
+    "Прогоны нашли, что в {file} написано не то, что в коде. Принятие допишет каждую находку рядом с тем, что она поправляет: код главнее, пока модуль не перегенерируют ({cmd} уже его подхватит).",
   "Accepting copies the built-in skill {skill} into {dir} and adds this at the end of its instructions: v{from} → v{to}.":
     "При принятии встроенный скилл {skill} копируется в {dir}, а это дописывается в конец его инструкций: v{from} → v{to}.",
   "Accepting adds this at the end of the instructions of {skill}: v{from} → v{to}.":

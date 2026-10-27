@@ -35,6 +35,8 @@ export interface KnowledgeDoc {
   /** Written by `jarvis onboard` (not a person): facts of when it ran, possibly older than the code. */
   readonly generated?: boolean /** Commits under its paths since it was last edited (the step's first documents): it may be out of date. */;
   readonly staleCommits?: number;
+  /** What runs found it says that the code does not, a person has not decided yet (src/app/knowledgeDrift.ts). */
+  readonly drift?: readonly string[];
 }
 
 /** Name prefix of a knowledge repository's shared documents (`landscape.md` → `common/landscape.md`). */

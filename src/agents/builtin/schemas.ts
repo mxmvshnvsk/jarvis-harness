@@ -79,6 +79,31 @@ const TermLinks = z
   .default([])
   .describe("business terms whose code goes by another name (e.g. a term in the issue's language → a class)");
 
+/**
+ * A knowledge document the code disagrees with (src/app/knowledgeDrift.ts): checked after the run —
+ * the document must say the claim, the cited lines must be in the code — and proposed to a person.
+ */
+const KnowledgeDrift = z
+  .array(
+    z.object({
+      doc: z
+        .string()
+        .min(1)
+        .describe("the knowledge document's name as your context shows it (## Knowledge <name>)"),
+      section: z.string().optional().describe("the heading of its section that says it"),
+      claim: z.string().min(1).describe("what the document says, quoted as written there"),
+      actual: z.string().min(1).describe("what the code does instead, one sentence"),
+      sources: z
+        .array(z.string().min(1))
+        .min(1)
+        .describe("where the code shows it: `path:line` or `path:from-to`, read in this repository"),
+    }),
+  )
+  .default([])
+  .describe(
+    "knowledge documents that say something the code contradicts now — not what this task is going to change",
+  );
+
 export const ResearchResult = z.object({
   ...Base,
   findings: z.array(
@@ -100,6 +125,7 @@ export const ResearchResult = z.object({
       "requirements that contradict each other or the design — never resolved silently; code that differs from a requirement is the change, not a contradiction",
     ),
   termLinks: TermLinks,
+  knowledgeDrift: KnowledgeDrift,
   outcome: z.enum(["ok"]).default("ok"),
 });
 
@@ -217,6 +243,7 @@ export const ImpactResult = z.object({
   risks: z.array(z.string()).default([]),
   unknowns: z.array(z.string()).default([]),
   termLinks: TermLinks,
+  knowledgeDrift: KnowledgeDrift,
   outcome: z.enum(["ok", "needs_research"]).default("ok"),
 });
 

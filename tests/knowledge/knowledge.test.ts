@@ -284,6 +284,26 @@ describe("skills and the resolver", () => {
     expect(review.standards.map((s) => s.id)).toEqual(["STD-ASPNET-01", "STD-SEC-01"]);
   });
 
+  it("a document runs found wrong goes with what they found: the code wins", () => {
+    sb.write("project/.jarvis/knowledge/k.md", "Retries three times.");
+    const pkg = resolvePackage({
+      roots: { projectRoot: sb.project },
+      config: CONFIG,
+      task: { kind: "change", affectedPaths: [], stacks: [], agentId: "implementation" },
+    });
+    const marked = {
+      ...pkg,
+      knowledge: pkg.knowledge.map((k) => ({
+        ...k,
+        drift: ["Flow: the document says «three», the code: five (a.ts:1)"],
+      })),
+    };
+    const text = renderPackage(marked, 20_000, CONFIG);
+    expect(text).toContain(
+      "## Knowledge k.md\n> Runs found this document disagrees with the code (the code wins):\n> - Flow: the document says «three»",
+    );
+  });
+
   it("renders within budget and lists the rest as available on request; knowledge.read serves it", () => {
     skill("big", "", "x".repeat(5000));
     skill("small", "", "small procedure");

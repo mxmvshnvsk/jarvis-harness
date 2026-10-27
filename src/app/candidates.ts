@@ -13,6 +13,13 @@ import { MODULE_MARKER, markSweeping, ONBOARD_MARKER } from "../onboarding/rende
 import type { Dropped } from "../onboarding/verify.ts";
 import { newRunId, shortRunId } from "../storage/runStore.ts";
 import { defaultScopeOf, glossaryFileFor, placeTerm, settleTerm } from "./glossaryPlace.ts";
+import {
+  closeDrift,
+  type DriftProposal,
+  fileOfVersioned,
+  versionedPathOf,
+  writeDrift,
+} from "./knowledgeDrift.ts";
 import type { Runtime } from "./runtime.ts";
 
 /**
@@ -23,7 +30,7 @@ import type { Runtime } from "./runtime.ts";
  * what it is about (`shared-lib/billing`).
  */
 export interface CandidateDoc {
-  kind: "knowledge" | "standard" | "skill-improvement" | "glossary";
+  kind: "knowledge" | "standard" | "skill-improvement" | "glossary" | "knowledge-fix";
   title: string;
   rationale: string;
   evidence?: string[];
@@ -48,6 +55,8 @@ export interface CandidateDoc {
   glossary?: GlossaryProposal;
   /** glossary in a knowledge repository: the glossary the term is for — `shared` or the run's service. */
   glossaryScope?: string;
+  /** knowledge-fix: what runs found a document says that the code does not (src/app/knowledgeDrift.ts). */
+  drift?: DriftProposal;
 }
 
 export interface Candidate {
@@ -182,6 +191,7 @@ export function targetOf(root: string, c: Candidate, id: string | undefined): st
       ? moduleFileId(c.name.replace(/@.*$/, ""))
       : slug(c.doc.title));
   const layout = layoutOf(root);
+  if (c.doc.kind === "knowledge-fix" && c.doc.drift) return fileOfVersioned(root, c.doc.drift.path);
   if (c.doc.kind === "glossary") return glossaryFileFor(root, c.doc.glossaryScope ?? defaultScopeOf(root));
   if (c.doc.kind === "standard") return join(layout.jarvisDir, "standards", `${fileId}.md`);
   // a service's knowledge goes to its folder of the knowledge repository (ADR-0025 §1)
@@ -383,6 +393,7 @@ export function promoteCandidate(runtime: Runtime, input: PromoteInput): Promote
   const c = input.candidate;
   if (c.doc.kind === "skill-improvement") return promoteSkillEdit(runtime, input);
   if (c.doc.kind === "glossary") return promoteGlossary(runtime, input);
+  if (c.doc.kind === "knowledge-fix") return promoteDrift(runtime, input);
   const file = targetOf(input.root, c, input.id);
   const id = file.replace(/^.*[\\/]/, "").replace(/\.md$/, "");
   // the same module's document under another name: replaced, and its file goes
@@ -426,6 +437,10 @@ export function promoteCandidate(runtime: Runtime, input: PromoteInput): Promote
     actor: `${input.actor.kind}:${input.actor.id}`,
     payload: { artifact: c.artifact.artifactId, file: path, ...(replaced ? { replaced } : {}) },
   });
+  // a module mapped again: what runs found on its old document is settled by the new one
+  if (c.doc.kind === "knowledge" && c.doc.module)
+    for (const p of new Set([file, ...(renamed ? [renamed] : [])].map((f) => versionedPathOf(input.root, f))))
+      closeDrift(runtime, p, input.actor, `settled: the module was mapped again (${c.name})`);
   return {
     file,
     path,
@@ -459,6 +474,42 @@ function promoteSkillEdit(runtime: Runtime, input: PromoteInput): Promoted {
     payload: { artifact: c.artifact.artifactId, file: path, skill: e.skill, version: e.version.to },
   });
   return { file: e.instructions, path, skill: { id: e.skill, ...e.version, fromBuiltin: e.fromBuiltin } };
+}
+
+/** Accepting a document's fixes: they are written into it next to what they correct (src/app/knowledgeDrift.ts). */
+function promoteDrift(runtime: Runtime, input: PromoteInput): Promoted {
+  const c = input.candidate;
+  const drift = c.doc.drift;
+  if (!drift) throw new CandidateNotPromotable("this candidate carries no findings");
+  const stamp = `${shortRunId(c.artifact.runId)}, ${new Date().toISOString().slice(0, 10)}`;
+  let file: string;
+  try {
+    file = writeDrift(input.root, drift, stamp);
+  } catch (error) {
+    throw new CandidateNotPromotable(error instanceof Error ? error.message : String(error));
+  }
+  const path = relative(input.root, file).split("\\").join("/");
+  runtime.artifacts.approve({
+    runId: c.artifact.runId,
+    stepId: c.artifact.stepId ?? "candidates",
+    artifactId: c.artifact.artifactId,
+    version: c.artifact.version,
+    actor: input.actor,
+    decision: "approve",
+    comment: [
+      `${drift.items.length} fix(es) written into ${drift.path}`,
+      input.channel ? `from the ${input.channel === "ui" ? "page" : "terminal"}` : "",
+    ]
+      .filter(Boolean)
+      .join("; "),
+  });
+  runtime.events.emit({
+    kind: "knowledge.promoted",
+    runId: c.artifact.runId,
+    actor: `${input.actor.kind}:${input.actor.id}`,
+    payload: { artifact: c.artifact.artifactId, file: path, fixes: drift.items.length },
+  });
+  return { file, path };
 }
 
 /** A glossary term another service has: whether it is one sense or two is a person's call. */

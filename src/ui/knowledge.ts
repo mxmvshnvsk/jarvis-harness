@@ -660,7 +660,7 @@ ${s.problems.map((p) => html`<div class="banner bad">${p}</div>`)}
 export interface CandidateView {
   readonly id: string;
   readonly name: string;
-  readonly kind: "knowledge" | "standard" | "skill-improvement" | "glossary";
+  readonly kind: "knowledge" | "standard" | "skill-improvement" | "glossary" | "knowledge-fix";
   readonly title: string;
   readonly rationale: string;
   readonly proposal?: string;
@@ -692,6 +692,16 @@ export interface CandidateView {
     /** Another service's glossary has the term: accepting needs one sense or two. */
     readonly conflict?: string;
   };
+  /** knowledge-fix: the document and what runs found it says that the code does not. */
+  readonly drift?: {
+    readonly path: string;
+    readonly items: ReadonlyArray<{
+      readonly section?: string;
+      readonly claim: string;
+      readonly actual: string;
+      readonly sources: readonly string[];
+    }>;
+  };
   /** Accepting cannot work, and why (a skill that is not this project's to change). */
   readonly blocked?: string;
 }
@@ -707,12 +717,13 @@ export interface CandidatesPage {
   readonly modules: number;
 }
 
-// t("standard") t("knowledge") t("skill-improvement") t("glossary")
+// t("standard") t("knowledge") t("skill-improvement") t("glossary") t("knowledge-fix")
 const KIND_PILL: Record<CandidateView["kind"], string> = {
   standard: "bad",
   knowledge: "info",
   "skill-improvement": "wait",
   glossary: "plain",
+  "knowledge-fix": "wait",
 };
 const kindPill = (k: CandidateView["kind"]) => html`<span class="pill ${KIND_PILL[k]}">${t(k)}</span>`;
 const candidateHref = (c: CandidateView, all: boolean) =>
@@ -744,6 +755,9 @@ function writesHtml(c: CandidateView): Html {
         to: c.skillEdit.to,
       },
     )}</p>`;
+  if (c.drift)
+    return html`<p class="hint">${th("Runs found {file} says what the code does not. Accepting writes each finding into it next to what it corrects — the code wins until the module is mapped again ({cmd} picks it up now).", { file: html`<code>${c.drift.path}</code>`, cmd: html`<code>jarvis onboard --stale</code>` })}</p>
+<ul class="kchecks">${c.drift.items.map((i) => html`<li class="warn"><span aria-hidden="true">≠</span> ${i.section ? html`<b>${i.section}</b>: ` : ""}«${i.claim}» → ${i.actual} ${i.sources.map((x) => html`<code>${x}</code> `)}</li>`)}</ul>`;
   if (c.glossary?.conflict)
     return html`<p class="hint"><b>${th("{service}'s glossary has the term {term} too.", { service: html`<code>${c.glossary.conflict}</code>`, term: html`<b>${c.glossary.term}</b>` })}</b> ${t("The same meaning: it moves to the shared glossary with both services' symbols. Another meaning: a homonym — each service keeps its own row, the shared glossary says where each is.")}</p>`;
   if (c.glossary)

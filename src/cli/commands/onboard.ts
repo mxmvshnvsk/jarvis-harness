@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { type DriftItem, driftLine, openDrift, versionedPathOf } from "../../app/knowledgeDrift.ts";
 import { createRuntime } from "../../app/runtime.ts";
 import type { GraphEdge, GraphNode } from "../../core/capabilities/contracts.ts";
 import { missingChecks } from "../../core/config/requiredChecks.ts";
@@ -373,6 +374,8 @@ export function remapNote(input: {
   readonly reasons: readonly string[];
   readonly changed: readonly string[];
   readonly lost: DocCheck["lost"];
+  /** What runs found it says that the code does not. */
+  readonly drift?: readonly DriftItem[];
 }): string {
   const purpose = input.text
     .replace(/^---\n[\s\S]*?\n---\n/, "")
@@ -383,6 +386,9 @@ export function remapNote(input: {
   const at = codeAtOf(input.text);
   return [
     `Map it again: ${input.doc}${at ? ` was made at ${at.commit.slice(0, 12)}${at.branch ? ` (${at.branch})` : ""}` : ""} and ${input.reasons.join("; ")}.`,
+    ...(input.drift && input.drift.length > 0
+      ? [`Runs found it wrong: ${input.drift.slice(0, 6).map(driftLine).join("; ")}.`]
+      : []),
     ...(purpose ? [`What it said the module is for: ${purpose.slice(0, 400)}`] : []),
     ...(input.changed.length > 0 ? [`Files changed since: ${input.changed.join(", ")}.`] : []),
     ...(input.lost.length > 0
@@ -412,10 +418,24 @@ async function runStaleMaps(
     language: loaded.config.language,
     tree: false,
   });
+  // what runs found the documents say that the code does not, a person has not decided yet
+  let drift = new Map<string, DriftItem[]>();
+  const runtime = createRuntime(loaded, { env: ctx.env });
+  try {
+    drift = openDrift(runtime);
+  } catch {
+    // no candidates to read: the code check alone decides
+  } finally {
+    await runtime.close();
+  }
   const todo: Array<{ module: string; doc: string; reasons: string[]; note: string }> = [];
   for (const d of check.docs) {
     if (!d.generated) continue;
-    const reasons = staleReasons(d);
+    const found = drift.get(versionedPathOf(root, join(root, d.doc))) ?? [];
+    const reasons = [
+      ...staleReasons(d),
+      ...(found.length > 0 ? [`${found.length} place(s) where runs found it disagrees with the code`] : []),
+    ];
     if (reasons.length === 0) continue;
     const text = readFileSync(join(root, d.doc), "utf8");
     const paths = parseFrontMatter(text).data.paths;
@@ -430,7 +450,7 @@ async function runStaleMaps(
       module,
       doc: d.doc,
       reasons,
-      note: remapNote({ doc: d.doc, text, reasons, changed, lost: d.lost }),
+      note: remapNote({ doc: d.doc, text, reasons, changed, lost: d.lost, drift: found }),
     });
   }
   if (todo.length === 0) {

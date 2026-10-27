@@ -1281,6 +1281,10 @@ ${candidateReviewHtml(c, run, run.workspace.repoRoot, actions, { back: `/runs/${
         extra = {
           skillEdit: { skill: e.skill, from: e.version.from, to: e.version.to, fromBuiltin: e.fromBuiltin },
         };
+      } else if (c.doc.kind === "knowledge-fix") {
+        extra = c.doc.drift
+          ? { drift: { path: c.doc.drift.path, items: c.doc.drift.items } }
+          : { blocked: "this candidate carries no findings" };
       } else if (c.doc.kind === "glossary") {
         const g = c.doc.glossary;
         extra = g

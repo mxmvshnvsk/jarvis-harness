@@ -6,6 +6,7 @@ import { type BudgetStop, grantBudget } from "../app/budgetStop.ts";
 import { proposeGlossaryCandidates } from "../app/candidates.ts";
 import { goOnRequested, rerunBackTo } from "../app/decide.ts";
 import { DeliveryError, deliverPr, deliversItself, PR_REQUEST, prFlowOn, prOf } from "../app/deliver.ts";
+import { proposeDriftCandidates } from "../app/knowledgeDrift.ts";
 import { checkMasterBudget } from "../app/masterBudget.ts";
 import { pausedText, pauseRequested } from "../app/pause.ts";
 import { pendingRedo } from "../app/redo.ts";
@@ -1182,13 +1183,21 @@ export class LocalWorkflowEngine {
     syncEditable(this.rt, run);
   }
 
-  /** A completed run: the terms it linked to code become glossary candidates (ADR-0015 §3). */
+  /** A completed run: the terms it linked to code become glossary candidates (ADR-0015 §3), the documents it found the code disagrees with — fixes. */
   private completed(run: Run): void {
     try {
       proposeGlossaryCandidates(this.rt, run);
     } catch (error) {
       // proposals are a by-product: a glossary that cannot be read never fails the run
       this.emit(run, "glossary.failed", { error: error instanceof Error ? error.message : String(error) });
+    }
+    try {
+      proposeDriftCandidates(this.rt, run);
+    } catch (error) {
+      // a by-product too: a document that cannot be read never fails the run
+      this.emit(run, "knowledge.drift.failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 
