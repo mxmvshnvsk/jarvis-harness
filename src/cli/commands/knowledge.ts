@@ -152,17 +152,23 @@ export async function runSkillsList(
 ): Promise<void> {
   const loaded = await loadForCli(ctx);
   const service = serviceOf(ctx, loaded, options.service);
-  const roots = service ? knowledgeRootsOf(loaded, service.repo) : rootsOf(loaded, ctx.cwd);
+  // the service's own configuration, as its run loads it: its knowledge.sources (skills kept in its docs)
+  const roots = service
+    ? knowledgeRootsOf(await loadForCli({ ...ctx, cwd: service.repo }), service.repo)
+    : rootsOf(loaded, ctx.cwd);
   const skills = loadSkills(roots);
   const stacks = service ? service.stacks : effectiveStacks(loaded.config.stack, roots.projectRoot);
   const unscoped = unscopedShared(
     loaded,
-    skills.map((s) => ({
-      id: s.id,
-      level: s.level,
-      stacks: s.appliesTo.stacks,
-      folderScoped: s.folderScoped,
-    })),
+    // a skill kept in a service's own documentation (knowledge.sources) is that service's already
+    skills
+      .filter((s) => !s.source && s.format !== "agent-skills")
+      .map((s) => ({
+        id: s.id,
+        level: s.level,
+        stacks: s.appliesTo.stacks,
+        folderScoped: s.folderScoped,
+      })),
   );
   const pkg = resolvePackage({
     roots,

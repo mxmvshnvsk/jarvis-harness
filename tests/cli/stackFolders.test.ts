@@ -20,7 +20,10 @@ const skill = (id: string, applies = "") =>
 beforeEach(() => {
   sb = sandbox();
   sb.write("home/.jarvis/config.yaml", "version: 1\nactor: { id: dev@example.com }\n");
-  sb.write("shop-knowledge/project.yaml", "version: 1\nservices:\n  orders-api: {}\n  shop-ui: {}\n");
+  sb.write(
+    "shop-knowledge/project.yaml",
+    "version: 1\nservices:\n  orders-api: {}\n  shop-ui:\n    knowledge: { sources: [{ path: docs, skills: ['SKILL_*.md'] }] }\n",
+  );
   sb.write("shop-knowledge/standards/java/_scope.yaml", "stacks: [java]\n");
   sb.write("shop-knowledge/standards/java/java-01-naming.md", std("java-01-naming"));
   sb.write("shop-knowledge/standards/frontend/_scope.yaml", "scope: { stacks: [react, typescript] }\n");
@@ -44,6 +47,7 @@ beforeEach(() => {
   }
   sb.write("shop-knowledge/skills/java/_scope.yaml", "stacks: [java]\n");
   sb.write("shop-knowledge/skills/frontend/_scope.yaml", "appliesTo: { stacks: [react] }\n");
+  sb.write("shop-ui/docs/SKILL_forms.md", "# Forms\n\nHow to add a form.\n");
   sb.write("orders-api/build.gradle", "plugins { id 'java' }\n");
   sb.write(
     "shop-ui/package.json",
@@ -108,6 +112,8 @@ describe("standards and skills by stack folders", () => {
     const skills = await jarvis(["skills", "list", "--service", "shop-ui"]);
     expect(skills.out).toContain("shop-ui — stacks: node, react, typescript");
     expect(skills.out).toContain("1 skill(s) name no stack (docker)");
+    // a skill kept in the service's own documentation (its knowledge.sources) is listed for it
+    expect(skills.out).toMatch(/\n. forms /);
     const doctor = await jarvis(["--json", "doctor"]);
     const checks = (JSON.parse(doctor.out) as { checks: Array<{ id: string; detail: string }> }).checks;
     expect(checks.find((c) => c.id === "knowledge.unscoped")?.detail).toContain("loose, docker");

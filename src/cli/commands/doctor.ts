@@ -245,12 +245,14 @@ export async function runDoctor(ctx: CliContext): Promise<DoctorReport> {
           stacks: x.scope.stacks,
           folderScoped: x.folderScoped,
         })),
-        ...loadSkills(roots).map((x) => ({
-          id: x.id,
-          level: x.level,
-          stacks: x.appliesTo.stacks,
-          folderScoped: x.folderScoped,
-        })),
+        ...loadSkills(roots)
+          .filter((x) => !x.source && x.format !== "agent-skills")
+          .map((x) => ({
+            id: x.id,
+            level: x.level,
+            stacks: x.appliesTo.stacks,
+            folderScoped: x.folderScoped,
+          })),
       ]);
       if (unscoped.length > 0)
         checks.push(
