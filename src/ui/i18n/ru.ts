@@ -546,6 +546,8 @@ export const RU: Readonly<Record<string, string>> = {
   all: "все",
   "in parts": "по частям",
   "Every module has a document.": "У каждого модуля есть документ.",
+  "No documents here yet. In a knowledge repository a service's documents are under Modules, by its folders.":
+    "Документов здесь пока нет. В репе знаний документы сервиса — в разделе «Модули», по его папкам.",
   "Architecture and modules": "Архитектура и модули",
   Project: "Проект",
   stale: "устарел",

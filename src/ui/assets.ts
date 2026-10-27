@@ -763,7 +763,8 @@ p.sv-pair{margin:0;font-size:14px}
 .kside{padding:0;gap:16px}
 .kbox p{margin:0;font-size:14px;line-height:21px}
 .kbox.warn{background:var(--focus-row)}
-.kres{justify-content:space-between}
+.kres{justify-content:space-between;flex-wrap:wrap;column-gap:12px}
+.kbox{min-width:0}.kempty{margin:0;padding:14px 30px}.kbox code,.kres>a{min-width:0;overflow-wrap:anywhere}
 .kdoccols{display:grid;grid-template-columns:260px minmax(0,1fr) 300px;gap:20px;align-items:start}
 .kdoccols.kstd{grid-template-columns:minmax(0,1fr) minmax(0,1.5fr)}
 .ktree,.klist{padding:10px 8px;display:flex;flex-direction:column;gap:2px}

@@ -115,6 +115,8 @@ describe("Services in jarvis ui", () => {
   it("the tab, the map and a service's page", async () => {
     const overview = await page("/knowledge");
     expect(overview.text).toContain('href="/knowledge/services">Services <span class="muted">2</span>');
+    // the services' documents are not the overview's: an empty table says where they are
+    expect(overview.text).toContain("documents are under Modules, by its folders");
     const map = await page("/knowledge/services");
     expect(map.status).toBe(200);
     // the top bar: Services of the map, current here; Knowledge not

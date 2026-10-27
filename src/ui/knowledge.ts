@@ -196,6 +196,7 @@ ${searchHtml(page)}
 <div class="row khead"><h2 id="docs-h">${t("Documents")}</h2><span class="hint">${t("click to read · edit them in your editor")}</span></div>
 <div class="ktable" role="table" aria-label="${t("Knowledge documents")}">
 <div class="kr kh" role="row"><span role="columnheader">${t("Document")}</span><span role="columnheader">${t("About (paths)")}</span><span role="columnheader">${t("Used")}</span><span role="columnheader">${t("Edited")}</span></div>
+${shown.length === 0 ? html`<p class="hint kempty">${t("No documents here yet. In a knowledge repository a service's documents are under Modules, by its folders.")}</p>` : ""}
 ${shown.map(
   (d) =>
     html`<a class="kr${d.staleCommits ? " warn" : ""}" role="row" href="${docHref(d.path)}"><span role="cell"><code>${d.path.replace(/^\.jarvis\/knowledge\//, "")}</code>${d.generated ? html` <span class="pill plain">${t("generated")}</span>` : ""}${d.source ? html` <span class="pill plain">documentation/</span>` : ""}${d.staleCommits ? html` <span class="pill wait">${t("may be stale")}</span>` : ""}</span><span role="cell" class="meta">${d.paths.length > 0 ? d.paths.slice(0, 2).join(", ") + (d.paths.length > 2 ? ` +${d.paths.length - 2}` : "") : t("everywhere")}</span><span role="cell" class="meta">${d.usage ? plural(d.usage.runs, "run") : "—"}</span><span role="cell" class="meta">${d.edited ?? t("not committed")}</span></a>`,
