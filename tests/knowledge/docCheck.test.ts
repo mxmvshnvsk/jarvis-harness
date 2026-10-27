@@ -46,6 +46,7 @@ describe("jarvis knowledge check (pilot: 30 documents checked by hand)", () => {
       ].join("\n"),
     );
     put("src/orders/extra.ts", "export const x = 1;\n");
+    put("src/orders/index.ts", "export * from './order';\n");
     git("add", "-A");
     git("commit", "-q", "-m", "code");
     const at = git("rev-parse", "HEAD");
@@ -65,6 +66,7 @@ describe("jarvis knowledge check (pilot: 30 documents checked by hand)", () => {
       "- Discounts first.",
       "  - `src/orders/order.ts:4`: `applyDiscounts(n)`",
       "- See `src/orders/gone.ts`, `src/orders/extra.ts`, `@scope/pkg`, `/api/orders`, `GhostThing` and `formatTotal()`.",
+      "- Not ours: `react-dom/server`, `login/password`, `metric_`; re-exported: `Order` (`src/orders/index.ts:1`).",
       "",
     ].join("\n");
     put(".jarvis/knowledge/module-src-orders.md", doc);

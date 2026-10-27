@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { layoutOf, rootRelative } from "../core/paths.ts";
+import { MODULE_MARKER, ONBOARD_MARKER } from "../onboarding/render.ts";
 import { trackedFiles } from "../onboarding/scan.ts";
 import { isAuxFolder, moduleTree, type TreeNode } from "../onboarding/tree.ts";
 import { codeAtOf, commitsSinceCode } from "./freshness.ts";
@@ -97,7 +98,7 @@ export function citedPath(text: string): string | undefined {
 /** A symbol a document names: an identifier that reads as code (camelCase, PascalCase, snake_case, a call). */
 export function citedSymbol(text: string): string | undefined {
   const t = text.trim().replace(/\(\)$/, "");
-  if (!/^[A-Za-z_$][\w$]{3,}$/.test(t)) return undefined;
+  if (!/^[A-Za-z_$][\w$]{3,}$/.test(t) || t.endsWith("_")) return undefined;
   return /[a-z][A-Z]|^[A-Z][a-z]+[A-Z]|_|\$|^[A-Z]{2,}[a-z]/.test(t) || text.trim().endsWith("()")
     ? t
     : undefined;
@@ -199,6 +200,10 @@ export async function checkKnowledge(
   const files = await trackedFiles(root);
   const words = wordsOf(root, files);
   const known = pathsOf(files);
+  // a path is the repository's when it starts at one of its folders; else a package's (`react-dom/server`),
+  // a build output, a route or words with a slash (`login/password`)
+  const folders = new Set(files.flatMap((f) => f.split("/").slice(0, -1)));
+  const ours = (p: string) => known.has(p) || folders.has(p.split("/")[0] as string);
   const cache = new Map<string, string[] | undefined>();
   const fileLines = (p: string) => {
     if (!cache.has(p)) {
@@ -254,8 +259,10 @@ export async function checkKnowledge(
         const src = fileLines(path);
         if (!src) return whole;
         const def = definitionOf(symbol);
+        const word = new RegExp(`(?<![\\w$])${symbol.replace(/[$]/g, "\\$")}(?![\\w$])`);
         const n = Number(at);
-        if (n <= src.length && def.test(src[n - 1] ?? "")) return whole;
+        // on its line, defined or not (a re-export, a key of a JSON file): in place
+        if (n <= src.length && (def.test(src[n - 1] ?? "") || word.test(src[n - 1] ?? ""))) return whole;
         const found = nearest(
           src.flatMap((l, i) => (def.test(l) ? [i + 1] : [])),
           n,
@@ -264,6 +271,8 @@ export async function checkKnowledge(
           moved += 1;
           return whole.replace(`${path}:${at}`, `${path}:${found}`);
         }
+        // named elsewhere in the file, or behind `export *`: it may still be there — not said gone
+        if (src.some((l) => word.test(l)) || src.some((l) => /export\s*\*/.test(l))) return whole;
         lost.push({ ref: `${path}:${at}`, text: symbol });
         return whole;
       });
@@ -271,7 +280,7 @@ export async function checkKnowledge(
     });
     const fixed = options.fix === true && moved > 0;
     if (fixed) writeFileSync(file, out.join("\n"));
-    const generated = text.includes("<!-- jarvis:onboard");
+    const generated = text.includes(MODULE_MARKER) || text.includes(ONBOARD_MARKER);
     const code = codeAtOf(text);
     const docPaths = parseFrontMatter(text).data.paths;
     const stale =
@@ -283,11 +292,13 @@ export async function checkKnowledge(
           )
         : undefined;
     const lang = options.language?.toLowerCase();
-    const found = lang === "ru" || lang === "en" ? proseLanguageOf(text) : undefined;
+    // the scan's skeletons (architecture, conventions) are written by jarvis as they are: not a language slip
+    const skeleton = text.includes(ONBOARD_MARKER);
+    const found = (lang === "ru" || lang === "en") && !skeleton ? proseLanguageOf(text) : undefined;
     docs.push({
       doc: rootRelative(root, file),
       cited: { paths: paths.length, symbols: symbols.length, quotes },
-      missingPaths: paths.filter((p) => !known.has(p)),
+      missingPaths: paths.filter((p) => ours(p) && !known.has(p)),
       missingSymbols: symbols.filter((s) => !words.has(s)),
       moved,
       lost,
