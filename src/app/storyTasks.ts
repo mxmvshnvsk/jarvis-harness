@@ -77,10 +77,10 @@ export async function readStoryTasks(
 export function storyTasksText(doc: StoryTasksDoc): string {
   return [
     `## Jira tasks of the Story ${doc.story}`,
-    "Their texts and the pages they link are in the sources input, already read: do not read them again. They are all parts of this task: a task of a side that has a service of the map is that service's subtask, whatever another service's knowledge says about whose it is. Each subtask is one of these tasks: set its `issue` to the key of the task of its service's side (a backend service — the back/middle task, a frontend — the front task). A service with no task of its side here: leave `issue` empty.",
+    "Their texts and the pages they link are in the sources input, already read: do not read them again. A task with a side is work: a task of a side that has a service of the map is that service's subtask, whatever another service's knowledge says about whose it is. Each subtask is one of these tasks: set its `issue` to the key of the task of its service's side (a backend service — the back/middle task, a frontend — the front task). A service with no task of its side here: leave `issue` empty. A task without a side (analytics, design, research of the domain) is read, not built: what it says and the pages it links are the requirements' source — no subtask is made for it and no subtask's `issue` is its key.",
     ...doc.tasks.map(
       (t) =>
-        `- ${t.key}${t.type ? ` (${t.type})` : ""}${t.side ? ` — ${t.side}` : ""}${t.summary ? `: ${t.summary}` : ""}`,
+        `- ${t.key}${t.type ? ` (${t.type})` : ""}${t.side ? ` — ${t.side}` : " — read only: no subtask"}${t.summary ? `: ${t.summary}` : ""}`,
     ),
   ].join("\n");
 }
@@ -115,7 +115,8 @@ export function issueOfSubtask(
 ): string | undefined {
   const doc = storyTasksOf(runtime, master);
   if (!doc) return undefined;
-  const keys = new Set(doc.tasks.map((t) => t.key));
+  // a task without a side (analytics, design) is read, not built: no subtask works under its key
+  const keys = new Set(doc.tasks.filter((t) => t.side).map((t) => t.key));
   if (sub.issue && keys.has(sub.issue)) return sub.issue;
   const taken = new Set(
     split.subtasks.filter((s) => s.key !== sub.key && s.issue && keys.has(s.issue)).map((s) => s.issue),

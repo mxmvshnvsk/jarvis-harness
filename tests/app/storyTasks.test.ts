@@ -144,6 +144,17 @@ describe("the Story's Jira tasks for a task across services", () => {
         { key: "ABC-7", type: "Analytics" },
       ],
     });
+    // read, not built: said to the split, and no subtask works under its key
+    expect(storyTasksText(doc as never)).toContain("- ABC-7 (Analytics) — read only: no subtask");
+    artifacts.set(STORY_TASKS, JSON.stringify(doc));
+    expect(
+      issueOfSubtask(
+        runtime,
+        master,
+        split(["ABC-7", undefined]).subtasks[0] as never,
+        split(["ABC-7", undefined]),
+      ),
+    ).toBe("ABC-19");
   });
 
   it("a server that refuses the fields as asked is asked again without them (pilot: Expected array)", async () => {
