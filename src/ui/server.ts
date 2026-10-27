@@ -942,7 +942,9 @@ ${kept && actions ? html`<form method="post" action="/runs/${encodeURIComponent(
       runtime.events.list({ runId: run.id, kind: "run.applied", limit: 1 }).length > 0 ||
       (branchExists &&
         (await git(["merge-base", "--is-ancestor", branch as string, "HEAD"], ws.repoRoot)).code === 0);
-    const keepWork = run.state === "COMPLETED" && !taken;
+    // a PR has the work (its branch pushed): the local branch is not its only copy, Apply is not the way
+    // (pilot: a delivered run said «its changes are not applied — the only copy» and offered Apply)
+    const keepWork = run.state === "COMPLETED" && !taken && !pr;
     const current = (await git(["rev-parse", "--abbrev-ref", "HEAD"], ws.repoRoot)).stdout.trim();
     const what = [
       exists ? th("folder {path}", { path: html`<code>${ws.path}</code>` }) : "",
@@ -952,7 +954,7 @@ ${kept && actions ? html`<form method="post" action="/runs/${encodeURIComponent(
     return html`<section class="panel" aria-labelledby="checkout"><h2 id="checkout">${t("Checkout")}</h2>
 <p class="muted">${th(what.length > 1 ? "The run has ended; its {what} are still there." : "The run has ended; its {what} is still there.", { what: html`${what.map((w, i) => html`${i > 0 ? ` ${t("and")} ` : ""}${w}`)}` })}</p>
 ${
-  actions && branchExists && !taken && run.state === "COMPLETED"
+  actions && branchExists && !taken && !pr && run.state === "COMPLETED"
     ? html`<form method="post" action="/runs/${encodeURIComponent(shortRunId(run.id))}/apply"><input type="hidden" name="t" value="${actions.token}"><div class="row"><button type="submit" class="btn primary">${th("Apply to {branch}", { branch: html`<code>${current}</code>` })}</button><span class="hint">${th("the run's changes as one commit on the branch checked out in the repository, as {cmd}; not pushed", { cmd: html`<code>jarvis apply</code>` })}</span></div></form>`
     : ""
 }
@@ -1307,6 +1309,12 @@ ${candidateReviewHtml(c, run, run.workspace.repoRoot, actions, { back: `/runs/${
       ...extra,
     };
   };
+  let usageMemo: { at: number; usage: ReturnType<typeof usageOf> } | undefined;
+  const usageNow = (): ReturnType<typeof usageOf> => {
+    const now = Date.now();
+    if (!usageMemo || now - usageMemo.at > 60_000) usageMemo = { at: now, usage: usageOf(runtime) };
+    return usageMemo.usage;
+  };
   const countsOf = (): KnowledgeCounts => {
     const r = roots();
     const safe = (f: () => number) => {
@@ -1336,11 +1344,13 @@ ${candidateReviewHtml(c, run, run.workspace.repoRoot, actions, { back: `/runs/${
     return glossaryCache.view;
   };
   /** A knowledge page: its content, then the drafts strip (every page commits the same way). */
-  const knowledgePage = async (r: Request, title: string, content: Html, back: string) =>
+  const knowledgePage = async (r: Request, title: string, content: Html, back: string, runId?: string) =>
     page(
       r,
       200,
-      { title, page: "knowledge" },
+      // a knowledge page follows the journal only for its own run (an answer being written): others
+      // are files, not runs (pilot: a knowledge tab re-read on every event of the runs in other tabs)
+      { title, page: "knowledge", ...(runId ? { runId } : {}) },
       html`${content}${draftsHtml(await draftsOf(), back, actions)}`,
     );
   /** Standards and skills are files people write: a broken one is said on the page, not a 500. */
@@ -1353,7 +1363,9 @@ ${candidateReviewHtml(c, run, run.workspace.repoRoot, actions, { back: `/runs/${
     const q = (name: string) => r.url.searchParams.get(name) ?? undefined;
     const counts = countsOf();
     const notice = knowledgeNotice(r);
-    const usage = usageOf(runtime);
+    // read on the pages that show it, at most once a minute (pilot: every knowledge page read the
+    // journal's last 20 000 tool calls, and a tab following the journal asked for it every 2 s)
+    const usage = () => usageNow();
     if (at === "/knowledge") {
       const query = q("q")?.trim().slice(0, 300);
       let result: RetrievalResult | undefined;
@@ -1378,7 +1390,7 @@ ${candidateReviewHtml(c, run, run.workspace.repoRoot, actions, { back: `/runs/${
       const content = overviewContent(
         {
           counts,
-          docs: await docsOf(roots(), usage),
+          docs: await docsOf(roots(), usage()),
           glossaryProblems: glossary.rows.filter((x) => x.problems.length > 0).length,
           toResearch,
           candidates,
@@ -1424,7 +1436,7 @@ ${candidateReviewHtml(c, run, run.workspace.repoRoot, actions, { back: `/runs/${
       );
     }
     if (at === "/knowledge/docs") {
-      const docs = await docsOf(roots(), usage);
+      const docs = await docsOf(roots(), usage());
       const want = q("doc");
       // by path, or by name (`?doc=architecture.md` — wherever the project keeps its knowledge)
       const selected = want ? docs.find((d) => d.path === want || d.name === want) : docs[0];
@@ -1449,7 +1461,7 @@ ${candidateReviewHtml(c, run, run.workspace.repoRoot, actions, { back: `/runs/${
     if (at === "/knowledge/standards") {
       let content: Html;
       try {
-        const standards = standardsOf(runtime, roots(), usage);
+        const standards = standardsOf(runtime, roots(), usage());
         const severity = q("severity");
         const sev = severity === "required" || severity === "recommended" ? severity : undefined;
         const id = q("id");
@@ -1492,7 +1504,7 @@ ${candidateReviewHtml(c, run, run.workspace.repoRoot, actions, { back: `/runs/${
     if (at === "/knowledge/skills") {
       let content: Html;
       try {
-        const skills = skillsOf(roots(), usage);
+        const skills = skillsOf(roots(), usage());
         const id = q("id");
         const selected = id
           ? skills.find((s) => `${s.skill.id}${s.overridden ? "@builtin" : ""}` === id)
@@ -1552,6 +1564,7 @@ ${candidateReviewHtml(c, run, run.workspace.repoRoot, actions, { back: `/runs/${
         current ? `Ask · ${current.question.slice(0, 60)}` : "Knowledge · ask",
         content,
         "/knowledge/ask",
+        run && !isTerminal(run.state) ? run.id : undefined,
       );
     }
     if (at === "/knowledge/glossary") {

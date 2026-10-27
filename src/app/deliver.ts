@@ -154,11 +154,18 @@ export function scopeNamed(runtime: Runtime, runId: string): string | undefined 
 }
 
 /** The PR a run was delivered as, if it was. */
+/** A PR's address as a person reads it: the server's base and its path joined once (`…//projects` → `…/projects`). */
+export function prUrl(url: string): string {
+  return url.replace(/^(https?:\/\/[^/]+)\/{2,}/, "$1/");
+}
+
 export function prOf(runtime: Runtime, run: Run): Delivered | undefined {
   const artifact = runtime.artifacts.listLatest(run.id, PR_ARTIFACT)[0];
   if (!artifact) return undefined;
   try {
-    return JSON.parse(runtime.artifacts.text(artifact)) as Delivered;
+    const pr = JSON.parse(runtime.artifacts.text(artifact)) as Delivered;
+    // the server's link as it gave it, a double slash and all (e.g. «https://git.example.com//projects/…»)
+    return pr.url ? { ...pr, url: prUrl(pr.url) } : pr;
   } catch {
     return undefined;
   }
@@ -455,7 +462,7 @@ export async function deliverPr(runtime: Runtime, run: Run, options: DeliverOpti
       });
       const found = linkOf(opened.result);
       const delivered: Delivered = {
-        ...(found.url ? { url: found.url } : {}),
+        ...(found.url ? { url: prUrl(found.url) } : {}),
         ...(found.id ? { id: found.id } : {}),
         title: request.title,
         source: request.source,
@@ -479,7 +486,7 @@ export async function deliverPr(runtime: Runtime, run: Run, options: DeliverOpti
         kind: "run.delivered",
         runId: run.id,
         payload: {
-          ...(found.url ? { url: found.url } : {}),
+          ...(found.url ? { url: prUrl(found.url) } : {}),
           capability: capability.name,
           source: request.source,
           target: request.target,

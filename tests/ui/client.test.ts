@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { beforeEach, describe, expect, it } from "vitest";
-import { edited, inPhase, morphRegions, startClocks } from "../../src/ui/client/live.ts";
+import { edited, followsJournal, inPhase, morphRegions, startClocks } from "../../src/ui/client/live.ts";
 
 /**
  * The page's live refresh on a DOM: each `[data-live]` region morphed to the server's fresh rendering,
@@ -106,5 +106,16 @@ describe("running clocks", () => {
     el.dataset.ms = "3600000";
     countOn();
     expect(el.textContent).toBe("1:00:00");
+  });
+});
+
+describe("what follows the journal", () => {
+  it("a run's page its run, Runs any run, a knowledge page only its own run", () => {
+    expect(followsJournal("run", "run_a", ["run_a"])).toBe(true);
+    expect(followsJournal("run", "run_a", ["run_b"])).toBe(false);
+    expect(followsJournal("runs", undefined, ["run_b"])).toBe(true);
+    // pilot: a knowledge tab re-rendered on every event of the runs open in other tabs, and the server hung
+    expect(followsJournal("knowledge", undefined, ["run_b"])).toBe(false);
+    expect(followsJournal("knowledge", "run_ask", ["run_ask"])).toBe(true);
   });
 });

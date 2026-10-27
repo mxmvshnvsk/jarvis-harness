@@ -96,6 +96,21 @@ export function startClocks(doc: Document = document): () => void {
   return countOn;
 }
 
+/**
+ * Whether a journal event about `runs` refreshes the page: a run's page — its own run's events; the Runs
+ * page — any; a knowledge page — only its own run (an answer being written), else none: it shows files,
+ * not runs (pilot: a knowledge tab re-rendered on every event of the runs open in other tabs, each time
+ * reading the journal, and the server stopped answering them all).
+ */
+export function followsJournal(
+  page: string | undefined,
+  runId: string | undefined,
+  runs?: readonly string[],
+): boolean {
+  if (runId) return (runs ?? []).includes(runId);
+  return page !== "knowledge";
+}
+
 /** The live page: the journal's events (SSE) and the page's tick bring refreshes, at most one each 2 s. */
 export function startLive(hooks: { afterRefresh: () => void; onJournal: () => void }): () => Promise<void> {
   const body = document.body;
@@ -163,7 +178,7 @@ export function startLive(hooks: { afterRefresh: () => void; onJournal: () => vo
       } catch {
         /* an event without data: refresh all the same */
       }
-      if (!runId || (data.runs ?? []).includes(runId)) soon();
+      if (followsJournal(body.dataset.page, runId, data.runs)) soon();
       clearTimeout(journalSoon);
       journalSoon = setTimeout(hooks.onJournal, 1000);
     });

@@ -405,6 +405,32 @@ describe("Knowledge → Modules", () => {
       "Removed: no folder and no branch of this run are left.",
     );
 
+    // delivered by a PR: its pushed branch has the work — no Apply, not «the only copy», the link as read
+    const delivered = await make("ABC-3 delivered", "COMPLETED");
+    rt.artifacts.put({
+      runId: delivered.run.id,
+      type: "pull-request",
+      name: "pull-request.json",
+      content: JSON.stringify({
+        url: "https://git.example.com//projects/shop/repos/orders/pull-requests/7",
+        id: "7",
+        title: "t",
+        source: "feature/ABC-3",
+        target: "dev",
+        commit: "c",
+        capability: "bitbucket.pr.create",
+        actor: "user:dev@example.com",
+        at: "2026-10-23T06:44:26.558Z",
+      }),
+      mediaType: "application/json",
+      provenance: { kind: "tool", capability: "bitbucket.pr.create" },
+    });
+    const db = await page(`/runs/${delivered.short}`);
+    expect(db).toContain('href="https://git.example.com/projects/shop/repos/orders/pull-requests/7"');
+    expect(db).not.toContain("Apply to");
+    expect(db).not.toContain("its changes are not applied");
+    expect(db).toMatch(/name="branch" value="1" checked> also delete the branch/);
+
     const finished = await make("ABC-2 finished", "COMPLETED");
     const fb = await page(`/runs/${finished.short}`);
     expect(fb).toMatch(/name="branch" value="1"> also delete the branch/);
