@@ -30,7 +30,7 @@ import { Journey, type LoopReport, type StepReport } from "../app/journey.ts";
 import { type MasterBudget, masterBudgetOf } from "../app/masterBudget.ts";
 import { pauseRequested } from "../app/pause.ts";
 import { type PlanProgress, planProgressOf } from "../app/planProgress.ts";
-import { followsPr, prReviewOf } from "../app/prReview.ts";
+import { followsPr, openThreads, prReviewOf } from "../app/prReview.ts";
 import { triageOf } from "../app/prTriage.ts";
 import { redoableInPlace, redoTargets } from "../app/redo.ts";
 import { type RestartPlan, restartPlanOf } from "../app/restart.ts";
@@ -1017,7 +1017,7 @@ export function runPrOf(runtime: Runtime, run: Run): RunPr | undefined {
   if (!pr) return undefined;
   const review = prReviewOf(runtime, run);
   const need = runtime.loaded.config.delivery.flow.ready.approvals;
-  const threads = review ? review.threads.filter((x) => !x.mine).length : 0;
+  const threads = review ? openThreads(review.threads).length : 0;
   const waiting = triageOf(runtime, run).items.filter((i) => i.state === "proposed").length;
   const b = review?.build;
   const build = b ? (b.failed > 0 ? "failed" : b.inProgress > 0 ? "running" : "ok") : undefined;

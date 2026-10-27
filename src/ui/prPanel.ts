@@ -1,5 +1,5 @@
 import type { Delivered } from "../app/deliver.ts";
-import type { PrComment, PrReviewDoc, PrThread } from "../app/prReview.ts";
+import { openThreads, type PrComment, type PrReviewDoc, type PrThread } from "../app/prReview.ts";
 import { commentText, type TriageDoc, type TriageItem } from "../app/prTriage.ts";
 import type { Run } from "../core/domain/run.ts";
 import { shortRunId } from "../storage/runStore.ts";
@@ -55,7 +55,7 @@ export function prPanelHtml(
       : phase === "DECLINED"
         ? "bad"
         : "info";
-  const open = doc ? doc.threads.filter((t) => !t.mine).length : undefined;
+  const open = doc ? openThreads(doc.threads).length : undefined;
   const link = pr.url
     ? html`<a href="${pr.url}" rel="noreferrer noopener" target="_blank">PR #${pr.id ?? ""}</a>`
     : html`PR`;

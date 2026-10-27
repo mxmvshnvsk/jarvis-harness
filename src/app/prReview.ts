@@ -23,6 +23,8 @@ export interface PrComment {
 }
 
 export interface PrThread extends PrComment {
+  /** A tool's comment (`delivery.flow.bots`): not a thread that holds the merge, not answered. */
+  readonly bot?: true;
   readonly file?: string;
   readonly line?: number;
   /** A task (Bitbucket Server: BLOCKER), not a plain comment. */
@@ -109,9 +111,18 @@ function reviewersOf(v: unknown): PrReviewDoc["reviewers"] {
   });
 }
 
+/** A tool's author: named in `delivery.flow.bots`, or «bot» in its name. */
+export function isBot(author: string, bots: readonly string[] = []): boolean {
+  return bots.includes(author) || /(^|[^a-z])bot([^a-z]|$)|\[bot\]/i.test(author);
+}
+
+/** Open threads of people: not Jarvis's own, not a tool's. */
+export const openThreads = (threads: readonly PrThread[]) => threads.filter((t) => !t.mine && !t.bot);
+
 /** What `bitbucket.pr.get` answered: state, reviewers, the open threads, the tasks. */
 export function prStateOf(
   text: string,
+  bots: readonly string[] = [],
 ): Omit<PrReviewDoc, "pr" | "repo" | "ready" | "blockers" | "checkedAt"> {
   const doc = json(text) ?? {};
   const comments = Array.isArray(doc.active_comments)
@@ -126,9 +137,14 @@ export function prStateOf(
       ...(str(c.file_path) ? { file: str(c.file_path) as string } : {}),
       ...(num(c.line_number) !== undefined ? { line: num(c.line_number) as number } : {}),
       ...(c.is_task === true ? { task: true } : {}),
+      ...(isBot(str(c.author) ?? "", bots) ? { bot: true as const } : {}),
       ...(num(c.version) !== undefined ? { version: num(c.version) as number } : {}),
     }));
-  const reviewers = reviewersOf(doc.reviewers);
+  // the server lists them in no stable order: sorted, a read that changed nothing is the same document
+  // (pilot: a new pr-review every poll, fifty in a day, from the order of the reviewers alone)
+  const reviewers = [...reviewersOf(doc.reviewers)].sort((x, y) =>
+    x.name < y.name ? -1 : x.name > y.name ? 1 : 0,
+  );
   const tasks = Array.isArray(doc.tasks) ? (doc.tasks as Array<Record<string, unknown>>) : undefined;
   const openTasks = num(doc.open_task_count) ?? tasks?.filter((t) => str(t.state) !== "RESOLVED").length ?? 0;
   const head = str(doc.source_commit);
@@ -168,7 +184,7 @@ export function readinessOf(
   if (s.approvals < approvals) blockers.push(`approvals: ${s.approvals} of ${approvals}`);
   const work = s.reviewers.filter((r) => r.status === "NEEDS_WORK").map((r) => r.name);
   if (work.length > 0) blockers.push(`needs work: ${work.join(", ")}`);
-  const open = s.threads.filter((t) => !t.mine).length;
+  const open = openThreads(s.threads).length;
   if (open > 0) blockers.push(`open threads: ${open}`);
   if (s.openTasks > 0) blockers.push(`open tasks: ${s.openTasks}`);
   if (s.build && s.build.failed > 0) blockers.push("the build failed");
@@ -250,11 +266,11 @@ export async function checkPr(
     throw new PrCheckError(
       "bitbucket.pr.get is not available or failed: allow it on the Bitbucket MCP server",
     );
-  const state = prStateOf(got);
+  const flow = runtime.loaded.config.delivery.flow;
+  const state = prStateOf(got, flow.bots);
   // the build: optional — a server without it, or not allowed, leaves it unknown, not failed
   const commits = await read("bitbucket.pr.commits", at).catch(() => undefined);
   const build = commits ? buildOf(commits, state.head) : undefined;
-  const flow = runtime.loaded.config.delivery.flow;
   const whole = { ...state, ...(build ? { build } : {}) };
   const { ready, blockers } = readinessOf(whole, flow.ready.approvals);
   const before = prReviewOf(runtime, run);
@@ -295,7 +311,7 @@ export async function checkPr(
       channel,
       state: doc.state,
       fresh: fresh.length,
-      open: doc.threads.filter((t) => !t.mine).length,
+      open: openThreads(doc.threads).length,
       approvals: doc.approvals,
       ...(doc.build
         ? { build: doc.build.failed > 0 ? "failed" : doc.build.inProgress > 0 ? "running" : "ok" }

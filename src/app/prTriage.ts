@@ -117,7 +117,7 @@ export function lastTheirs(thread: PrThread): { comment: PrComment; answered: bo
 /** Threads to weigh: a reviewer's comment not weighed yet, and not answered by Jarvis after it. */
 export function threadsToWeigh(review: PrReviewDoc, triage: TriageDoc): PrThread[] {
   return review.threads.filter((t) => {
-    if (t.mine) return false;
+    if (t.mine || t.bot) return false;
     const last = lastTheirs(t);
     if (!last || last.answered) return false;
     const known = triage.items.find((i) => i.thread === t.id);
@@ -199,7 +199,8 @@ export async function triagePr(runtime: Runtime, run: Run, review: PrReviewDoc):
           "Rules:",
           "- agree when the comment is right: a bug, a missed case, the team's convention, a clearer name. Say what to change, exactly.",
           "- disagree only with a reason that stands: the spec or the task says so, the code already handles it (`path:line`), the change is out of the task's scope. Never disagree because a change is work.",
-          "- question when the reviewer asks to explain, not to change: the reply explains.",
+          "- question when the reviewer asks to explain, not to change: the reply explains — from the code, with `path:line` of what you read; the task or the contract says what was meant, not what the code does (pilot: «the middle expects these fields» answered with the contract, when the middle's code showed it).",
+          "- A tool's comment (a scanner's summary, a code-owners notice) is nothing, with no reply.",
           "- nothing for thanks, an acknowledgement, or what is already done.",
           "- The reply goes to the reviewer: their language, polite, short, no apologies, no praise of the comment. Never promise what agree does not change.",
           '- Quote with «» and never with ".',

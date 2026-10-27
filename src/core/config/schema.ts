@@ -652,6 +652,11 @@ export const DeliveryConfigSchema = z.strictObject({
       fixWhenAgreed: z.boolean().default(true),
       /** Ready for merge: this many approvals (the front 2, the back 1 — per repository or service). */
       ready: z.strictObject({ approvals: z.int().min(0).max(10).default(1) }).prefault({}),
+      /**
+       * Authors whose PR comments are a tool's, not a reviewer's (a scanner's summary, a code-owners
+       * notice): not open threads that hold the merge, and not answered. Also any name with «bot» in it.
+       */
+      bots: z.array(z.string().min(1)).default([]),
     })
     .prefault({}),
 });

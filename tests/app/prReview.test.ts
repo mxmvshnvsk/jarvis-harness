@@ -78,14 +78,40 @@ describe("reading a PR", () => {
     const s = prStateOf(`[bitbucket.pr.get] ok\n${PR()}`);
     expect(s).toMatchObject({ state: "OPEN", version: 5, approvals: 1, openTasks: 1 });
     expect(s.reviewers).toEqual([
-      { name: "reviewer-a", status: "APPROVED" },
       { name: "Reviewer B" },
+      { name: "reviewer-a", status: "APPROVED" },
       { name: "reviewer-c", status: "NEEDS_WORK" },
     ]);
     expect(s.threads[0]).toMatchObject({ id: 101, file: "src/main/java/shop/OrderService.java", line: 48 });
     expect(s.threads[0]?.replies[0]).toMatchObject({ id: 102, mine: true });
     expect(s.threads[1]).toMatchObject({ id: 103, task: true });
     expect(buildOf(COMMITS, s.head)).toEqual({ successful: 1, failed: 0, inProgress: 0 });
+  });
+
+  it("the reviewers in a stable order; a tool's comment is not an open thread", () => {
+    // pilot: the server listed the reviewers in another order on every read — a new document each poll
+    const one = prStateOf(PR({ reviewers: ["b (APPROVED)", "a", "c"] }));
+    const two = prStateOf(PR({ reviewers: ["c", "b (APPROVED)", "a"] }));
+    expect(one.reviewers).toEqual(two.reviewers);
+    // a scanner's summary and a code-owners notice hold no merge and get no answer
+    const bots = prStateOf(
+      PR({
+        reviewers: ["a (APPROVED)"],
+        active_comments: [
+          { id: 1, author: "scanner", text: "| tool | issues |", state: "OPEN" },
+          { id: 2, author: "Owners Bot", text: "owners added", state: "OPEN" },
+          { id: 3, author: "Reviewer B", text: "why?", state: "OPEN" },
+        ],
+        open_task_count: 0,
+      }),
+      ["scanner"],
+    );
+    expect(bots.threads.map((t) => [t.id, t.bot ?? false])).toEqual([
+      [1, true],
+      [2, true],
+      [3, false],
+    ]);
+    expect(readinessOf({ ...bots, approvals: 5 }, 1).blockers).toEqual(["open threads: 1"]);
   });
 
   it("ready for merge: enough approvals, nobody wants work, no open thread or task, the build green", () => {
