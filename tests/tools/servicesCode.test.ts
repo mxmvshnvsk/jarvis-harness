@@ -4,15 +4,19 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { forgetLayouts, metaProjectPaths, rememberLayout } from "../../src/core/paths.ts";
-import { ServicesCodeProvider, servesServicesCode } from "../../src/tools/servicesCode.ts";
+import { SERVICES_READS, ServicesCodeProvider, servesServicesCode } from "../../src/tools/servicesCode.ts";
 import type { ToolContext } from "../../src/tools/types.ts";
 
 let base: string;
 let meta: string;
 
-const ctxAt = (workspacePath: string) =>
+let step = 0;
+const ctxAt = (workspacePath: string, stepId = `s${step}`) =>
   ({
     workspacePath,
+    run: { id: "run_t" },
+    stepId,
+    iteration: 1,
     pathPolicy: { isDenied: (p: string) => p.startsWith("secret") },
   }) as unknown as ToolContext;
 const tool = (name: string) => {
@@ -22,6 +26,7 @@ const tool = (name: string) => {
 };
 
 beforeEach(() => {
+  step += 1;
   base = mkdtempSync(join(tmpdir(), "svc-code-"));
   meta = join(base, "knowledge-repo");
   mkdirSync(meta);
@@ -31,7 +36,10 @@ beforeEach(() => {
   );
   for (const [svc, files] of Object.entries({
     "shop-web": { "src/banner.ts": "export const showGiftBanner = true;\n", "secret.ts": "showGiftBanner\n" },
-    "orders-api": { "src/Order.java": "class Order { boolean giftBanner; }\n" },
+    "orders-api": {
+      "src/Order.java": "class Order { boolean giftBanner; }\n",
+      "src/Big.java": "// line\n".repeat(40),
+    },
   })) {
     const dir = join(base, svc);
     for (const [f, text] of Object.entries(files)) {
@@ -94,5 +102,27 @@ describe("the services' code from the knowledge repository", () => {
         )
       ).error,
     ).toContain("only in a task across services");
+  });
+
+  it("lines shown in the step already get a pointer; past its reads the master is told to finish", async () => {
+    const read = (a: Record<string, unknown>) => tool("services.read").handler(a, ctxAt(meta));
+    await read({ service: "shop-web", path: "src/banner.ts", startLine: 1, endLine: 2 });
+    const again = await read({ service: "shop-web", path: "src/banner.ts", startLine: 1, endLine: 1 });
+    expect(again.text).toBe(
+      "shop-web:src/banner.ts: lines 1–1 were shown in this step already (a read of 1–2 above) — use them",
+    );
+    for (let i = 1; i < SERVICES_READS; i++)
+      await read({ service: "orders-api", path: "src/Big.java", startLine: i, endLine: i });
+    const past = await read({ service: "orders-api", path: "src/Big.java", startLine: 35, endLine: 36 });
+    expect(past.text).toContain(`${SERVICES_READS} places of the services' code read in this step`);
+    // another step reads again
+    expect(
+      (
+        await tool("services.read").handler(
+          { service: "shop-web", path: "src/banner.ts" },
+          ctxAt(meta, "other"),
+        )
+      ).text,
+    ).toContain("1: export const");
   });
 });

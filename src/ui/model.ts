@@ -1706,14 +1706,18 @@ export async function runPage(
   const reports = new Map<string, StepReport[]>();
   const loops = new Map<string, LoopReport[]>();
   const started = new Map<string, string>();
+  const rounds = new Map<string, number>();
   const finished = new Set<string>();
   const skills = new Map<string, StepSkills>();
   for (const e of events) {
     if (e.kind === "context.skills" && e.stepId) skills.set(e.stepId, skillsOf(e));
     if (e.kind === "step.start") {
       const id = str(e.payload?.stepId) ?? e.stepId;
-      if (id) {
+      const round = Number(e.payload?.iteration ?? e.iteration ?? 1);
+      // the same round resumed (more budget, a quota window, a pause): its clock goes on from its start
+      if (id && !(started.has(id) && !finished.has(id) && rounds.get(id) === round)) {
         started.set(id, e.ts);
+        rounds.set(id, round);
         finished.delete(id);
       }
     }

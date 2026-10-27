@@ -22,6 +22,16 @@ export function servesServicesCode(root: string): boolean {
 
 const MAX_LINE = 300;
 const READ_MAX = 400;
+/**
+ * Reads of the services' code in one step: the master maps the task onto services and their contract;
+ * each subtask's research reads its own code. Pilot: a master's research read 156 places in the
+ * services' code — the hashing, the e-mails, the controllers, their tests — and ran to 270 calls.
+ */
+export const SERVICES_READS = 30;
+
+/** What a step was shown of each file: its line ranges (what a read inside them would repeat). */
+const shown = new Map<string, Map<string, Array<[number, number]>>>();
+const stepOf = (ctx: ToolContext) => `${ctx.run.id}:${ctx.stepId}:${ctx.iteration}`;
 
 function cloned(ctx: ToolContext): Record<string, string> | ToolOutput {
   if (!servesServicesCode(ctx.workspacePath))
@@ -148,6 +158,28 @@ export class ServicesCodeProvider implements ToolProvider {
           const lines = readFileSync(file, "utf8").split("\n");
           const from = Math.max(1, Number(args.startLine) || 1);
           const to = Math.min(lines.length, Number(args.endLine) || from + READ_MAX - 1, from + READ_MAX - 1);
+          const step = shown.get(stepOf(ctx)) ?? new Map<string, Array<[number, number]>>();
+          shown.set(stepOf(ctx), step);
+          // the steps of long ago are of no use: the map keeps the latest few
+          if (shown.size > 64) shown.delete(shown.keys().next().value as string);
+          const key = `${service}:${rel}`;
+          const ranges = step.get(key) ?? [];
+          // lines this step was shown already: a pointer, not the text again
+          const within = ranges.find(([a, b]) => a <= from && to <= b);
+          if (within)
+            return {
+              ok: true,
+              text: `${key}: lines ${from}–${to} were shown in this step already (a read of ${within[0]}–${within[1]} above) — use them`,
+              data: { service, path: rel, repeat: true },
+            };
+          const reads = [...step.values()].reduce((n, r) => n + r.length, 0);
+          if (reads >= SERVICES_READS)
+            return {
+              ok: true,
+              text: `${SERVICES_READS} places of the services' code read in this step: enough to say which service changes where. Name the place (${key}) in your result — the subtask's own research reads it — and finish.`,
+              data: { service, path: rel, capped: true },
+            };
+          step.set(key, [...ranges, [from, to]]);
           const body = lines
             .slice(from - 1, to)
             .map((l, i) => `${from + i}: ${l}`)

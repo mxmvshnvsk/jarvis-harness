@@ -195,6 +195,22 @@ describe("the steps as they went", () => {
         ),
       );
     expect(await status()).toEqual({ write: "running", approve: "returned" });
+    // more budget for write#2: the same round resumes, its clock goes on from where it began
+    const startOf = async () =>
+      (await runPage(rt, createEngine(rt), rt.runs.get(run.id) as never, { homeDir: sb.home })).steps.find(
+        (s) => s.id === "write",
+      )?.startedAt;
+    const began = await startOf();
+    await new Promise((r) => setTimeout(r, 15));
+    rt.events.emit({
+      kind: "step.start",
+      runId: run.id,
+      stepId: "write",
+      iteration: 2,
+      payload: { stepId: "write", iteration: 2 },
+    });
+    expect(began).toBeDefined();
+    expect(await startOf()).toBe(began);
     const body = runContent(
       await runPage(rt, createEngine(rt), rt.runs.get(run.id) as never, { homeDir: sb.home }),
       Date.now(),
