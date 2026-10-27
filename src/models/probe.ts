@@ -3,6 +3,7 @@ import { join } from "node:path";
 import type { ModelConfig, ModelSupports } from "../core/config/schema.ts";
 import { ModelError } from "./errors.ts";
 import type { ModelGateway } from "./gateway.ts";
+import { extractJson } from "./structured.ts";
 
 /**
  * `jarvis models probe` (ADR-0007 §1): canary requests that establish what a model actually
@@ -177,9 +178,13 @@ export async function probeModel(gateway: ModelGateway, modelId: string): Promis
   };
 }
 
+/**
+ * The answer read as a run reads it: bare or in a ```json fence (pilot: a gateway that keeps the fence
+ * under response_format was probed "no", and the router then refused the model to every agent).
+ */
 function parsesOk(text: string): boolean {
   try {
-    return (JSON.parse(text) as { ok?: unknown }).ok === true;
+    return (JSON.parse(extractJson(text) ?? text) as { ok?: unknown }).ok === true;
   } catch {
     return false;
   }

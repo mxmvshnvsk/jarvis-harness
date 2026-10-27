@@ -53,6 +53,22 @@ describe("probeModel", () => {
     expect(probeIsStale({ ...result, probedAt: "2020-01-01T00:00:00Z" })).toBe(true);
   });
 
+  it("JSON in a ```json fence is JSON mode: a run reads it the same way", async () => {
+    server.respond((req) => {
+      const body = req.body as { response_format?: { type: string }; tools?: unknown[] };
+      if (body.tools) return toolCallCompletion("ping", { echo: "hi" });
+      if (body.response_format) return completion('```json\n{"ok": true}\n```');
+      return completion("PONG");
+    });
+    const gateway = new ModelGateway({
+      config: testConfig(server.baseUrl),
+      adapters: defaultAdapters(),
+      secrets: new EnvSecretResolver({ FAKE_TOKEN: "t" }),
+    });
+    const result = await probeModel(gateway, "schema");
+    expect(result.supports.jsonMode).toBe(true);
+  });
+
   it("stops immediately on auth failures instead of recording them as unsupported", async () => {
     server.respond(() => ({ status: 401, body: "no" }));
     const gateway = new ModelGateway({
