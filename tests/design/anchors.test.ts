@@ -2,6 +2,22 @@ import { describe, expect, it } from "vitest";
 import { ANCHOR_LIMITS, anchorsIn, anchorsSection, hitOf } from "../../src/design/anchors.ts";
 
 describe("anchors: the sources' code names and interface texts, found in the code by code", () => {
+  it("a person's name in an issue's JSON is no interface text (pilot: a link ate the field up to the name)", () => {
+    const issue = JSON.stringify({
+      fields: {
+        assignee: {
+          avatarUrls: { "32x32": "https://jira.example.org/secure/useravatar?size=medium&avatarId=10172" },
+          displayName: "Petrov Ivan Sergeevich",
+          active: true,
+        },
+      },
+    });
+    const texts = anchorsIn([issue, "Remove the «Gift banner» from the card"])
+      .filter((a) => a.kind === "text")
+      .map((a) => a.value);
+    expect(texts).toEqual(["Gift banner"]);
+  });
+
   it("takes names and quoted texts; leaves JSON keys and values, links, brands, escapes and ids", () => {
     // a page as a tool answers it: JSON, its markdown body with escaped quotes and line breaks
     const page = JSON.stringify({

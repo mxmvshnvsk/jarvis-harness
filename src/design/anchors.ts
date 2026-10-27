@@ -50,7 +50,10 @@ export function anchorsIn(texts: readonly string[]): Anchor[] {
       .replace(/\\+[rt]/g, " ")
       .replace(/\\+"/g, '"')
       .replace(/\u00a0|&nbsp;/g, " ")
-      .replace(/https?:\/\/\S+/g, " ");
+      // a link ends at a quote or a bracket too: in a tool's JSON nothing separates it from the next
+      // field (pilot: `…avatarId=1"},"displayName":"Surname Name Patronymic"` — the end of a person's name
+      // was searched for in the code as an interface text)
+      .replace(/https?:\/\/[^\s"'<>()[\]{}]+/g, " ");
     for (const m of text.matchAll(
       /(?<![\w./-])([a-z][a-z0-9]*(?:[A-Z][a-z0-9]*)+|[A-Z][a-z0-9]+(?:[A-Z][a-z0-9]+)+|[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+)(?![\w/-])/g,
     )) {
