@@ -3,7 +3,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { parse } from "yaml";
-import { declaredPublishes, librariesOf, libraryOf, usesOf } from "../../src/onboarding/library.ts";
+import {
+  declaredPublishes,
+  librariesOf,
+  libraryOf,
+  platformDiff,
+  platformOf,
+  usesOf,
+} from "../../src/onboarding/library.ts";
 import { fillServiceEntry } from "../../src/onboarding/serviceEntry.ts";
 
 /** A library among the services: from the build files, and who depends on it. */
@@ -152,5 +159,46 @@ describe("the map's entry", () => {
     expect(r.added).toEqual([]);
     expect(r.kept).toEqual(["uses"]);
     expect(r.text).toBe(MAP);
+  });
+});
+
+describe("the platform a build is on", () => {
+  it("Gradle: the framework plugin, platform(), a catalog's and gradle.properties' versions", () => {
+    write(
+      "a/build.gradle.kts",
+      'plugins {\n  id("org.springframework.boot") version "3.5.4"\n}\ndependencies {\n  implementation(platform("com.example:shop-bom:7.1.0"))\n  implementation(enforcedPlatform("com.example:base-bom:$baseBom"))\n}\n',
+    );
+    write("a/gradle.properties", "version=1.0.0\nbaseBom=2.0.0\nplatformVersion=9\n");
+    write(
+      "a/gradle/libs.versions.toml",
+      '[versions]\nspring-boot = "3.5.4"\njackson = "2.17.0"\n[libraries]\nx = "a:b:1"\n',
+    );
+    expect(platformOf(join(dir, "a"))).toEqual([
+      { name: "org.springframework.boot", version: "3.5.4" },
+      { name: "com.example:shop-bom", version: "7.1.0" },
+      { name: "com.example:base-bom", version: "2.0.0" },
+      { name: "spring-boot", version: "3.5.4" },
+      { name: "platformVersion", version: "9" },
+    ]);
+  });
+
+  it("Maven: the parent and the imported BOMs, a property's version resolved", () => {
+    write(
+      "m/pom.xml",
+      "<project><parent><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-parent</artifactId><version>3.3.1</version></parent><properties><shop.version>7.0.0</shop.version></properties><dependencyManagement><dependencies><dependency><groupId>com.example</groupId><artifactId>shop-bom</artifactId><version>${shop.version}</version><type>pom</type><scope>import</scope></dependency><dependency><groupId>com.example</groupId><artifactId>plain</artifactId><version>1</version></dependency></dependencies></dependencyManagement></project>",
+    );
+    const pins = platformOf(join(dir, "m"));
+    expect(pins).toEqual([
+      { name: "org.springframework.boot:spring-boot-starter-parent", version: "3.3.1" },
+      { name: "com.example:shop-bom", version: "7.0.0" },
+    ]);
+    expect(platformDiff([{ name: "com.example:shop-bom", version: "7.1.0" }], pins)).toEqual([
+      { name: "com.example:shop-bom", library: "7.1.0", service: "7.0.0" },
+    ]);
+  });
+
+  it("nothing in the build: no pins", () => {
+    write("n/package.json", "{}");
+    expect(platformOf(join(dir, "n"))).toEqual([]);
   });
 });

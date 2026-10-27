@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { isPlainObject } from "../core/config/merge.ts";
 import { knowledgeConfigOf } from "../core/config/meta.ts";
 import { isTerminal, type Run, type RunState } from "../core/domain/run.ts";
-import { libraryVersionOf } from "../onboarding/library.ts";
+import { libraryVersionOf, type PlatformPin, platformOf } from "../onboarding/library.ts";
 import { shortRunId } from "../storage/runStore.ts";
 import { runShell } from "../tools/local/exec.ts";
 import { resumeLibraryWaiters } from "./contractChange.ts";
@@ -185,6 +185,8 @@ export interface Publication {
   readonly version?: string;
   /** Published nothing: the library has no `publish-local` (the services build against what they have). */
   readonly skipped?: string;
+  /** What its checkout is built on (a BOM, a parent, the framework plugin): a service on another may not run it. */
+  readonly platform?: readonly PlatformPin[];
   /** The command's last lines. */
   readonly tail?: string;
   /** Where it ran: the library subtask's checkout. */
@@ -251,6 +253,15 @@ export function publicationsOf(runtime: Runtime, masterId: string): Map<string, 
       ...str("skipped"),
       ...str("tail"),
       ...str("at"),
+      ...(Array.isArray(p.platform)
+        ? {
+            platform: p.platform.filter(
+              (x): x is PlatformPin =>
+                typeof (x as PlatformPin)?.name === "string" &&
+                typeof (x as PlatformPin)?.version === "string",
+            ),
+          }
+        : {}),
       ts: e.ts,
     });
   }
@@ -454,10 +465,12 @@ export async function publishLibrary(
     .slice(-20)
     .join("\n");
   const version = libraryVersionOf(at);
+  const platform = platformOf(at);
   return emit({
     ok: r.code === 0 && !r.timedOut,
     command,
     ...(version ? { version } : {}),
+    ...(platform.length > 0 ? { platform } : {}),
     ...(tail ? { tail: tail.slice(-4000) } : {}),
     at,
   });

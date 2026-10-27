@@ -356,6 +356,9 @@ describe("a library in a task across services", () => {
 
   it("who uses it starts once its change is accepted and published, against that version", async () => {
     sb.write("repos/jarvis-knowledge/.jarvis/project.yaml", map("echo published > published.txt"));
+    // the library is built on a newer platform than the service that uses it
+    sb.write("repos/common-lib/gradle.properties", "version=2.15.0\nspringBootVersion=3.5.4\n");
+    sb.write("repos/orders-api/gradle.properties", "springBootVersion=3.3.1\n");
     await jarvis(meta, ["work", "ABC-57 round amounts", "--workflow", "sdd-cross"]);
     // the library and the service that does not use it start; orders-api waits
     expect(launches.map((l) => [l.args[3], l.cwd])).toEqual([
@@ -402,11 +405,16 @@ describe("a library in a task across services", () => {
         ok: true,
         version: "2.15.0",
         command: "echo published > published.txt",
+        platform: [{ name: "springBootVersion", version: "3.5.4" }],
       });
       const task = v.find((x) => x.subtask.key === "2")?.run?.task ?? "";
       expect(task).toContain("Libraries this service uses that the task changed first");
       expect(task).toContain(
         "- common-lib (subtask 1): Add Money.round() — the dependency to move: com.example:common-lib — version 2.15.0, published on this machine by `echo published > published.txt`",
+      );
+      // the platforms differ: the subtask is told both, and to ask rather than move its own
+      expect(task).toContain(
+        "— built on springBootVersion 3.5.4; this service is on springBootVersion 3.3.1: if the library does not run here, do not move this service's platform",
       );
     } finally {
       rt2.close();

@@ -27,6 +27,7 @@ import {
   subtasksOf,
 } from "../../app/subtasks.ts";
 import { isTerminal, type Run } from "../../core/domain/run.ts";
+import { pinText, platformDiff, platformOf } from "../../onboarding/library.ts";
 import { newRunId, shortRunId } from "../../storage/runStore.ts";
 import type { CliContext } from "../context.ts";
 import { CliExit, EXIT } from "../output.ts";
@@ -69,6 +70,8 @@ export interface UsedLibrary {
   /** The names the service's build depends on it by (`services.<lib>.publishes`). */
   readonly publishes: readonly string[];
   readonly publication?: Publication;
+  /** Where the library's platform and this service's differ (src/onboarding/library.ts). */
+  readonly platformDiff?: readonly { name: string; library: string; service: string }[];
 }
 
 export function subtaskTask(
@@ -110,21 +113,33 @@ export function subtaskTask(
                   : l.publication?.skipped
                     ? ` — not published: ${l.publication.skipped}`
                     : ""
-              }`,
+              }${platformLine(l)}`,
           ),
         ]
       : []),
   ].join("\n");
 }
 
+/** The library's platform, and where this service's differs: a library built for another may not run here. */
+function platformLine(l: UsedLibrary): string {
+  const pins = l.publication?.platform ?? [];
+  if (pins.length === 0) return "";
+  const diff = l.platformDiff ?? [];
+  return diff.length > 0
+    ? ` — built on ${pinText(pins)}; this service is on ${diff.map((d) => `${d.name} ${d.service}`).join(", ")}: if the library does not run here, do not move this service's platform and do not work around it — ask (needs_clarification) with what fails`
+    : ` — built on ${pinText(pins)}`;
+}
+
 /** The library subtasks a subtask waits for, with their publications. */
 export function usedLibraries(runtime: Runtime, master: Run, sub: Subtask, split: Split): UsedLibrary[] {
   const published = publicationsOf(runtime, master.id);
   const map = libraryMapOf(runtime);
+  const here = runtime.loaded.meta?.repos[sub.service];
   return libraryBlockers(sub, split, map).flatMap((key) => {
     const lib = split.subtasks.find((s) => s.key === key);
     if (!lib) return [];
     const publication = published.get(key);
+    const diff = publication?.platform && here ? platformDiff(publication.platform, platformOf(here)) : [];
     return [
       {
         service: lib.service,
@@ -132,6 +147,7 @@ export function usedLibraries(runtime: Runtime, master: Run, sub: Subtask, split
         task: lib.task,
         publishes: map.publishes.get(lib.service) ?? [],
         ...(publication ? { publication } : {}),
+        ...(diff.length > 0 ? { platformDiff: diff } : {}),
       },
     ];
   });

@@ -22,6 +22,7 @@ import { incompleteOf } from "../cli/style.ts";
 import { isTerminal, type Run } from "../core/domain/run.ts";
 import type { CandidateReason } from "../evals/candidates.ts";
 import type { ScheduledEvalOutcome } from "../evals/schedule.ts";
+import { pinText } from "../onboarding/library.ts";
 import type { EgressNotice, ModelEgressNotice } from "../security/policy/egress.ts";
 import { shortRunId } from "../storage/runStore.ts";
 import { CLIENT_STRINGS } from "./assets.ts";
@@ -1809,7 +1810,7 @@ function subtasksHtml(page: RunPage, actions?: Actions): Html {
     if (p.skipped)
       return html`<p class="hint sub-pub">Not published: no publish-local — the services build against the version they have.</p>`;
     return p.ok
-      ? html`<p class="hint sub-pub">✓ published${p.version ? html` <code>${p.version}</code>` : ""} by <code>${p.command ?? ""}</code></p>`
+      ? html`<p class="hint sub-pub">✓ published${p.version ? html` <code>${p.version}</code>` : ""} by <code>${p.command ?? ""}</code>${p.platform && p.platform.length > 0 ? html` · built on <code>${pinText(p.platform)}</code>` : ""}</p>`
       : html`<div class="banner bad sub-pub"><b>publish-local failed</b> — <code>${p.command ?? ""}</code>; the services that use it keep waiting.${p.tail ? html`<pre class="tf-tail">${p.tail}</pre>` : ""}</div>`;
   };
   return html`<section class="panel subtasks" aria-labelledby="subtasks" data-live="subtasks">

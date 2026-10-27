@@ -226,3 +226,85 @@ export function libraryVersionOf(root: string): string | undefined {
     return undefined;
   }
 }
+
+/** A platform a build is on: a BOM, a parent, the framework plugin, and its version. */
+export interface PlatformPin {
+  /** `group:artifact` of a BOM or a parent, a plugin's id. */
+  readonly name: string;
+  readonly version: string;
+}
+
+/** A key of a properties file or a version catalog that names a platform's version. */
+const PLATFORM_KEY = /boot|bom|platform|framework|quarkus|micronaut/i;
+
+/**
+ * What a checkout is built on, from its build files, no build run: Gradle's framework plugins and
+ * `platform(…)`/`enforcedPlatform(…)`/`mavenBom`, the version catalog's and gradle.properties' platform
+ * versions, Maven's parent and imported BOMs. A library published for one platform may not run on a
+ * service built on another: the consumer's subtask is told both.
+ */
+export function platformOf(root: string): PlatformPin[] {
+  const out = new Map<string, string>();
+  const put = (name: string, version: string | undefined) => {
+    if (version && !/^\$|^\{/.test(version) && !out.has(name)) out.set(name, version);
+  };
+  const props = new Map<string, string>();
+  for (const m of (read(join(root, "gradle.properties")) ?? "").matchAll(/^\s*([\w.-]+)\s*=\s*(\S+)\s*$/gm))
+    props.set(m[1] as string, m[2] as string);
+  const resolve = (v: string | undefined) => {
+    const ref = v ? /^\$\{?([\w.-]+)\}?$/.exec(v)?.[1] : undefined;
+    return ref ? props.get(ref) : v;
+  };
+  const gradle = [read(join(root, "build.gradle.kts")), read(join(root, "build.gradle"))]
+    .filter((x): x is string => x !== undefined)
+    .join("\n");
+  for (const m of gradle.matchAll(
+    /id\s*\(?\s*["']((?:org\.springframework\.boot|io\.quarkus|io\.micronaut\.application))["']\s*\)?\s*version\s*\(?\s*["']([^"']+)["']/g,
+  ))
+    put(m[1] as string, resolve(m[2]));
+  for (const m of gradle.matchAll(
+    /(?:enforcedPlatform|platform|mavenBom)\s*\(?\s*["']([^:"']+:[^:"']+):([^"']+)["']/g,
+  ))
+    put(m[1] as string, resolve(m[2]));
+  const catalog = read(join(root, "gradle", "libs.versions.toml"));
+  const versions = catalog ? /^\[versions\]\s*$([\s\S]*?)(?=^\[|$(?![\s\S]))/m.exec(catalog)?.[1] : undefined;
+  for (const m of (versions ?? "").matchAll(/^\s*([\w.-]+)\s*=\s*["']([^"']+)["']/gm))
+    if (PLATFORM_KEY.test(m[1] as string)) put(m[1] as string, m[2]);
+  for (const [k, v] of props) if (PLATFORM_KEY.test(k) && /version/i.test(k)) put(k, v);
+  const pom = read(join(root, "pom.xml"));
+  if (pom) {
+    const pomProps = new Map<string, string>();
+    const propsBlock = /<properties>([\s\S]*?)<\/properties>/.exec(pom)?.[1] ?? "";
+    for (const m of propsBlock.matchAll(/<([\w.-]+)>\s*([^<\s]+)\s*<\/\1>/g))
+      pomProps.set(m[1] as string, m[2] as string);
+    const val = (v: string | undefined) => (v?.startsWith("${") ? pomProps.get(v.slice(2, -1)) : v);
+    const coord = (block: string) => {
+      const g = first(block, /<groupId>\s*([^<\s]+)\s*<\/groupId>/);
+      const a = first(block, /<artifactId>\s*([^<\s]+)\s*<\/artifactId>/);
+      const v = val(first(block, /<version>\s*([^<\s]+)\s*<\/version>/));
+      if (g && a) put(`${g}:${a}`, v);
+    };
+    const parent = /<parent>([\s\S]*?)<\/parent>/.exec(pom)?.[1];
+    if (parent) coord(parent);
+    const managed = /<dependencyManagement>([\s\S]*?)<\/dependencyManagement>/.exec(pom)?.[1] ?? "";
+    for (const m of managed.matchAll(/<dependency>([\s\S]*?)<\/dependency>/g))
+      if (/<scope>\s*import\s*<\/scope>/.test(m[1] as string)) coord(m[1] as string);
+  }
+  return [...out].map(([name, version]) => ({ name, version }));
+}
+
+/** The pins two builds share with different versions: where a library and a service may not fit. */
+export function platformDiff(
+  library: readonly PlatformPin[],
+  service: readonly PlatformPin[],
+): { name: string; library: string; service: string }[] {
+  return library.flatMap((p) => {
+    const there = service.find((s) => s.name === p.name);
+    return there && there.version !== p.version
+      ? [{ name: p.name, library: p.version, service: there.version }]
+      : [];
+  });
+}
+
+export const pinText = (pins: readonly PlatformPin[]): string =>
+  pins.map((p) => `${p.name} ${p.version}`).join(", ");
