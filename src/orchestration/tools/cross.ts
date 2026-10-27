@@ -28,12 +28,15 @@ import {
 } from "../../app/subtasks.ts";
 import type { Run } from "../../core/domain/run.ts";
 import { codeContractsOf } from "../../design/codeContracts.ts";
+import { mapEntriesOf, snapshotMapsIn } from "../../design/contracts.ts";
 import {
+  MAP_CLIENT,
   parseEndpoint,
   type ServiceContracts,
   sameEndpoint,
   serviceContractsOf,
   springConfigOf,
+  withMapEndpoints,
 } from "../../knowledge/catalog.ts";
 import { repoIdOf, updateGraph } from "../../knowledge/graph/update.ts";
 import { trackedFiles } from "../../onboarding/scan.ts";
@@ -155,7 +158,12 @@ async function factsAt(ctx: StepContext, run: Run, service: string): Promise<Ser
     store: ctx.runtime.graph,
   });
   const code = codeContractsOf([...result.snapshot.nodes]);
-  return serviceContractsOf(service, code, springConfigOf(path, await trackedFiles(path)));
+  const tracked = await trackedFiles(path);
+  // a BFF's routes and backends are in its snapshot maps, not in its code
+  return withMapEndpoints(
+    serviceContractsOf(service, code, springConfigOf(path, tracked)),
+    mapEntriesOf(path, snapshotMapsIn(tracked)).entries,
+  );
 }
 
 const where = (e: { file: string; line?: number }) => (e.line ? `${e.file}:${e.line}` : e.file);
@@ -221,8 +229,17 @@ function sideOf(
   const segment = producer ? undefined : item.producer;
   const hit = producer
     ? facts.serves.find((e) => sameEndpoint(e, wanted))
-    : facts.calls.find((e) => sameEndpoint(e, wanted, segment));
-  return hit ? { service, status: "ok", at: where(hit) } : { service, status: "missing" };
+    : (facts.calls.find((e) => sameEndpoint(e, wanted, segment)) ??
+      // a map's call names the backend as the balancer does (`/env-orders-api/orders`): its first segment
+      facts.calls.find(
+        (e) =>
+          e.client === MAP_CLIENT && sameEndpoint({ ...e, path: e.path.replace(/^\/[^/]+/, "") }, wanted),
+      ));
+  if (hit) return { service, status: "ok", at: where(hit) };
+  // only a map's calls and none of them: the map may name it otherwise, not a missing call
+  if (!producer && facts.calls.every((e) => e.client === MAP_CLIENT))
+    return { service, status: "not checked", note: "not among the calls its contract map names" };
+  return { service, status: "missing" };
 }
 
 /** `cross.check`: each side of the contract in its subtask's checkout, without a model. */

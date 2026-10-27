@@ -168,6 +168,47 @@ export interface ContractCheck {
   readonly config?: readonly ConfigHit[];
 }
 
+/** The entries of the maps a configuration names, the files read and those that could not be. */
+export function mapEntriesOf(
+  root: string,
+  maps: readonly ContractMapConfig[],
+): { files: string[]; unreadable: string[]; entries: ContractEntry[] } {
+  const files: string[] = [];
+  const unreadable: string[] = [];
+  const entries: ContractEntry[] = [];
+  for (const map of maps)
+    for (const pattern of map.files) {
+      const found = filesOf(root, pattern);
+      if (found.length === 0) unreadable.push(pattern);
+      for (const f of found)
+        try {
+          entries.push(...entriesOf(f, JSON.parse(readFileSync(join(root, f), "utf8"))));
+          files.push(f);
+        } catch {
+          unreadable.push(f);
+        }
+    }
+  return { files, unreadable, entries };
+}
+
+/** A BFF's snapshot maps (`__snapshots__/routes-*.json`, `services-*.json`) a test keeps true. */
+const SNAPSHOT_MAP = /(^|\/)__snapshots__\/(routes|services)-[^/]+\.json$/;
+
+/**
+ * Maps a repository keeps without saying so: a BFF's route and service snapshots, as the folders
+ * that hold them (`apps/server/__snapshots__/routes-*.json`). Pilot: a BFF calls its backends through
+ * a map in its configuration, not from code, so its contracts.json said it served and called nothing.
+ */
+export function snapshotMapsIn(tracked: readonly string[]): ContractMapConfig[] {
+  const patterns = new Set<string>();
+  for (const f of tracked) {
+    const m = SNAPSHOT_MAP.exec(f);
+    if (!m) continue;
+    patterns.add(`${f.slice(0, f.lastIndexOf("/"))}/${m[2]}-*.json`);
+  }
+  return [...patterns].sort().map((p) => ({ files: [p], about: "a snapshot map kept true by a test" }));
+}
+
 /**
  * Every mention against every map the project names and the contracts of its code (`code`, from the
  * project graph); undefined when there is nothing to check against or nothing is mentioned.
@@ -192,21 +233,7 @@ export function checkContracts(
   const topics = topicsNamedIn(sources, fromCode);
   const config = configNamedIn(sources, fromCode);
   if (mentions.length === 0 && topics.length === 0 && config.length === 0) return undefined;
-  const files: string[] = [];
-  const unreadable: string[] = [];
-  const entries: ContractEntry[] = [];
-  for (const map of maps)
-    for (const pattern of map.files) {
-      const found = filesOf(root, pattern);
-      if (found.length === 0) unreadable.push(pattern);
-      for (const f of found)
-        try {
-          entries.push(...entriesOf(f, JSON.parse(readFileSync(join(root, f), "utf8"))));
-          files.push(f);
-        } catch {
-          unreadable.push(f);
-        }
-    }
+  const { files, unreadable, entries } = mapEntriesOf(root, maps);
   entries.push(...fromCode.endpoints);
   return {
     files,

@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { parse, parseDocument, stringify } from "yaml";
 import type { Actor } from "../core/domain/actor.ts";
@@ -147,12 +148,28 @@ export function candidatesOf(runtime: Runtime, only?: (run: Run) => boolean): Ca
     .sort((a, b) => a.artifact.createdAt.localeCompare(b.artifact.createdAt));
 }
 
-function slug(text: string): string {
+function slug(text: string, max = 48): string {
   return text
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
-    .slice(0, 48);
+    .slice(0, max)
+    .replace(/-+$/, "");
+}
+
+/** Longest file id of a module map before it is shortened with a hash of the whole name. */
+const MODULE_ID_MAX = 96;
+
+/**
+ * A module map's file id: the whole name, so two folders never share one and the name says which
+ * folder it is; a very long one keeps its start and a hash of the rest (pilot: 48 characters cut
+ * `…-container-online-bank-account-docs-presign` to `…-container-online-bank-`).
+ */
+export function moduleFileId(name: string): string {
+  const full = slug(name, Number.MAX_SAFE_INTEGER);
+  if (full.length <= MODULE_ID_MAX) return `module-${full}`;
+  const hash = createHash("sha1").update(full).digest("hex").slice(0, 6);
+  return `module-${full.slice(0, MODULE_ID_MAX - 7).replace(/-+$/, "")}-${hash}`;
 }
 
 /** Where `promote` writes, from the kind and the id (`--id`, or one derived from the name). */
@@ -160,7 +177,7 @@ export function targetOf(root: string, c: Candidate, id: string | undefined): st
   const fileId =
     id ??
     (c.doc.module || /^module\s/.test(c.doc.title)
-      ? `module-${slug(c.name.replace(/@.*$/, ""))}`
+      ? moduleFileId(c.name.replace(/@.*$/, ""))
       : slug(c.doc.title));
   const layout = layoutOf(root);
   if (c.doc.kind === "glossary") return layout.glossaryFile;
@@ -261,6 +278,29 @@ export function existingAt(file: string): { readonly text: string; readonly gene
   return { text, generated: isGenerated(text) };
 }
 
+/**
+ * The document already in the knowledge folder about the same module (its `paths` is the module's
+ * folder), under whatever name: a new map of the module replaces it instead of lying next to it
+ * (pilot: names cut at 48 characters, then a longer name for the same folder — two documents).
+ */
+export function sameModuleDoc(dir: string, module: string): string | undefined {
+  if (!existsSync(dir)) return undefined;
+  const want = `${module.replace(/\/+$/, "")}/**`;
+  for (const name of readdirSync(dir)) {
+    if (!/^module-.*\.md$/.test(name)) continue;
+    const file = join(dir, name);
+    const head = /^---\n([\s\S]*?)\n---/.exec(readFileSync(file, "utf8"))?.[1];
+    if (!head) continue;
+    try {
+      const paths = (parse(head) as { paths?: unknown } | null)?.paths;
+      if (Array.isArray(paths) && paths.length === 1 && paths[0] === want) return file;
+    } catch {
+      // a broken front matter is not this module's document
+    }
+  }
+  return undefined;
+}
+
 /** The target holds a document a person wrote: promote replaces it only when told to. */
 export class CandidateTargetTaken extends Error {
   readonly file: string;
@@ -317,6 +357,8 @@ export interface Promoted {
   readonly path: string;
   /** What was there before and got replaced. */
   readonly replaced?: "generated" | "written by a person";
+  /** The same module's document it replaced under another name (repository-relative): removed. */
+  readonly renamedFrom?: string;
   /** A skill improvement: the skill edited, its version before and after. */
   readonly skill?: {
     readonly id: string;
@@ -337,10 +379,17 @@ export function promoteCandidate(runtime: Runtime, input: PromoteInput): Promote
   if (c.doc.kind === "glossary") return promoteGlossary(runtime, input);
   const file = targetOf(input.root, c, input.id);
   const id = file.replace(/^.*[\\/]/, "").replace(/\.md$/, "");
-  const before = existingAt(file);
-  if (before && !before.generated && !input.replace) throw new CandidateTargetTaken(file);
+  // the same module's document under another name: replaced, and its file goes
+  const old =
+    c.doc.kind === "knowledge" && c.doc.module && !input.id
+      ? sameModuleDoc(dirname(file), c.doc.module)
+      : undefined;
+  const renamed = old && old !== file ? old : undefined;
+  const before = existingAt(file) ?? (renamed ? existingAt(renamed) : undefined);
+  if (before && !before.generated && !input.replace) throw new CandidateTargetTaken(renamed ?? file);
   mkdirSync(dirname(file), { recursive: true });
   writeFileSync(file, contentOf(c, id));
+  if (renamed && existsSync(renamed)) unlinkSync(renamed);
   const replaced: Promoted["replaced"] = before
     ? before.generated
       ? "generated"
@@ -350,6 +399,7 @@ export function promoteCandidate(runtime: Runtime, input: PromoteInput): Promote
   const notes = [
     `promoted to ${path}`,
     replaced ? `replaced a document ${replaced === "generated" ? "jarvis generated" : "a person wrote"}` : "",
+    renamed ? `in place of ${relative(input.root, renamed).split("\\").join("/")}` : "",
     input.checked !== undefined && c.review.length > 0
       ? `${input.checked} of ${c.review.length} generalisations checked`
       : "",
@@ -370,7 +420,12 @@ export function promoteCandidate(runtime: Runtime, input: PromoteInput): Promote
     actor: `${input.actor.kind}:${input.actor.id}`,
     payload: { artifact: c.artifact.artifactId, file: path, ...(replaced ? { replaced } : {}) },
   });
-  return { file, path, ...(replaced ? { replaced } : {}) };
+  return {
+    file,
+    path,
+    ...(replaced ? { replaced } : {}),
+    ...(renamed ? { renamedFrom: relative(input.root, renamed).split("\\").join("/") } : {}),
+  };
 }
 
 function promoteSkillEdit(runtime: Runtime, input: PromoteInput): Promoted {

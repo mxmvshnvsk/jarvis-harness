@@ -169,7 +169,7 @@ describe("module research from the page", () => {
     expect(first.queued).toBe(false);
     expect([second.queued, third.queued]).toEqual([true, true]);
     expect((await calls(1))[0]).toBe(
-      `${sb.project}|off|onboard --module src/orders --note how totals are rounded`,
+      `${sb.project}|off|onboard --module src/orders --note how totals are rounded --whole`,
     );
     // the CLI made its run; it is the launch's once matched by the module
     const run = rt.runs.create({
@@ -197,7 +197,7 @@ describe("module research from the page", () => {
     rt.runs.transition(run.id, "COMPLETED");
     launcher.tend();
     expect(second.queued).toBe(false);
-    expect((await calls(2))[1]).toBe(`${sb.project}|off|onboard --module src/billing`);
+    expect((await calls(2))[1]).toBe(`${sb.project}|off|onboard --module src/billing --whole`);
     expect(launcher.list().some((l) => l.id === third.id)).toBe(false);
   });
 });

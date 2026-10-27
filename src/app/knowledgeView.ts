@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { layoutOf, rootRelative, versionedAt } from "../core/paths.ts";
+import { type CodeAt, codeAtOf, commitsSinceCode } from "../knowledge/freshness.ts";
 import { parseFrontMatter } from "../knowledge/frontmatter.ts";
 import { knowledgeFilesIn, SHARED_KNOWLEDGE_PREFIX } from "../knowledge/resolver.ts";
 import { type GlossaryEntry, parseGlossary } from "../knowledge/retrieval/glossary.ts";
@@ -108,8 +109,10 @@ export interface DocView {
   readonly sections: ReadonlyArray<{ readonly heading: string; readonly chars: number }>;
   /** Last commit of the document (YYYY-MM-DD); none — not committed yet. */
   readonly edited?: string;
-  /** Commits under its paths since that commit. */
+  /** Commits under its paths since that commit (a map: since the code commit it was made from). */
   readonly staleCommits?: number;
+  /** A map's code: the commit and branch it was made from (front matter). */
+  readonly codeAt?: CodeAt;
   readonly usage?: Usage;
 }
 
@@ -172,6 +175,7 @@ export async function docsOf(roots: KnowledgeRoots, usage?: ReadonlyMap<string, 
       source: false,
       body: body.replace(/^<!--[\s\S]*?-->\n?/gm, "").trim(),
       sections: sectionsOf(body),
+      ...(codeAtOf(raw) ? { codeAt: codeAtOf(raw) as CodeAt } : {}),
       ...(u ? { usage: u } : {}),
     });
   }
@@ -208,9 +212,14 @@ export async function docsOf(roots: KnowledgeRoots, usage?: ReadonlyMap<string, 
     if (!facts) {
       facts = (async () => {
         const last = await lastCommit(at.cwd, at.path);
-        if (!last) return undefined;
+        // a map made from a known commit: stale by the code since then, committed or not
+        const code = d.source ? undefined : d.codeAt;
+        const fromCode = code ? await commitsSinceCode(root, code.commit, d.paths) : undefined;
+        if (!last) return fromCode ? { staleCommits: fromCode } : undefined;
         const since = at.cwd === root ? { hash: last.hash } : { date: last.date };
-        const stale = d.source ? undefined : await commitsSince(root, since, d.paths);
+        const stale = d.source
+          ? undefined
+          : (fromCode ?? (code ? undefined : await commitsSince(root, since, d.paths)));
         return { edited: last.date, ...(stale ? { staleCommits: stale } : {}) };
       })();
       if (gitFacts.size > 5000) gitFacts.clear();
@@ -595,7 +604,7 @@ export function extendGlossaryTerm(
 }
 
 /** A document's last edit and the commits since under its paths, by its file's state and HEAD. */
-const gitFacts = new Map<string, Promise<{ edited: string; staleCommits?: number } | undefined>>();
+const gitFacts = new Map<string, Promise<{ edited?: string; staleCommits?: number } | undefined>>();
 
 async function inBatches<T, R>(items: readonly T[], limit: number, work: (t: T) => Promise<R>): Promise<R[]> {
   const out: R[] = new Array(items.length);
@@ -628,6 +637,14 @@ export async function staleCommitsOf(
   let known = staleByDoc.get(key);
   if (!known) {
     known = (async () => {
+      let text = "";
+      try {
+        text = readFileSync(join(root, file), "utf8");
+      } catch {
+        text = "";
+      }
+      const code = codeAtOf(text);
+      if (code) return commitsSinceCode(root, code.commit, paths);
       const at = versionedAt(layoutOf(root), file);
       const last = await lastCommit(at.cwd, at.path);
       if (!last) return undefined;

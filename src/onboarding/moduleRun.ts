@@ -1,4 +1,5 @@
 import type { Runtime } from "../app/runtime.ts";
+import { branchOf } from "../knowledge/freshness.ts";
 import type { DeterministicTool } from "../orchestration/executors.ts";
 import { renderModuleDoc } from "./render.ts";
 import type { ModuleFacts } from "./scan.ts";
@@ -96,7 +97,10 @@ export const verifyModuleStep: DeterministicTool = async (ctx) => {
       outputs: [`${check.artifactId}@${check.version}`],
     };
   }
-  const markdown = renderModuleDoc(verified, input.facts);
+  const markdown = renderModuleDoc(verified, input.facts, {
+    commit: run.workspace.baseCommit,
+    branch: await branchOf(run.workspace.path),
+  });
   const evidence = [
     ...new Set(
       [...verified.responsibilities, ...verified.rules].flatMap((c) =>

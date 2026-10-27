@@ -5,9 +5,19 @@ import type { GraphEdge, GraphNode } from "../../core/capabilities/contracts.ts"
 import { missingChecks } from "../../core/config/requiredChecks.ts";
 import { layoutOf, rootRelative } from "../../core/paths.ts";
 import { codeContractsOf } from "../../design/codeContracts.ts";
-import { CONTRACTS_FILE, serviceContractsOf, springConfigOf } from "../../knowledge/catalog.ts";
+import { mapEntriesOf, snapshotMapsIn } from "../../design/contracts.ts";
+import {
+  CONTRACTS_FILE,
+  serviceContractsOf,
+  springConfigOf,
+  withMapEndpoints,
+} from "../../knowledge/catalog.ts";
+import { checkKnowledge, type DocCheck } from "../../knowledge/docCheck.ts";
+import { changedSinceCode, codeAtOf } from "../../knowledge/freshness.ts";
+import { parseFrontMatter } from "../../knowledge/frontmatter.ts";
 import { repoIdOf, updateGraph } from "../../knowledge/graph/update.ts";
-import { mapModule, taskFor } from "../../onboarding/deep.ts";
+import { knowledgeRootsOf } from "../../knowledge/sources.ts";
+import { mapModule, NOTE_MAX, taskFor } from "../../onboarding/deep.ts";
 import { declaredPublishes, librariesOf, libraryOf, usesOf } from "../../onboarding/library.ts";
 import {
   applyCommands,
@@ -18,6 +28,7 @@ import {
 } from "../../onboarding/render.ts";
 import { type ScanReport, scanProject, scopeFacts, trackedFiles } from "../../onboarding/scan.ts";
 import { type FilledEntry, fillServiceEntry, kindOf } from "../../onboarding/serviceEntry.ts";
+import { TOO_BIG } from "../../onboarding/tree.ts";
 import { git } from "../../tools/local/exec.ts";
 import type { CliContext } from "../context.ts";
 import { CliExit, EXIT } from "../output.ts";
@@ -41,6 +52,10 @@ export interface OnboardOptions {
   readonly note?: string;
   /** In a knowledge repository: only this service of the map (ADR-0025). */
   readonly service?: string;
+  /** With `module`: map it in one pass even when it is bigger than one pass covers well. */
+  readonly whole?: boolean;
+  /** Map again the generated module documents the code moved on from (`jarvis knowledge check`). */
+  readonly stale?: boolean;
 }
 
 type FileAction = "created" | "refreshed" | "kept (edited by a human)" | "would create" | "would refresh";
@@ -99,6 +114,10 @@ export async function runOnboard(ctx: CliContext, options: OnboardOptions): Prom
     await runModuleMap(ctx, loaded, root, report, options, graph);
     return;
   }
+  if (options.stale) {
+    await runStaleMaps(ctx, loaded, root, report, options, graph);
+    return;
+  }
 
   // a service of a knowledge repository: its folder there (ADR-0025 §1)
   const knowledgeDir = layoutOf(root).knowledgeDir;
@@ -127,7 +146,15 @@ export async function runOnboard(ctx: CliContext, options: OnboardOptions): Prom
   if (contracts && service) {
     const tracked = await trackedFiles(root);
     const head = (await git(["rev-parse", "HEAD"], root)).stdout.trim();
-    const doc = serviceContractsOf(service, contracts, springConfigOf(root, tracked), head || undefined);
+    // and what its maps say (a BFF's routes and backends live in a map, not in code)
+    const maps = loaded.config.contracts.length > 0 ? loaded.config.contracts : snapshotMapsIn(tracked);
+    const fromMaps = mapEntriesOf(root, maps);
+    const doc = withMapEndpoints(
+      serviceContractsOf(service, contracts, springConfigOf(root, tracked), head || undefined),
+      fromMaps.entries,
+    );
+    if (fromMaps.files.length > 0 && !ctx.out.json)
+      ctx.out.line(`contract maps read: ${fromMaps.files.join(", ")}`);
     const path = join(knowledgeDir, CONTRACTS_FILE);
     const action: FileAction = existsSync(path)
       ? options.dryRun
@@ -318,6 +345,141 @@ async function runOnboardServices(
   if (done.length === 0) throw new CliExit(EXIT.error);
 }
 
+/** Why a generated map is mapped again, for the person and as the mapper's note. */
+export function staleReasons(d: DocCheck): string[] {
+  return [
+    ...(d.staleCommits ? [`${d.staleCommits} commit(s) under its paths since it was mapped`] : []),
+    ...(d.lost.length > 0 ? [`${d.lost.length} quoted line(s) gone from the code`] : []),
+    ...(d.missingPaths.length > 0 ? [`${d.missingPaths.length} path(s) it names are gone`] : []),
+    ...(d.language ? [`written in ${d.language.found}, the team's language is ${d.language.expected}`] : []),
+  ];
+}
+
+/**
+ * The mapper's note for a module mapped again: what the old document said it was for, what changed
+ * in the code since, what of it is gone — so it describes the module as it is now, not from scratch
+ * blind to what moved (pilot: a form rewritten in one merge, its map describing folders that were gone).
+ */
+export function remapNote(input: {
+  readonly doc: string;
+  readonly text: string;
+  readonly reasons: readonly string[];
+  readonly changed: readonly string[];
+  readonly lost: DocCheck["lost"];
+}): string {
+  const purpose = input.text
+    .replace(/^---\n[\s\S]*?\n---\n/, "")
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .split("\n")
+    .map((l) => l.trim())
+    .find((l) => l && !l.startsWith("#") && !l.startsWith(">"));
+  const at = codeAtOf(input.text);
+  return [
+    `Map it again: ${input.doc}${at ? ` was made at ${at.commit.slice(0, 12)}${at.branch ? ` (${at.branch})` : ""}` : ""} and ${input.reasons.join("; ")}.`,
+    ...(purpose ? [`What it said the module is for: ${purpose.slice(0, 400)}`] : []),
+    ...(input.changed.length > 0 ? [`Files changed since: ${input.changed.join(", ")}.`] : []),
+    ...(input.lost.length > 0
+      ? [
+          `Quoted lines no longer in the code: ${input.lost
+            .slice(0, 8)
+            .map((l) => `${l.ref} \`${l.text.slice(0, 80)}\``)
+            .join("; ")}.`,
+        ]
+      : []),
+    "Describe the module as the code is now.",
+  ]
+    .join("\n")
+    .slice(0, NOTE_MAX);
+}
+
+/** `jarvis onboard --stale`: maps again, one by one, the generated module documents the code moved on from. */
+async function runStaleMaps(
+  ctx: CliContext,
+  loaded: Awaited<ReturnType<typeof loadForCli>>,
+  root: string,
+  report: ScanReport,
+  options: OnboardOptions,
+  graph?: { edges: readonly GraphEdge[] },
+): Promise<void> {
+  const check = await checkKnowledge(knowledgeRootsOf(loaded, root), {
+    language: loaded.config.language,
+    tree: false,
+  });
+  const todo: Array<{ module: string; doc: string; reasons: string[]; note: string }> = [];
+  for (const d of check.docs) {
+    if (!d.generated) continue;
+    const reasons = staleReasons(d);
+    if (reasons.length === 0) continue;
+    const text = readFileSync(join(root, d.doc), "utf8");
+    const paths = parseFrontMatter(text).data.paths;
+    const module =
+      Array.isArray(paths) && paths.length === 1 && typeof paths[0] === "string"
+        ? (paths[0] as string).replace(/\/\*\*$/, "")
+        : undefined;
+    if (!module || module.includes("*")) continue;
+    const at = codeAtOf(text);
+    const changed = at ? await changedSinceCode(root, at.commit, [`${module}/**`], 30) : [];
+    todo.push({
+      module,
+      doc: d.doc,
+      reasons,
+      note: remapNote({ doc: d.doc, text, reasons, changed, lost: d.lost }),
+    });
+  }
+  if (todo.length === 0) {
+    ctx.out.result({ stale: [] }, () =>
+      ctx.out.line("every generated module document is as fresh as its code"),
+    );
+    return;
+  }
+  if (options.dryRun) {
+    ctx.out.result({ stale: todo }, () => {
+      ctx.out.line(`would map again ${todo.length} module(s):`);
+      for (const t of todo) ctx.out.line(`  ${t.module} ${ctx.out.style.muted(`— ${t.reasons.join("; ")}`)}`);
+    });
+    return;
+  }
+  let failed = 0;
+  for (const t of todo) {
+    if (!ctx.out.json) ctx.out.line(`== ${t.module} (${t.reasons.join("; ")})`);
+    try {
+      await runModuleMap(
+        ctx,
+        loaded,
+        root,
+        report,
+        { ...options, module: t.module, note: t.note, whole: true },
+        graph,
+      );
+    } catch (error) {
+      failed += 1;
+      if (!(error instanceof CliExit)) ctx.out.error(error instanceof Error ? error.message : String(error));
+    }
+  }
+  if (!ctx.out.json)
+    ctx.out.line(
+      `mapped again ${todo.length - failed} of ${todo.length}; accept each with jarvis candidates promote — it replaces the old document`,
+    );
+  if (failed > 0) throw new CliExit(EXIT.error);
+}
+
+/** A folder's parts for mapping one at a time: its subfolders (and its own files), biggest first. */
+export function partsOf(tracked: readonly string[], module: string): Array<{ path: string; files: number }> {
+  const counts = new Map<string, number>();
+  const prefix = `${module}/`;
+  for (const f of tracked) {
+    if (!f.startsWith(prefix)) continue;
+    const rest = f.slice(prefix.length);
+    const slash = rest.indexOf("/");
+    const part = slash < 0 ? module : `${module}/${rest.slice(0, slash)}`;
+    counts.set(part, (counts.get(part) ?? 0) + 1);
+  }
+  return [...counts]
+    .filter(([path]) => path !== module)
+    .map(([path, files]) => ({ path, files }))
+    .sort((a, b) => b.files - a.files || a.path.localeCompare(b.path));
+}
+
 /** `jarvis onboard --module <path>`: the agent maps one module; the result waits as a knowledge candidate. */
 async function runModuleMap(
   ctx: CliContext,
@@ -341,6 +503,25 @@ async function runModuleMap(
       .map((m) => m.path);
     ctx.out.error(
       `"${module}" is not a module of this repository or a directory inside one${known.length > 0 ? `; modules: ${known.join(", ")}` : ""}`,
+    );
+    throw new CliExit(EXIT.error);
+  }
+  // bigger than one pass covers well: offer its parts, as the Modules page does (pilot: a 307-file
+  // folder of components asked for in one go; the person split it by hand)
+  if (!options.whole && (facts.files > TOO_BIG.files || facts.lines > TOO_BIG.lines)) {
+    const parts = partsOf(await trackedFiles(root), module);
+    ctx.out.result(
+      { module, tooBig: true, files: facts.files, lines: facts.lines, limit: TOO_BIG, parts },
+      () => {
+        const st = ctx.out.style;
+        ctx.out.line(
+          `${st.warn(module)} is ${facts.files} files, ~${facts.lines} lines — more than one pass maps well (${TOO_BIG.files} files or ${TOO_BIG.lines} lines); map it in parts:`,
+        );
+        for (const p of parts.slice(0, 12))
+          ctx.out.line(`  ${st.cmd(`jarvis onboard --module ${p.path}`)} ${st.muted(`· ${p.files} files`)}`);
+        if (parts.length > 12) ctx.out.line(st.muted(`  … and ${parts.length - 12} smaller`));
+        ctx.out.line(st.muted("  or the whole of it anyway: --whole"));
+      },
     );
     throw new CliExit(EXIT.error);
   }

@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { layoutOf, rootRelative } from "../core/paths.ts";
+import { codeAtOf, commitsSinceCode } from "../knowledge/freshness.ts";
 import { globMatches, parseFrontMatter } from "../knowledge/frontmatter.ts";
 import { knowledgeFilesIn } from "../knowledge/resolver.ts";
 import { loadSourceDocuments } from "../knowledge/sources.ts";
@@ -178,6 +179,16 @@ interface Building {
 }
 
 async function staleCommits(root: string, doc: string, path: string): Promise<number | undefined> {
+  // a map records the code it was made from: count from there (works for a knowledge repository's
+  // documents too, which the code's history does not know)
+  let text = "";
+  try {
+    text = readFileSync(join(root, doc), "utf8");
+  } catch {
+    text = "";
+  }
+  const at = codeAtOf(text);
+  if (at) return commitsSinceCode(root, at.commit, [path]);
   const last = await git(["log", "-1", "--format=%H", "--", doc], root);
   const commit = last.stdout.trim();
   if (last.code !== 0 || !commit) return undefined;

@@ -212,11 +212,18 @@ export function markSweeping(markdown: string): { markdown: string; sweeping: st
   return { markdown: lines.join("\n"), sweeping };
 }
 
-export function renderModuleDoc(map: VerifiedModuleMap, facts?: ModuleFacts): string {
+export function renderModuleDoc(
+  map: VerifiedModuleMap,
+  facts?: ModuleFacts,
+  at?: { readonly commit?: string | undefined; readonly branch?: string | undefined },
+): string {
   const lines: string[] = [
     "---",
     `tags: [module, generated]`,
     `paths: [${JSON.stringify(`${map.module}/**`)}]`,
+    // the code it was mapped from: how stale it is counts from here (src/knowledge/freshness.ts)
+    ...(at?.commit ? [`commit: ${at.commit}`] : []),
+    ...(at?.branch ? [`branch: ${JSON.stringify(at.branch)}`] : []),
     "---",
     MODULE_MARKER,
     `# Module ${map.module}`,

@@ -198,6 +198,8 @@ export function createLauncher(options: LauncherOptions): Launcher {
       "--module",
       launch.module as string,
       ...(launch.note ? ["--note", launch.note] : []),
+      // the page offers a big folder «in parts» already: what the person started is mapped as asked
+      "--whole",
     ];
     spawnCli(args, launch.repoRoot, launch.log, (code) => {
       launch.exitCode = code ?? 1;

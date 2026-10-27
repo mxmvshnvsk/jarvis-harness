@@ -40,6 +40,7 @@ import { runAnswer, runAttach, runReviewStatus, runReviewSubmit, runThreads } fr
 import { renderInit, runInit } from "./commands/init.ts";
 import { renderInitKnowledge, runInitKnowledge } from "./commands/initKnowledge.ts";
 import { runSkillsList, runStandardsCheck, runStandardsList } from "./commands/knowledge.ts";
+import { runKnowledgeCheck } from "./commands/knowledgeCheck.ts";
 import {
   runKnowledgeIndex,
   runKnowledgeSearch,
@@ -397,6 +398,12 @@ export function buildProgram(options: RunOptions = {}): Command {
       "agent mode: map one module with the onboard-mapper agent; the result waits as a knowledge candidate",
     )
     .option("--note <text>", "with --module: what matters, added to the agent's task")
+    .option("--whole", "with --module: map a module bigger than one pass in one go anyway", false)
+    .option(
+      "--stale",
+      "map again the generated module documents the code moved on from (see jarvis knowledge check)",
+      false,
+    )
     .option("--no-graph", "skip the project graph (module dependencies)")
     .option(
       "--service <name>",
@@ -411,6 +418,8 @@ export function buildProgram(options: RunOptions = {}): Command {
         module?: string;
         note?: string;
         service?: string;
+        whole: boolean;
+        stale: boolean;
       }) => {
         await runOnboard(ctxFor(), opts);
       },
@@ -1123,6 +1132,17 @@ export function buildProgram(options: RunOptions = {}): Command {
     .option("--service <name>", "only the links of this service")
     .action(async (opts: { service?: string }) => {
       await runKnowledgeLinks(ctxFor(), opts);
+    });
+  knowledge
+    .command("check")
+    .description(
+      "the knowledge documents against the code, no model: cited paths, symbols and quoted lines, maps the code moved on from, copies, language, folders without a document",
+    )
+    .option("--fix", "put the line numbers of quoted lines that moved right", false)
+    .option("--service <name>", "in a knowledge repository: only this service")
+    .option("--no-tree", "skip the folders without a document")
+    .action(async (opts: { fix: boolean; service?: string; tree: boolean }) => {
+      await runKnowledgeCheck(ctxFor(), opts);
     });
   knowledge
     .command("status")

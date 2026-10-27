@@ -262,6 +262,7 @@ export async function runCandidatesPromote(
         name: found.name,
         file,
         ...(promoted.replaced ? { replaced: promoted.replaced } : {}),
+        ...(promoted.renamedFrom ? { renamedFrom: promoted.renamedFrom } : {}),
       },
       () => {
         const st = ctx.out.style;
@@ -275,7 +276,7 @@ export async function runCandidatesPromote(
         if (promoted.replaced)
           ctx.out.line(
             st.muted(
-              `  replaced the document ${promoted.replaced === "generated" ? "jarvis generated there" : "a person wrote there"}`,
+              `  replaced the document ${promoted.replaced === "generated" ? "jarvis generated there" : "a person wrote there"}${promoted.renamedFrom ? ` (${promoted.renamedFrom}, removed: the same module under its old name)` : ""}`,
             ),
           );
         if (found.review.length > 0)

@@ -172,6 +172,8 @@ describe("jarvis onboard --module", () => {
     const text = readFileSync(join(sb.project, ".jarvis/knowledge/module-src-orders.md"), "utf8");
     expect(text).toMatch(/^---\nsource: \S+\n/);
     expect(text).toContain('paths: ["src/orders/**"]');
+    // the code it was mapped from: staleness counts from here
+    expect(text).toMatch(/\ncommit: [0-9a-f]{40}\nbranch: "main"\n/);
     expect(text).toContain("# Module src/orders");
     expect(text).toContain("Discounts are applied before tax.");
     expect(text).toContain("src/orders/order.ts:3");
@@ -183,6 +185,75 @@ describe("jarvis onboard --module", () => {
     const found = await jarvis(["--json", "knowledge", "search", "discounts before tax"]);
     expect(found.code).toBe(0);
     expect(found.out).toContain("module-src-orders");
+  });
+
+  it("--stale maps again what the code moved on from, told what changed; the new map replaces the old", async () => {
+    mapper(GOOD);
+    const first = JSON.parse(
+      (await jarvis(["--json", "onboard", "--module", "src/orders", "--no-graph"])).out,
+    ) as {
+      candidateId: string;
+    };
+    expect((await jarvis(["candidates", "promote", first.candidateId])).code).toBe(0);
+    const doc = join(sb.project, ".jarvis/knowledge/module-orders.md");
+    expect(existsSync(doc)).toBe(true);
+    // fresh: nothing to do
+    expect((await jarvis(["onboard", "--stale", "--no-graph"])).out).toContain("as fresh as its code");
+    // the code moves on: the quoted comment goes
+    put("src/orders/order.ts", "export class Order {\n  total() { return 2; }\n}\n");
+    git(["commit", "-qam", "rewrite"]);
+    const dry = await jarvis(["onboard", "--stale", "--dry-run", "--no-graph"]);
+    expect(dry.code).toBe(0);
+    expect(dry.out).toContain("would map again 1 module(s):");
+    expect(dry.out).toContain(
+      "src/orders — 1 commit(s) under its paths since it was mapped; 1 quoted line(s) gone from the code",
+    );
+    const tasks: string[] = [];
+    server.respond((req) => {
+      const first = (req.body.messages as Array<{ role: string; content: string }>).find(
+        (m) => m.role === "user",
+      );
+      tasks.push(first?.content ?? "");
+      if (wantsResult(req))
+        return completion(
+          JSON.stringify({
+            ...GOOD,
+            publicApi: [{ symbol: "Order", file: "src/orders/order.ts", description: "the order" }],
+            rules: [],
+            terms: [],
+          }),
+        );
+      if (toolCount(req) === 0) return toolCallCompletion("repo.read", { path: "src/orders/order.ts" });
+      return completion("done");
+    });
+    const again = await jarvis(["onboard", "--stale", "--no-graph"]);
+    expect(again.code).toBe(0);
+    expect(again.out).toContain("mapped again 1 of 1");
+    expect(tasks.some((t) => t.includes("Files changed since: src/orders/order.ts."))).toBe(true);
+    expect(tasks.some((t) => t.includes("Quoted lines no longer in the code: src/orders/order.ts:3"))).toBe(
+      true,
+    );
+    expect((await jarvis(["candidates", "promote", "orders"])).code).toBe(0);
+    expect(readFileSync(doc, "utf8")).not.toContain("Discounts are applied before tax.");
+  });
+
+  it("a folder bigger than one pass is offered in parts, unless --whole (pilot: 307 files at once)", async () => {
+    for (let i = 0; i < 100; i++) put(`src/big/forms/f${i}.ts`, `export const f${i} = ${i};\n`);
+    for (let i = 0; i < 60; i++) put(`src/big/widgets/w${i}.ts`, `export const w${i} = ${i};\n`);
+    put("src/big/index.ts", "export {};\n");
+    git(["add", "-A"]);
+    git(["commit", "-q", "-m", "big"]);
+    const r = await jarvis(["--json", "onboard", "--module", "src/big", "--no-graph"]);
+    expect(r.code).toBe(1);
+    const out = JSON.parse(r.out) as { tooBig: boolean; parts: Array<{ path: string; files: number }> };
+    expect(out.tooBig).toBe(true);
+    expect(out.parts).toEqual([
+      { path: "src/big/forms", files: 100 },
+      { path: "src/big/widgets", files: 60 },
+    ]);
+    const dry = await jarvis(["onboard", "--module", "src/big", "--whole", "--dry-run", "--no-graph"]);
+    expect(dry.code).toBe(0);
+    expect(dry.out).toContain("would run the onboard-mapper agent on src/big");
   });
 
   it("marks a generalisation its excerpt cannot prove, for the reviewer to read first (pilot)", async () => {

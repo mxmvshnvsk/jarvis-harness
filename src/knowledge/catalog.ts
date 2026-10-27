@@ -4,6 +4,7 @@ import YAML from "yaml";
 import { isPlainObject } from "../core/config/merge.ts";
 import { metaConfigFile } from "../core/paths.ts";
 import type { CodeContracts } from "../design/codeContracts.ts";
+import type { ContractEntry } from "../design/contracts.ts";
 
 /**
  * The contract catalog of a knowledge repository (ADR-0025 §4): what each service serves, calls, sends
@@ -68,6 +69,65 @@ export function resolvePlaceholders(text: string, config: Readonly<Record<string
 
 const compact = <T>(o: Record<string, unknown>): T =>
   Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined && v !== "")) as T;
+
+/** The client of a call a contract map names (not seen in code): its backend may go by another name. */
+export const MAP_CLIENT = "map";
+
+/**
+ * The endpoints a contract map names (src/design/contracts.ts), as `contracts.json` keeps them: an
+ * entry with a `url` is a call to another service (its path — the URL's), one with a `path` is served
+ * here; a BFF's service map has both — the route it serves and the backend it passes it to.
+ */
+export function mapEndpointsOf(entries: readonly ContractEntry[]): {
+  serves: ServedEndpoint[];
+  calls: CalledEndpoint[];
+} {
+  const serves = new Map<string, ServedEndpoint>();
+  const calls = new Map<string, CalledEndpoint>();
+  for (const e of entries) {
+    if (e.direction) continue; // the code's own endpoints are counted from the code
+    if (e.path) {
+      const key = `${e.method ?? ""} ${e.path}`;
+      if (!serves.has(key))
+        serves.set(
+          key,
+          compact<ServedEndpoint>({ method: e.method, path: e.path, handler: e.key, file: e.file }),
+        );
+    }
+    if (e.url) {
+      const path = e.url.replace(/^[a-z]+:\/\/[^/]*/i, "") || "/";
+      const key = `${e.method ?? ""} ${e.url}`;
+      if (!calls.has(key))
+        calls.set(
+          key,
+          compact<CalledEndpoint>({
+            method: e.method,
+            path,
+            url: e.url,
+            handler: e.key,
+            file: e.file,
+            client: MAP_CLIENT,
+          }),
+        );
+    }
+  }
+  return { serves: [...serves.values()], calls: [...calls.values()] };
+}
+
+/** A service's contracts with what its maps add: an endpoint the code already has is not doubled. */
+export function withMapEndpoints(doc: ServiceContracts, entries: readonly ContractEntry[]): ServiceContracts {
+  const { serves, calls } = mapEndpointsOf(entries);
+  const has = (list: readonly ServedEndpoint[], e: ServedEndpoint) =>
+    list.some((x) => x.path === e.path && (!x.method || !e.method || x.method === e.method));
+  return {
+    ...doc,
+    serves: [...doc.serves, ...serves.filter((e) => !has(doc.serves, e))],
+    calls: [
+      ...doc.calls,
+      ...calls.filter((e) => !doc.calls.some((x) => x.url === e.url && x.path === e.path)),
+    ],
+  };
+}
 
 /** A service's contracts from its code (src/design/codeContracts.ts), as `contracts.json` keeps them. */
 export function serviceContractsOf(
