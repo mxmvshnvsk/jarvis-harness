@@ -28,11 +28,13 @@ import { InterruptedError, interruption } from "../orchestration/interrupt.ts";
 import { type StepContext, type StepOutcome, SuspendRun } from "../orchestration/types.ts";
 import { wrapUntrusted } from "../security/policy/untrusted.ts";
 import { callRefsOf } from "../telemetry/callRefs.ts";
+import { servesServicesCode } from "../tools/servicesCode.ts";
 import type { ToolResult } from "../tools/types.ts";
 import { buildBaseMessages, outlinesFor, planStepFilesNow } from "./context.ts";
 import { COVERAGE_ACTOR, coverageGaps, gapsMessage } from "./coverage.ts";
 import type { AgentRegistry } from "./definition.ts";
 import { packageForStep } from "./knowledge.ts";
+import { RepeatLedger } from "./repeats.ts";
 import { ReadLedger, readKey } from "./rereads.ts";
 import { SearchLedger } from "./searches.ts";
 import { WriteLedger } from "./writes.ts";
@@ -220,7 +222,9 @@ export class AgentRuntimeRunner implements AgentRunner {
       ...(def.writes ? { writePaths: def.writes } : {}),
       env: rt.env,
     });
-    const toolDescriptors = bound.list();
+    // the services' code only where a task across services works: the knowledge repository itself
+    const servicesCode = servesServicesCode(ctx.workspace.ref.path);
+    const toolDescriptors = bound.list().filter((t) => servicesCode || !t.name.startsWith("services."));
     // reads without effects may run side by side; a write, a command, an effect runs alone and in order
     const readOnly = new Set(
       toolDescriptors.filter((t) => t.access === "read" && !t.effect).map((t) => t.name),
@@ -316,8 +320,8 @@ export class AgentRuntimeRunner implements AgentRunner {
     // in the pool's unlimited hours the limits grow (`unlimitedScale`), read anew at every check: a
     // step that began at night is held to the day's limits once the night is over — for what it does
     // after it (pilot: the night's calls counted against the day's limits, and the step stopped at 8:00)
-    const toolLimit = override?.maxToolCalls ?? def.limits.maxToolCalls;
-    const modelLimit = override?.maxModelCalls ?? def.limits.maxModelCalls;
+    const toolLimit = override?.maxToolCalls ?? ctx.step.limits?.maxToolCalls ?? def.limits.maxToolCalls;
+    const modelLimit = override?.maxModelCalls ?? ctx.step.limits?.maxModelCalls ?? def.limits.maxModelCalls;
     const scale = () =>
       Math.min(rt.budget.scaleNow(route.pool), def.limits.maxScale ?? Number.POSITIVE_INFINITY);
     let freeToolCalls = restored?.freeToolCalls ?? 0;
@@ -346,6 +350,7 @@ export class AgentRuntimeRunner implements AgentRunner {
     const reads = ReadLedger.from(transcript);
     reads.seed(baseShown);
     const searches = SearchLedger.from(transcript);
+    const repeats = RepeatLedger.from(transcript);
     const writes = new WriteLedger();
     let toolCalls = restored?.toolCalls ?? 0;
     let modelCalls = restored?.modelCalls ?? 0;
@@ -622,6 +627,19 @@ export class AgentRuntimeRunner implements AgentRunner {
         const asked = call.name === "knowledge.read" ? knowledgeRefOf(call.arguments) : undefined;
         if (asked && knowledgeShown.has(asked))
           return { call, args: {} as Record<string, unknown>, shown: asked };
+        // the same read again in this step: not run, not counted (src/agents/repeats.ts)
+        if (readOnly.has(call.name)) {
+          let same: Record<string, unknown> | undefined;
+          try {
+            const parsed: unknown = call.arguments.trim() ? JSON.parse(call.arguments) : {};
+            if (parsed && typeof parsed === "object" && !Array.isArray(parsed))
+              same = parsed as Record<string, unknown>;
+          } catch {
+            same = undefined;
+          }
+          const first = same ? repeats.first(call.name, same) : undefined;
+          if (same && first) return { call, args: same, repeat: first };
+        }
         if (toolCalls >= limits.maxToolCalls) {
           budgetExhausted = "tools";
           return { call, args: {} as Record<string, unknown>, skipped: true as const };
@@ -644,7 +662,10 @@ export class AgentRuntimeRunner implements AgentRunner {
       //    alone and in order; their answers go into the transcript in the order asked, as before
       const runnable = planned
         .map((p, i) => ({ p, i }))
-        .filter(({ p }) => !("skipped" in p) && !("shown" in p) && !("parseError" in p && p.parseError));
+        .filter(
+          ({ p }) =>
+            !("skipped" in p) && !("shown" in p) && !("repeat" in p) && !("parseError" in p && p.parseError),
+        );
       const results: Array<ToolResult | undefined> = planned.map(() => undefined);
       const batch = modelCalls;
       if (runnable.length > 1)
@@ -692,6 +713,14 @@ export class AgentRuntimeRunner implements AgentRunner {
           ];
           continue;
         }
+        if ("repeat" in p) {
+          emit("tool.repeat", { capability: call.name, kind: "asked", first: p.repeat });
+          transcript = [
+            ...transcript,
+            { role: "tool", toolCallId: call.id, content: RepeatLedger.text(call.name, p.repeat) },
+          ];
+          continue;
+        }
         if ("skipped" in p) {
           transcript = [
             ...transcript,
@@ -719,6 +748,10 @@ export class AgentRuntimeRunner implements AgentRunner {
         const sought = searches.answer(call.name, args, call.id, answered.content);
         if (sought.kind !== "first")
           emit("tool.repeat", { capability: call.name, pattern: args.pattern, kind: sought.kind });
+        if (results[i]?.ok === true) {
+          if (readOnly.has(call.name)) repeats.answered(call.name, args, call.id);
+          else repeats.changed();
+        }
         // the same file written round and round: said once, in the write's answer
         const churn = results[i]?.ok === true ? writes.note(call.name, args, call.id) : undefined;
         if (churn)

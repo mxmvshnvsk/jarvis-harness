@@ -63,6 +63,17 @@ export const StepDefinitionSchema = z.strictObject({
    * more calls and on, or finish. For steps whose half-done result costs more than a question.
    */
   onLimit: z.enum(["finish", "ask"]).optional(),
+  /**
+   * Agentic steps: the agent's tool and model calls in this step, over its own (a project's
+   * `agents.<id>.limits` still wins). The same agent has more to read in one workflow than in another:
+   * a task across services' spec reads several services' documents.
+   */
+  limits: z
+    .strictObject({
+      maxToolCalls: z.int().positive().optional(),
+      maxModelCalls: z.int().positive().optional(),
+    })
+    .optional(),
 });
 export type StepDefinition = z.infer<typeof StepDefinitionSchema>;
 

@@ -62,11 +62,20 @@ Method:
 - Keep findings specific: a finding names a topic, what the code does, and the sources.
 - When a business term of the task led you to code under another name («повторная регистрация» → canRestartOnboarding), record it in "termLinks": the term as the task says it and the symbols or module paths you verified in files. These become glossary proposals for a person.
 - When a knowledge document says something the code you read contradicts (a file, a flow, a field, a rule that is not so now), trust the code and record it in "knowledgeDrift": the document by the name your context gives it, the section, its words as written, what the code does and the lines that show it. Only what is so before this task: what the task is going to change is not drift. These become fixes of the document for a person.
-- A task across services (a catalog input: you work in the knowledge repository of many services, no service's code is here): the catalog lists the services of the map, the links between them, the libraries and the services the task names. Read the knowledge of each service the task may touch — knowledge/services/<service>/ (architecture, contracts, neighbours) with knowledge.search and knowledge.read — and say per service what the task needs of it and which links between services change (an endpoint, a topic, a field, a library's version). A DTO, type or client the task changes that a library of the map declares is a change of that library too: name the library and what changes in it. Its users are not touched by that alone: only the services that change for the task move to its new version. Use the services' names exactly as the catalog lists them; a service you could not settle goes to "unknowns".
+- A task across services (a catalog input: you work in the knowledge repository of many services, no service's code is here): the catalog lists the services of the map, the links between them, the libraries and the services the task names. Read the knowledge of each service the task may touch — knowledge/services/<service>/ (architecture, contracts, neighbours) with knowledge.search and knowledge.read — and say per service what the task needs of it and which links between services change (an endpoint, a topic, a field, a library's version). A DTO, type or client the task changes that a library of the map declares is a change of that library too: name the library and what changes in it. Its users are not touched by that alone: only the services that change for the task move to its new version. Use the services' names exactly as the catalog lists them; a service you could not settle goes to "unknowns". The knowledge repository has the services' documents, not their code: for a name, a flag, a text of the task that the documents do not have, search the services' code with services.search (one search across all of them, not one per spelling) and read the hit with services.read; repo.search here searches only the documents.
   Here every service of the map is this task's to change: the rule above about other systems applies only to systems outside the map. A service's own knowledge that calls another service «another team's», a task labelled «| BACK» or «| MIDDLE» as not ours — that is that one service's boundary, not this task's. The Jira tasks of the Story (front, middle, back) are all parts of this task: what each asks of a service of the map is work, not a dependency. Only what systems outside the map must do goes to "dependencies".
 Stop when further reading would not change the findings. Then produce the result document.`,
   // Jira/Confluence reads arrive through MCP profiles when the project configures them (ADR-0017 §4).
-  capabilities: [...READ_REPO, "jira.get", "jira.search", "confluence.get", "confluence.search", "figma.get"],
+  capabilities: [
+    ...READ_REPO,
+    "jira.get",
+    "jira.search",
+    "confluence.get",
+    "confluence.search",
+    "figma.get",
+    "services.search",
+    "services.read",
+  ],
   requires: { tools: true, structuredOutput: "json" },
   output: { type: "research", schema: ResearchResult, outcomes: ["ok"] },
   limits: DEFAULT_LIMITS,
@@ -117,7 +126,7 @@ Method:
 - A related-work input is what related tasks already did in their branches, not merged yet: build on the contract it shows (fields, endpoints) and list each such branch in dependencies with its issue, branch, commit and PR state; never assume what the branch does not have.
 - A task across services (the research says per service of the map what the task needs): the requirements cover every service of the map the task changes, each naming its service — a library of the map too. A service of the map is a non-goal only when the sources say so in words; its part being a separate Jira task of the Story (front, middle) makes it a part of this task, not a non-goal. A library's change is no requirement on its users: only a service that changes anyway moves to the new version (say so in its requirement); the others keep theirs. Only what systems outside the map must do goes to dependencies.
 Produce the result document when every requirement has acceptance criteria.`,
-  capabilities: ["repo.read", "repo.list", "repo.search"],
+  capabilities: ["repo.read", "repo.list", "repo.search", "services.search", "services.read"],
   requires: { tools: true, structuredOutput: "json" },
   output: { type: "spec", schema: SpecResult, outcomes: ["ok"] },
   // the code is read by research and requirements: spec writes, it looks up a name or two
@@ -172,7 +181,15 @@ Method:
 - Read the services' documents (knowledge/services/<service>/) for what you need; do not design the implementation inside a service.
 - If the specification lacks what the split needs (which service owns a behaviour, a field's format), set outcome "spec_gap" with reasons.
 Produce the result document.`,
-  capabilities: ["repo.read", "repo.list", "repo.search", "knowledge.read", "knowledge.search"],
+  capabilities: [
+    "repo.read",
+    "repo.list",
+    "repo.search",
+    "knowledge.read",
+    "knowledge.search",
+    "services.search",
+    "services.read",
+  ],
   requires: { tools: true, structuredOutput: "json" },
   output: { type: "split", schema: SplitResult, outcomes: ["ok", "spec_gap"] },
   limits: { ...DEFAULT_LIMITS, maxToolCalls: 20 },

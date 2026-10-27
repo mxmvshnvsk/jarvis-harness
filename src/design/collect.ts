@@ -2,6 +2,7 @@ import { readStoryTasks } from "../app/storyTasks.ts";
 import type { GraphNode } from "../core/capabilities/contracts.ts";
 import { repoIdOf } from "../knowledge/graph/update.ts";
 import type { DeterministicTool } from "../orchestration/executors.ts";
+import { servesServicesCode } from "../tools/servicesCode.ts";
 import { type AnchorHit, anchorsIn, anchorsSection, hitOf } from "./anchors.ts";
 import { type CodeContracts, codeContractsOf } from "./codeContracts.ts";
 import { type ContractCheck, checkContracts, contractsSection } from "./contracts.ts";
@@ -132,10 +133,15 @@ export const collectSources: DeterministicTool = async (ctx, args) => {
     });
   // the code names and interface texts they mention, found in the code: where the agents start
   const anchors: AnchorHit[] = [];
-  if (available.has("repo.search")) {
+  // a task across services works in the knowledge repository: the names are looked for in the services' code
+  const searchTool =
+    servesServicesCode(ctx.workspace.ref.path) && available.has("services.search")
+      ? "services.search"
+      : "repo.search";
+  if (available.has(searchTool)) {
     const asked = anchorsIn(sources.map((s) => s.text));
     const found = await inTurns(asked, READS_AT_ONCE, (anchor) =>
-      ctx.tools.invoke("repo.search", { pattern: anchor.value, literal: true, maxResults: 200 }),
+      ctx.tools.invoke(searchTool, { pattern: anchor.value, literal: true, maxResults: 200 }),
     );
     for (const [i, r] of found.entries())
       if (r.ok)

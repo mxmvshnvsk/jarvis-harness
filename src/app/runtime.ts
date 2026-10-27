@@ -42,6 +42,7 @@ import { eventLevel, Logger, logLevelFrom, logSettingsFrom } from "../telemetry/
 import { LocalToolProvider } from "../tools/local/provider.ts";
 import { ToolRegistry } from "../tools/registry.ts";
 import { ToolRouter } from "../tools/router.ts";
+import { ServicesCodeProvider } from "../tools/servicesCode.ts";
 
 /** Everything that needs the database and the configuration, wired once per process. */
 export interface Runtime {
@@ -175,6 +176,8 @@ export function createRuntime(loaded: LoadedConfig, options: RuntimeOptions = {}
       ? new OpenAiCompatibleEmbedder(embeddingsModelId, embeddingsModel, secrets)
       : undefined;
   registry.register(new GraphToolProvider(graph));
+  // a task across services: the services' clones, read only, from the knowledge repository
+  registry.register(new ServicesCodeProvider());
   // Adapter packs (ADR-0021 §8): TypeScript and JVM ship in-process; others arrive as packs.
   const capabilities = new CapabilityRegistry();
   const snapshotOf = (workspace: string) => {

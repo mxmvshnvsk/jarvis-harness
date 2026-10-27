@@ -27,6 +27,9 @@ import {
 import { type Sandbox, sandbox } from "../helpers/tmp.ts";
 
 let sb: Sandbox;
+// a listing each time: the same call again in a step is not run (src/agents/repeats.ts)
+let listed = 0;
+const listCall = () => toolCallCompletion("repo.list", { maxEntries: 500 + listed++ });
 let server: FakeOpenAi;
 let rt: Runtime | undefined;
 
@@ -470,7 +473,7 @@ context: { maxContext: 8000 }
     let phase = 0;
     server.respond((_req, i) => {
       if (phase === 0) {
-        if (i < 5) return toolCallCompletion("repo.list", {});
+        if (i < 5) return listCall();
         return { status: 429, body: { error: { message: "insufficient_quota" } } };
       }
       // Resumed process: the model asks for one more tool, then finishes.
@@ -562,7 +565,7 @@ context: { maxContext: 8000 }
       const system = (req.body.messages as Array<{ content: string }>)[0]?.content ?? "";
       if (system.includes("# Agent: impact")) {
         const tools = req.body.tools as unknown[] | undefined;
-        if (tools) return toolCallCompletion("repo.list", {});
+        if (tools) return listCall();
         const user = lastUserContent(req);
         if (
           user.includes("Produce the result document") ||
@@ -633,7 +636,7 @@ context: { maxContext: 8000 }
       if (system.includes("# Agent: research")) {
         // keeps exploring while it may, three calls an answer: only the limit stops it
         if (req.body.tools) {
-          const reply = toolCallCompletion("repo.list", {});
+          const reply = listCall();
           const message = (reply.body as { choices: Array<{ message: { tool_calls: unknown[] } }> })
             .choices[0]?.message;
           if (message)
@@ -708,6 +711,30 @@ context: { maxContext: 8000 }
     });
   });
 
+  it("the same search again in a step is not run and not counted (pilot: its own issue three times)", async () => {
+    sb.write("project/.jarvis/project.yaml", "version: 1\nworkspace: { mode: cwd }\n");
+    rt = await testRuntime(sb, { PATH: process.env.PATH ?? "" });
+    let turn = 0;
+    server.respond((req) => {
+      if (!req.body.tools) return completion(JSON.stringify(RESEARCH_DOC));
+      turn += 1;
+      return turn <= 3
+        ? toolCallCompletion("repo.search", { pattern: "canRestartOnboarding", path: "src" })
+        : completion(JSON.stringify(RESEARCH_DOC));
+    });
+    const run = createRun(rt, "r");
+    await engineWith(rt, researchOnly).execute(run.id, { owner: "cli:t" });
+    const last = server.requests.filter((r) => r.body.tools)[3];
+    const results = ((last?.body.messages ?? []) as Array<{ role: string; content: string }>).filter(
+      (m) => m.role === "tool",
+    );
+    expect(results[0]?.content).toContain("src/onboarding.ts:1:");
+    expect(results[1]?.content).toContain("(asked already in this step: the answer to call");
+    expect(results[2]?.content).toContain("(asked already in this step");
+    expect(rt.events.list({ runId: run.id, kind: "tool.call" })).toHaveLength(1);
+    expect(rt.events.list({ runId: run.id, kind: "tool.repeat" })).toHaveLength(2);
+  });
+
   it("the calls of one answer: reads side by side, a batch on the record, answers in the order asked", async () => {
     sb.write("project/.jarvis/project.yaml", "version: 1\nworkspace: { mode: cwd }\n");
     sb.write("project/src/billing.ts", "export const invoiceTotal = 1;\n");
@@ -780,9 +807,7 @@ context: { maxContext: 8000 }
       "version: 1\nworkspace: { mode: cwd }\nagents: { research: { limits: { maxToolCalls: 2, maxModelCalls: 4 } } }\n",
     );
     rt = await testRuntime(sb, { PATH: process.env.PATH ?? "" });
-    server.respond((req) =>
-      req.body.tools ? toolCallCompletion("repo.list", {}) : completion(JSON.stringify(RESEARCH_DOC)),
-    );
+    server.respond((req) => (req.body.tools ? listCall() : completion(JSON.stringify(RESEARCH_DOC))));
     const run = createRun(rt, "r");
     await engineWith(rt, researchOnly).execute(run.id, { owner: "cli:t" });
     const start = rt.events.list({ runId: run.id }).find((e) => e.kind === "agent.start");
@@ -810,9 +835,7 @@ context: { maxContext: 8000 }
       sources: [],
       outcome: "ok",
     };
-    server.respond((req) =>
-      req.body.tools ? toolCallCompletion("repo.list", {}) : completion(JSON.stringify(doc)),
-    );
+    server.respond((req) => (req.body.tools ? listCall() : completion(JSON.stringify(doc))));
     const wf = workflowOf({
       name: "im",
       entry: "impact",
@@ -849,9 +872,7 @@ context: { maxContext: 8000 }
         sources: [],
         outcome: "ok",
       };
-      server.respond((req) =>
-        req.body.tools ? toolCallCompletion("repo.list", {}) : completion(JSON.stringify(doc)),
-      );
+      server.respond((req) => (req.body.tools ? listCall() : completion(JSON.stringify(doc))));
       const wf = workflowOf({
         name: "im",
         entry: "impact",
@@ -981,7 +1002,7 @@ context: { maxContext: 8000 }
         const messages = req.body.messages as Array<{ role: string; content: string }>;
         const last = messages.at(-1)?.content ?? "";
         if (last.startsWith("Your document leaves these uncovered")) told.push(last);
-        if (req.body.tools && asks++ % 2 === 0) return toolCallCompletion("repo.list", {});
+        if (req.body.tools && asks++ % 2 === 0) return listCall();
         // R2 never gets a path
         return completion(
           JSON.stringify({
@@ -1055,9 +1076,7 @@ context: { maxContext: 8000 }
     });
     const engine = engineWith(rt, wf);
     // one tool call an answer, while tools are offered
-    server.respond((req) =>
-      req.body.tools ? toolCallCompletion("repo.list", {}) : completion(JSON.stringify(RESEARCH_DOC)),
-    );
+    server.respond((req) => (req.body.tools ? listCall() : completion(JSON.stringify(RESEARCH_DOC))));
     const run = createRun(rt, "ra");
     const first = await engine.execute(run.id, { owner: "cli:t" });
     expect(first.run.state).toBe("WAITING_HUMAN");
@@ -1114,9 +1133,7 @@ context: { maxContext: 8000 }
         },
       ],
     });
-    server.respond((req) =>
-      req.body.tools ? toolCallCompletion("repo.list", {}) : completion(JSON.stringify(RESEARCH_DOC)),
-    );
+    server.respond((req) => (req.body.tools ? listCall() : completion(JSON.stringify(RESEARCH_DOC))));
     const run = createRun(rt, "rb");
     const result = await engineWith(rt, wf).execute(run.id, { owner: "cli:t" });
     expect(result.run.state).toBe("COMPLETED");

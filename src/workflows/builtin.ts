@@ -498,10 +498,12 @@ steps:
     tool: cross.catalog
     outputs: [catalog]
     transitions: { onSuccess: research }
+  # the services' documents of every service the task may touch, and their code (services.search)
   - id: research
     kind: agentic
     agent: research
     phase: research
+    limits: { maxToolCalls: 60, maxModelCalls: 30 }
     inputs: [sources, design, catalog]
     outputs: [research]
     transitions: { onSuccess: spec }
@@ -509,6 +511,7 @@ steps:
     kind: agentic
     agent: specification
     onLimit: ask
+    limits: { maxToolCalls: 24 }
     phase: spec
     inputs: [research, design, related-work]
     outputs: [spec]
