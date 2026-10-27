@@ -16,6 +16,7 @@ import type { Capability, ToolContext, ToolOutput } from "../tools/types.ts";
 import { removeReviewMarkers } from "./applyRun.ts";
 import { branchOf, commitMessageOf, FormatError, headerOf, trailersOf } from "./deliveryFormat.ts";
 import { commitWithHooks } from "./repoHooks.ts";
+import { originsForPr, originsOf } from "./requirementOrigins.ts";
 import type { Runtime } from "./runtime.ts";
 
 /**
@@ -628,6 +629,8 @@ interface RunDocuments {
   readonly summary?: string;
   readonly goals: readonly string[];
   readonly changes?: string;
+  /** Where the requirements came from (src/app/requirementOrigins.ts): pages, items, the gate's answers. */
+  readonly origins?: string;
 }
 
 function json(runtime: Runtime, run: Run, type: string): Record<string, unknown> | undefined {
@@ -648,7 +651,10 @@ function documentsOf(runtime: Runtime, run: Run): RunDocuments {
   const title = text(spec?.title);
   const summary = text(spec?.summary);
   const changes = text(impl?.summary);
+  const found = originsOf(runtime, run);
+  const origins = found ? originsForPr(found) : undefined;
   return {
+    ...(origins ? { origins } : {}),
     ...(title ? { title } : {}),
     ...(summary ? { summary } : {}),
     goals: Array.isArray(spec?.goals) ? spec.goals.filter((g): g is string => typeof g === "string") : [],
@@ -668,6 +674,7 @@ function descriptionOf(run: Run, docs: RunDocuments, files: readonly string[]): 
   const parts: string[] = [docs.summary ?? run.task.trim()];
   if (docs.goals.length > 0) parts.push(`Goals:\n${docs.goals.map((g) => `- ${g}`).join("\n")}`);
   if (docs.changes) parts.push(`Changes:\n${docs.changes}`);
+  if (docs.origins) parts.push(docs.origins);
   const shown = files.slice(0, MAX_FILES).map((f) => `- ${f}`);
   if (files.length > MAX_FILES) shown.push(`- … and ${files.length - MAX_FILES} more`);
   parts.push(`Files (${files.length}):\n${shown.join("\n")}`);

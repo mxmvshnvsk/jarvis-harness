@@ -523,10 +523,13 @@ steps:
       onSuccess: split
       onOutcome:
         request_changes: { to: spec, maxIterations: 3 }
+  # a split cut short starts wrong subtasks: it asks at its limit, like the spec
   - id: split
     kind: agentic
     agent: split
     phase: spec
+    onLimit: ask
+    limits: { maxToolCalls: 40 }
     inputs: [spec, catalog, research]
     outputs: [split]
     transitions:

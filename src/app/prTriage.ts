@@ -11,6 +11,7 @@ import { git } from "../tools/local/exec.ts";
 import type { ToolOutput } from "../tools/types.ts";
 import { PR_REQUEST, prOf, requestOf } from "./deliver.ts";
 import { type PrComment, type PrReviewDoc, type PrThread, prReviewOf } from "./prReview.ts";
+import { originsOf, originsText } from "./requirementOrigins.ts";
 import type { Runtime } from "./runtime.ts";
 
 /**
@@ -66,7 +67,12 @@ const Item = z.object({
       "the reply to post in the thread, in the comment's language, polite and short; for agree — what will change",
     ),
   change: z.string().optional().describe("for agree: what exactly to change in the code, file and place"),
-  sources: z.array(z.string()).default([]).describe("spec requirement ids, `path:line`, the issue key"),
+  sources: z
+    .array(z.string())
+    .default([])
+    .describe(
+      "spec requirement ids, `path:line`, the issue key — for the record; the reply itself names pages, not ids",
+    ),
 });
 const Items = z.object({ items: z.array(Item) });
 
@@ -166,6 +172,7 @@ export async function triagePr(runtime: Runtime, run: Run, review: PrReviewDoc):
   if (threads.length === 0) return [];
   const spec = runtime.artifacts.listLatest(run.id, "spec")[0];
   const impl = runtime.artifacts.listLatest(run.id, "implementation")[0];
+  const origins = originsOf(runtime, run);
   const shown = await Promise.all(
     threads.map(async (t) => {
       const talk: string[] = [];
@@ -203,6 +210,7 @@ export async function triagePr(runtime: Runtime, run: Run, review: PrReviewDoc):
           "- A tool's comment (a scanner's summary, a code-owners notice) is nothing, with no reply.",
           "- nothing for thanks, an acknowledgement, or what is already done.",
           "- The reply goes to the reviewer: their language, polite, short, no apologies, no praise of the comment. Never promise what agree does not change.",
+          "- A reply that rests on a requirement never names the spec's ids (R1, R2…): the reviewers do not have them. Say where it was asked and who confirmed it, from «Where the spec's requirements came from»: the page or the issue as a link, the section, its words; then what was decided when the spec was accepted (the answer and who gave it), if anything; then what the code does because of it; and end a disagree with a question whether they object. For example: «В [Требования к форме](link), п. 3.2, просили «убрать поле ИНН». При согласовании спецификации Иван Петров подтвердил: «ИНН больше не нужен». Поэтому поле удалено. Есть возражения?». A requirement no page or issue says: say it was decided when the spec was accepted, by whom — or that it was the analysis' own conclusion; never invent a page.",
           '- Quote with «» and never with ".',
         ].join("\n"),
       },
@@ -211,6 +219,7 @@ export async function triagePr(runtime: Runtime, run: Run, review: PrReviewDoc):
         content: [
           `# Task ${run.task}`,
           spec ? `# Spec\n${clip(runtime.artifacts.text(spec), 12_000)}` : "",
+          origins ? originsText(origins) : "",
           impl ? `# What was implemented\n${clip(runtime.artifacts.text(impl), 4_000)}` : "",
           `# Threads\n${shown.join("\n\n")}`,
         ]

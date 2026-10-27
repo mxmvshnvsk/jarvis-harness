@@ -120,6 +120,7 @@ Goal: turn the task and the research artifact into a specification a reviewer ca
 Method:
 - Each requirement has an id (R1, R2, …), a precise statement, and acceptance criteria that can be checked by a test or an inspection.
 - State non-goals explicitly. List risks and open questions instead of guessing.
+- Each requirement says where it was asked in "sources": the issue key or the Confluence page id as the sources input gives it, the section or the item's number there, and its words quoted as written. A requirement no issue or page says — the analysis' own conclusion, or a person's answer at a gate — has no sources; never cite a page that does not say it. A reviewer of the code will ask «where does it say so?»: this is the answer.
 - A question for a person (open questions, the clarification) is read at the gate by someone who will not open your tools: name what it is about as they see it — the screen by its title or its section («To be - …»), the field by its label, the text in «» — and give the answers you see. A Figma node id, a requirement id or a path goes to refs and sources, never into the question. A design frame labelled To be or AS IS by its section answers which variant is the target: do not ask it.
 - The requirements input is the analysis of the task: build on it. Keep its numbering (R1, R2, …) and its verdict on each; every assumption it made goes to "assumptions"; cover each missing case it lists or say in risks why not. Contradictions it settled stay settled.
 - Consult the repository only to make requirements concrete (names of modules, existing behaviour) — research and requirements already read it; do not design the implementation.
@@ -178,7 +179,7 @@ Method:
 - A requirement goes to the service whose code does it, not to the one whose behaviour shows it: a rule computed in a library (a hash, a validation, a mapper the service only calls) is the library's subtask. When the code's place is unknown, say so in the subtask's task so its impact checks it first.
 - A library's new version is its publication's: do not tell a subtask to set or bump a version in the build files — the build or the CI derives it.
 - Keys go in delivery order: the producer before its consumers; "deliverAfter" names the keys that must be delivered before.
-- Read the services' documents (knowledge/services/<service>/) for what you need; do not design the implementation inside a service.
+- Read the services' documents (knowledge/services/<service>/) for what you need; do not design the implementation inside a service. The research already found where the task is in the code: services.search / services.read only to settle which service a change belongs to or where the contract between them runs — not to read each place again; the subtask's own research reads its code.
 - If the specification lacks what the split needs (which service owns a behaviour, a field's format), set outcome "spec_gap" with reasons.
 Produce the result document.`,
   capabilities: [

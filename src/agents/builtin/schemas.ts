@@ -167,6 +167,19 @@ export const RequirementsResult = z.object({
   outcome: z.enum(["ok", "needs_clarification"]).default("ok"),
 });
 
+/**
+ * Where a requirement of the spec was asked (src/app/requirementOrigins.ts): a reviewer of the PR asks
+ * «where does it say so?» — the answer names the page and the item, not «R3» (pilot).
+ */
+const RequirementSource = z.object({
+  ref: z
+    .string()
+    .min(1)
+    .describe("the issue key (ABC-12) or the Confluence page id, as the sources input names it"),
+  section: z.string().optional().describe("the section's heading or the item's number there"),
+  quote: z.string().optional().describe("its words, quoted as written there (a sentence or two)"),
+});
+
 export const SpecResult = z.object({
   ...Base,
   title: z.string().min(1),
@@ -174,7 +187,17 @@ export const SpecResult = z.object({
   nonGoals: z.array(z.string()).default([]),
   requirements: z
     .array(
-      z.object({ id: z.string().min(1), text: z.string().min(1), acceptance: z.array(z.string()).min(1) }),
+      z.object({
+        id: z.string().min(1),
+        text: z.string().min(1),
+        acceptance: z.array(z.string()).min(1),
+        sources: z
+          .array(RequirementSource)
+          .default([])
+          .describe(
+            "where it was asked: the issue or page that says it, the section, its words; none — the requirement is the analysis' own, or a person's answer at a gate",
+          ),
+      }),
     )
     .min(1),
   risks: z.array(z.string()).default([]),
