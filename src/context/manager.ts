@@ -89,10 +89,27 @@ export class ContextManager {
   private lastLevel: PressureLevel = "healthy";
   /** The results' size right after the last working-set trim: the next waits for a batch's growth. */
   private afterSetTrim = 0;
+  /** The working set now: it grows when the agent needs back what was trimmed (`widen`). */
+  private set: number;
 
   constructor(options: ContextManagerOptions, initial?: Partial<ContextStats>) {
     this.o = options;
+    this.set = options.workingSet ?? 0;
     this.stats = { peakPressure: 0, trims: 0, compactions: 0, resets: 0, ...initial };
+  }
+
+  /**
+   * The agent asked for a result the working set had trimmed (its text by its blob, a file read again):
+   * the set was too small for this step's work — it grows by half, up to half the window. Pilot (a model
+   * without a prefix cache, a set of 30k tokens): 14 trims, 47 results read back and 42 reads repeated
+   * in one research, each read trimmed before it was used.
+   */
+  widen(reason: string): number {
+    if (this.set <= 0) return 0;
+    const before = this.set;
+    this.set = Math.min(Math.round(this.set * 1.5), Math.round(this.o.effective * 0.5));
+    if (this.set > before) this.o.emit("context.widened", { from: before, to: this.set, reason });
+    return this.set;
   }
 
   measure(base: readonly Message[], transcript: readonly Message[]): { tokens: number; pressure: number } {
@@ -202,7 +219,7 @@ export class ContextManager {
     // what stays (sources, files read again) can keep it over the set, and a trim on every call
     // trimmed each result as it aged and the agent read it back (pilot: 23 trims and 11 re-reads in
     // a research of 58 calls).
-    const set = this.o.workingSet ?? 0;
+    const set = this.set;
     if (set > 0) {
       const own = this.o.estimate(transcript);
       const due = Math.max(set, this.afterSetTrim + set * (1 - WORKING_TARGET));

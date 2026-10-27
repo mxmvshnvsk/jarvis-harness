@@ -8,6 +8,7 @@ import {
   SUMMARY_MAX_OUTPUT,
   summarizerMessages,
 } from "../context/index.ts";
+import { TRIMMED_MARKER } from "../context/transcript.ts";
 import type { ArtifactVersion } from "../core/domain/artifact.ts";
 import { frameNamesOf, humanizeNodeIds } from "../design/frames.ts";
 import { NOTE_DELIVERED, notesOf, notesText } from "../interaction/notes.ts";
@@ -638,7 +639,13 @@ export class AgentRuntimeRunner implements AgentRunner {
             same = undefined;
           }
           const first = same ? repeats.first(call.name, same) : undefined;
-          if (same && first) return { call, args: same, repeat: first };
+          // only while that answer is still whole above: a trimmed one is asked for again, and runs
+          const intact =
+            first !== undefined &&
+            transcript.some(
+              (m) => m.role === "tool" && m.toolCallId === first && !m.content.includes(TRIMMED_MARKER),
+            );
+          if (same && first && intact) return { call, args: same, repeat: first };
         }
         if (toolCalls >= limits.maxToolCalls) {
           budgetExhausted = "tools";
@@ -744,6 +751,17 @@ export class AgentRuntimeRunner implements AgentRunner {
         );
         if (answered.kind !== "first")
           emit("tool.reread", { capability: call.name, path: args.path, kind: answered.kind });
+        // a result the working set trimmed, needed back: the set is too small for this step's work
+        if (
+          answered.kind === "again" ||
+          (call.name === "knowledge.read" &&
+            results[i]?.ok === true &&
+            typeof args.ref === "string" &&
+            args.ref.startsWith("blob:"))
+        )
+          manager.widen(
+            answered.kind === "again" ? "a file read again after its trim" : "a trimmed result read back",
+          );
         // the same empty search again: it ran, and the answer says it was empty before too
         const sought = searches.answer(call.name, args, call.id, answered.content);
         if (sought.kind !== "first")

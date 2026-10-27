@@ -133,6 +133,31 @@ describe("the working set: tool results past it go to pointers whatever the wind
     expect((await held.manage([], next)).changed).toBe(false); // a4 stays
     const later = [...next, ...result("c2", "repo.read", 3000), ...result("c3", "repo.read", 3000)];
     expect(trimmedIds((await held.manage([], later)).transcript)).toContain("a4");
+    // a trimmed result needed back: the set grows by half, up to half the window — what was trimmed for
+    // the old set stays as it is, and the next growth waits for the wider set
+    const widened: Array<{ kind: string; payload: Record<string, unknown> }> = [];
+    const small = new ContextManager({
+      effective: 10_000,
+      thresholds: DEFAULT_THRESHOLDS,
+      compactTarget: 0.35,
+      workingSet: 3_000,
+      estimate,
+      store: () => "ref",
+      summarize: async () => "unused",
+      emit: (kind, payload) => widened.push({ kind, payload }),
+    });
+    expect(small.widen("a trimmed result read back")).toBe(4_500);
+    expect(small.widen("again")).toBe(5_000);
+    expect(small.widen("again")).toBe(5_000);
+    expect(widened.map((w) => w.payload)).toEqual([
+      { from: 3_000, to: 4_500, reason: "a trimmed result read back" },
+      { from: 4_500, to: 5_000, reason: "again" },
+    ]);
+    const roomy = await small.manage(
+      [],
+      [...result("b1", "repo.read", 2000), ...result("b2", "repo.read", 2000)],
+    );
+    expect(roomy.changed).toBe(false);
     // off
     const off = new ContextManager({
       effective: 1_000_000,

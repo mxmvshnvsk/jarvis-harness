@@ -29,7 +29,7 @@ const READ_MAX = 400;
  */
 export const SERVICES_READS = 30;
 
-/** What a step was shown of each file: its line ranges (what a read inside them would repeat). */
+/** What a step read of each file: its line ranges (the places counted against SERVICES_READS). */
 const shown = new Map<string, Map<string, Array<[number, number]>>>();
 const stepOf = (ctx: ToolContext) => `${ctx.run.id}:${ctx.stepId}:${ctx.iteration}`;
 
@@ -164,22 +164,16 @@ export class ServicesCodeProvider implements ToolProvider {
           if (shown.size > 64) shown.delete(shown.keys().next().value as string);
           const key = `${service}:${rel}`;
           const ranges = step.get(key) ?? [];
-          // lines this step was shown already: a pointer, not the text again
-          const within = ranges.find(([a, b]) => a <= from && to <= b);
-          if (within)
-            return {
-              ok: true,
-              text: `${key}: lines ${from}–${to} were shown in this step already (a read of ${within[0]}–${within[1]} above) — use them`,
-              data: { service, path: rel, repeat: true },
-            };
+          const again = ranges.some(([a, b]) => a <= from && to <= b);
           const reads = [...step.values()].reduce((n, r) => n + r.length, 0);
-          if (reads >= SERVICES_READS)
+          if (!again && reads >= SERVICES_READS)
             return {
               ok: true,
               text: `${SERVICES_READS} places of the services' code read in this step: enough to say which service changes where. Name the place (${key}) in your result — the subtask's own research reads it — and finish.`,
               data: { service, path: rel, capped: true },
             };
-          step.set(key, [...ranges, [from, to]]);
+          // the same lines again (their first answer may have been trimmed): read, not counted again
+          if (!again) step.set(key, [...ranges, [from, to]]);
           const body = lines
             .slice(from - 1, to)
             .map((l, i) => `${from + i}: ${l}`)

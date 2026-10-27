@@ -104,18 +104,18 @@ describe("the services' code from the knowledge repository", () => {
     ).toContain("only in a task across services");
   });
 
-  it("lines shown in the step already get a pointer; past its reads the master is told to finish", async () => {
+  it("past its reads the master is told to finish; the same lines again are read, not counted", async () => {
     const read = (a: Record<string, unknown>) => tool("services.read").handler(a, ctxAt(meta));
     await read({ service: "shop-web", path: "src/banner.ts", startLine: 1, endLine: 2 });
-    const again = await read({ service: "shop-web", path: "src/banner.ts", startLine: 1, endLine: 1 });
-    expect(again.text).toBe(
-      "shop-web:src/banner.ts: lines 1–1 were shown in this step already (a read of 1–2 above) — use them",
-    );
     for (let i = 1; i < SERVICES_READS; i++)
       await read({ service: "orders-api", path: "src/Big.java", startLine: i, endLine: i });
     const past = await read({ service: "orders-api", path: "src/Big.java", startLine: 35, endLine: 36 });
     expect(past.text).toContain(`${SERVICES_READS} places of the services' code read in this step`);
-    // another step reads again
+    // lines read before (their answer may have been trimmed since): the text again
+    expect(
+      (await read({ service: "shop-web", path: "src/banner.ts", startLine: 1, endLine: 1 })).text,
+    ).toContain("1: export const showGiftBanner");
+    // another step reads anew
     expect(
       (
         await tool("services.read").handler(
