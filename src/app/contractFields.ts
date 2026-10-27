@@ -76,7 +76,8 @@ export class Checkout {
       ...list.filter((f) => this.changed.has(f)),
       ...list.filter((f) => !this.changed.has(f)),
     ];
-    const declares = new RegExp(`\\b(class|record|interface|type)\\s+${name}\\b`);
+    // an enum is a type of the contract too (pilot: EmailType «not declared» in the library declaring it)
+    const declares = new RegExp(`\\b(class|record|interface|type|enum)\\s+${name}\\b`);
     let decl: DtoDecl | undefined;
     for (const file of [...changedFirst(named), ...changedFirst(sources)]) {
       const text = this.read(file);

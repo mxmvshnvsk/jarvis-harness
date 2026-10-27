@@ -87,7 +87,13 @@ export function contractChangeAsked(
   const owner = str(c.owner);
   return {
     id: `${a.artifactId}@${a.version}`,
-    ask: { item, ...(kind ? { kind } : {}), change, why: str(c.why) ?? "", ...(owner ? { owner } : {}) },
+    ask: {
+      item: kind ? item.replace(new RegExp(`^${kind}\\s+`, "i"), "").trim() : item,
+      ...(kind ? { kind } : {}),
+      change,
+      why: str(c.why) ?? "",
+      ...(owner ? { owner } : {}),
+    },
   };
 }
 
@@ -153,10 +159,36 @@ export function ownerToAdd(
   master: Run,
   request: ContractChangeAsk & { service: string },
 ): string | undefined {
+  const o = ownerOf(runtime, master, request);
+  return o && !o.working ? o.service : undefined;
+}
+
+/**
+ * The service whose code the change is, other than the asking one: with its subtask still working
+ * (`working`: it gets the change as a note, the asking one waits for it), or none at work — no subtask,
+ * or its subtask has ended: a new subtask makes the change (pilot: a hash rule asked of a library whose
+ * subtask was done was accepted, and nobody made it).
+ */
+export function ownerOf(
+  runtime: Runtime,
+  master: Run,
+  request: ContractChangeAsk & { service: string },
+): { service: string; working?: string; after?: string } | undefined {
   const owner = request.owner;
   if (!owner || owner === request.service) return undefined;
   if (!runtime.loaded.meta?.repos[owner]) return undefined;
-  return splitOf(runtime, master)?.subtasks.some((s) => s.service === owner) ? undefined : owner;
+  const split = splitOf(runtime, master);
+  // asked again as it was accepted: the owner made it already (or is making it)
+  const agreed = split?.contract.find((c) => c.id === request.item);
+  if (agreed?.producer === owner && agreed.change === request.change) return undefined;
+  const own = (split?.subtasks ?? []).filter((s) => s.service === owner);
+  if (own.length === 0) return { service: owner };
+  const children = childrenOf(runtime, master.id);
+  const busy = own.find((s) => {
+    const run = children.get(s.key);
+    return !run || !isTerminal(run.state);
+  });
+  return busy ? { service: owner, working: busy.key } : { service: owner, after: own.at(-1)?.key as string };
 }
 
 /** A key for a new subtask in the split's own style: S1, S2 → S3; anything else → the next free number. */
@@ -221,7 +253,8 @@ export function acceptContractChange(
   const change = edited?.trim() || request.change;
   const doc = JSON.parse(runtime.artifacts.text(split)) as Record<string, unknown>;
   const contract = (Array.isArray(doc.contract) ? doc.contract : []) as Array<Record<string, unknown>>;
-  const owner = ownerToAdd(runtime, master, request);
+  const ownerAt = ownerOf(runtime, master, request);
+  const owner = ownerAt && !ownerAt.working ? ownerAt.service : undefined;
   let item = contract.find((c) => c.id === request.item);
   if (item) item.change = change;
   else {
@@ -229,8 +262,8 @@ export function acceptContractChange(
       kind: request.kind ?? "dto",
       id: request.item,
       change,
-      producer: owner ?? request.service,
-      consumers: owner ? [request.service] : [],
+      producer: ownerAt?.service ?? request.service,
+      consumers: ownerAt ? [request.service] : [],
     };
     contract.push(item);
   }
@@ -243,9 +276,9 @@ export function acceptContractChange(
     subtasks.push({
       key,
       service: owner,
-      task: `${change} (the contract change ${request.item} asked by subtask ${request.key}, ${request.service}: ${request.why})`,
+      task: `${change} (the contract change ${request.item} asked by subtask ${request.key}, ${request.service}: ${request.why})${ownerAt?.after ? ` — on top of subtask ${ownerAt.after}, which is done: its change is in the task's branch` : ""}`,
       requirements: [],
-      deliverAfter: [],
+      deliverAfter: ownerAt?.after ? [ownerAt.after] : [],
     });
     const asking = subtasks.find((x) => x.key === request.key);
     if (asking) {
@@ -254,12 +287,24 @@ export function acceptContractChange(
     }
     added = { key, service: owner, library };
   }
+  // the owner's subtask still works: it gets the change (below, as a side), the asking one waits for it
+  if (ownerAt?.working) {
+    const asking = subtasks.find((x) => x.key === request.key);
+    if (asking) {
+      const after = Array.isArray(asking.deliverAfter) ? (asking.deliverAfter as string[]) : [];
+      asking.deliverAfter = [...new Set([...after, ownerAt.working])];
+    }
+  }
   const by = `${actor.kind}:${actor.id}`;
   const next = runtime.artifacts.put({
     runId: master.id,
     type: SPLIT_TYPE,
     name: split.name,
-    content: JSON.stringify({ ...doc, contract, ...(added ? { subtasks } : {}) }, null, 2),
+    content: JSON.stringify(
+      { ...doc, contract, ...(added || ownerAt?.working ? { subtasks } : {}) },
+      null,
+      2,
+    ),
     mediaType: "application/json",
     provenance: { kind: "human", actor: { kind: "user", id: actor.id, verified: false } },
     sourceRefs: [request.id],

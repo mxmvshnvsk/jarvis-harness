@@ -2011,10 +2011,17 @@ function contractCheckHtml(check: NonNullable<RunPage["contractCheck"]>): Html {
   return html`<section class="panel" aria-labelledby="contract" data-live="contract">
 <h2 id="contract">${t("Contract")} <span class="pill ${check.ok ? "ok" : "bad"}">${check.ok ? t("every side holds") : t("a side does not hold")}</span></h2>
 <p class="hint">${t("Checked in each subtask's checkout without a model: the producer sends or serves it, the consumers read or call it, with the same fields where the type is declared.")}</p>
-<ul style="margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:8px">${check.items.map(
-    (i) =>
-      html`<li style="display:flex;flex-direction:column;gap:6px"><div class="row" style="flex-wrap:wrap;gap:6px 12px"><span class="pill plain">${i.kind}</span><code>${i.id}</code><span class="muted" style="flex:1 1 220px">${i.change}</span>${side(i.producerSide)}${i.consumerSides.map(side)}</div>${[i.producerSide, ...i.consumerSides].flatMap((s) => (s.fields ?? []).map(dtoCheckHtml))}</li>`,
-  )}</ul>
+<ul class="ccheck">${check.items.map((i) => {
+    const checks = [i.producerSide, ...i.consumerSides].flatMap((s) => s.fields ?? []);
+    // the types seen on one side only: one line for them all, the list on hover (pilot: a line each, a
+    // screen of «fields not checked» under every endpoint)
+    const blind = checks.filter((c) => !c.fields);
+    return html`<li><span class="pill plain">${i.kind}</span><code class="cid">${i.id}</code><span class="muted chg">${i.change}</span><span class="sides">${side(i.producerSide)}${i.consumerSides.map(side)}</span>${
+      checks.length > 0
+        ? html`<div class="more">${checks.filter((c) => c.fields).map(dtoCheckHtml)}${blind.length > 0 ? html`<p class="meta" title="${blind.map((c) => `${c.dto}: ${c.writer} → ${c.reader}`).join("\n")}">${plural(blind.length, "type")} — ${t("fields not checked: the type is not seen on both sides")} ⓘ</p>` : ""}</div>`
+        : ""
+    }</li>`;
+  })}</ul>
 </section>`;
 }
 

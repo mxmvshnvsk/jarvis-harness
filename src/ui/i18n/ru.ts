@@ -1878,6 +1878,7 @@ export const RU_PLURALS: Readonly<Record<string, readonly [string, string, strin
   "answer to approve": ["ответ ждёт одобрения", "ответа ждут одобрения", "ответов ждут одобрения"],
   "PR comment": ["комментарий в PR", "комментария в PR", "комментариев в PR"],
   PR: ["PR", "PR", "PR"],
+  type: ["тип", "типа", "типов"],
   source: ["источник", "источника", "источников"],
   excerpt: ["цитата", "цитаты", "цитат"],
   frame: ["фрейм", "фрейма", "фреймов"],

@@ -768,6 +768,38 @@ steps:
       expect(notesOf(rt, subId)[0]?.text).toContain(
         "It is a change of the library common-lib: its subtask 3 changes it first",
       );
+      // another change of the library, asked once its subtask is done: a new subtask makes it, on top of
+      // the done one (pilot: a hash rule asked of a library whose subtask was done was accepted, nobody made it)
+      const cc = await import("../../src/app/contractChange.ts");
+      const master = rt.runs.get(masterId) as never;
+      expect(subtasksOf(rt, master).find((v) => v.subtask.key === "3")?.state).toBe("COMPLETED");
+      cc.recordContractRequest(rt, master, rt.runs.get(subId) as never, {
+        id: "art_hash@1",
+        ask: {
+          item: "HashService",
+          kind: "dto",
+          change: "the gift flag only when present",
+          why: "it is computed there",
+          owner: "common-lib",
+        },
+      });
+      const asked = cc.pendingContractRequests(rt, master).find((r) => r.id === "art_hash@1");
+      expect(asked?.adds).toEqual({ service: "common-lib", library: true });
+      const decided = cc.acceptContractChange(
+        rt,
+        master,
+        asked as never,
+        { kind: "user", id: "dev@example.com", verified: false },
+        "cli",
+      );
+      expect(decided.added).toMatchObject({ key: "4", service: "common-lib", library: true });
+      const split = JSON.parse(rt.artifacts.text(rt.artifacts.listLatest(masterId, "split")[0] as never)) as {
+        subtasks: Array<{ key: string; task: string; deliverAfter?: string[] }>;
+      };
+      const added = split.subtasks.find((s) => s.key === "4");
+      expect(added?.deliverAfter).toEqual(["3"]);
+      expect(added?.task).toContain("on top of subtask 3, which is done");
+      expect(split.subtasks.find((s) => s.key === "1")?.deliverAfter).toEqual(["3", "4"]);
     } finally {
       rt.close();
     }

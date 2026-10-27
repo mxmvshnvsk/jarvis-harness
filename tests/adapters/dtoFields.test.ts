@@ -44,6 +44,23 @@ public class OrderCreatedEvent {
     expect(decls[1]?.fields.map((f) => f.name)).toEqual(["sku"]);
   });
 
+  it("reads an enum's constants: a value removed from a shared enum is a change of the contract", () => {
+    const decl = dtoDeclsOf(
+      "src/main/java/shop/EmailType.java",
+      `package shop;
+public enum EmailType {
+    WELCOME(Notifications::getWelcome, Notifications::setWelcome),
+    @Deprecated GIFT(Notifications::getGift, Notifications::setGift),
+    DONE;
+    private final Object getter;
+    EmailType() { this.getter = null; }
+}`,
+    );
+    expect(decl.map((d) => [d.name, d.fields.map((f) => f.name)])).toEqual([
+      ["EmailType", ["WELCOME", "GIFT", "DONE"]],
+    ]);
+  });
+
   it("reads a record, a Kotlin data class and TypeScript types", () => {
     const record = dtoDeclsOf(
       "SlotDto.java",

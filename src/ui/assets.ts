@@ -245,6 +245,15 @@ section.group>.cards>.card>.actions{grid-column:2;grid-row:1/span 3;justify-cont
 section.group>.cards>.card h3{font-size:15px;line-height:22px;font-weight:500}
 section.group>.cards>.card p{font-size:13px;line-height:19px;color:var(--muted)}
 @media (max-width:720px){section.group>.cards>.card{grid-template-columns:minmax(0,1fr)}section.group>.cards>.card>.actions{grid-column:1;grid-row:auto;justify-content:flex-start}}
+.ccheck{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:12px}
+.ccheck>li{display:grid;grid-template-columns:max-content minmax(120px,max-content) minmax(0,1fr) minmax(160px,max-content);gap:6px 12px;align-items:start;padding-bottom:12px;border-bottom:1px solid var(--line-soft)}
+.ccheck>li:last-child{border-bottom:0;padding-bottom:0}
+.ccheck .cid{overflow-wrap:anywhere}
+.ccheck .chg{min-width:0}
+.ccheck .sides{display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end}
+.ccheck .more{grid-column:1 / -1;display:flex;flex-direction:column;gap:6px}
+.ccheck .more>p{margin:0}
+@media (max-width:760px){.ccheck>li{grid-template-columns:max-content minmax(0,1fr)}.ccheck .chg,.ccheck .sides{grid-column:1 / -1;justify-content:flex-start}}
 .panel.side.steps{background:none;border:0;box-shadow:none;padding:4px 0 0;flex:0 1 280px}
 .panel.side.steps h2{font-size:13px;font-weight:500;color:var(--faint);margin-bottom:6px;padding-left:8px}
 .step.focus{background:var(--panel);box-shadow:0 0 0 1px var(--line)}

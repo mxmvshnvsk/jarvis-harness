@@ -200,11 +200,23 @@ function sideOf(
     };
   if (!facts) return { service, status: "no checkout" };
   if (item.kind === "topic") {
+    if (!producer && facts.consumes.length === 0)
+      return { service, status: "not checked", note: "no topic is seen read in its code" };
     const hit = producer
       ? facts.produces.find((t) => t.topic === item.id)
       : facts.consumes.find((t) => t.topic === item.id);
     return hit ? { service, status: "ok", at: where(hit) } : { service, status: "missing" };
   }
+  // a side whose code shows no endpoint at all is not seen, not missing: a frontend calls through its
+  // BFF, a client may be generated (pilot: every endpoint «✗» on the frontend that called them all)
+  if ((producer ? facts.serves : facts.calls).length === 0)
+    return {
+      service,
+      status: "not checked",
+      note: producer
+        ? "no endpoint is seen served in its code"
+        : "no call is seen in its code (a frontend through its BFF, a generated client?)",
+    };
   const wanted = parseEndpoint(item.id);
   const segment = producer ? undefined : item.producer;
   const hit = producer
@@ -240,11 +252,15 @@ const checkStep: DeterministicTool = async (ctx) => {
       dtoChecksOf(item, sides.get(item.producer) ?? { service: item.producer }, facts),
     );
   };
-  const items: ContractCheckItem[] = split.contract.map((item) => ({
-    ...item,
-    producerSide: side(item, item.producer, true),
-    consumerSides: item.consumers.map((c) => side(item, c, false)),
-  }));
+  const items: ContractCheckItem[] = split.contract.map((raw) => {
+    // «endpoint POST /x» from a contract change: the id without its kind (pilot: «missing» for a served one)
+    const item = { ...raw, id: contractItemId(raw.kind, raw.id) };
+    return {
+      ...item,
+      producerSide: side(item, item.producer, true),
+      consumerSides: item.consumers.map((c) => side(item, c, false)),
+    };
+  });
   const broken = items
     .flatMap((i) => [i.producerSide, ...i.consumerSides])
     .filter((s) => s.status === "missing" || s.status === "mismatch");
@@ -365,3 +381,8 @@ export const CROSS_TOOLS: Record<string, DeterministicTool> = {
   "cross.check": checkStep,
   "cross.deliver": deliverStep,
 };
+
+/** A contract item's id without its kind in front: `endpoint POST /x` → `POST /x`. */
+export function contractItemId(kind: string, id: string): string {
+  return id.replace(new RegExp(`^${kind}\\s+`, "i"), "").trim();
+}

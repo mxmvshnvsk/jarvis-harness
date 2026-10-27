@@ -215,8 +215,28 @@ export function dtoDeclsOf(file: string, content: string): DtoDecl[] {
   const kotlin = /\.kts?$/.test(file);
   for (const m of code.matchAll(JVM_DECL)) {
     const kind = m[2] as string;
-    if (kind === "enum" || kind === "interface") continue;
+    if (kind === "interface") continue;
     const at = m.index ?? 0;
+    // an enum: its constants are what goes between the sides (pilot: a value removed from a shared
+    // enum, and the check said the type was not declared in the library declaring it)
+    if (kind === "enum") {
+      const open = code.indexOf("{", at + m[0].length - 1);
+      if (open < 0) continue;
+      const end = closing(code, open);
+      const body = code.slice(open + 1, end - 1);
+      const head = body.split(";")[0] ?? "";
+      const fields: DtoField[] = [];
+      let from = open + 1;
+      for (const part of topLevel(head)) {
+        const name = /^\s*(?:@\w+(?:\([^)]*\))?\s*)*([A-Z_][A-Z0-9_]*)\b/.exec(part)?.[1];
+        const idx = code.indexOf(part, from);
+        from = idx < 0 ? from : idx + part.length;
+        if (name && !fields.some((f) => f.name === name))
+          fields.push({ name, type: "enum constant", line: lineAt(idx < 0 ? open : idx) });
+      }
+      out.push({ name: m[3] as string, file, line: lineAt(at), fields });
+      continue;
+    }
     const name = m[3] as string;
     let members: Array<{ text: string; at: number }> = [];
     let after = at + m[0].length;
