@@ -1820,7 +1820,7 @@ ${page.masterBudget ? masterBudgetHtml(page.masterBudget) : ""}
     (v) => html`<li class="sub-row">
 <span class="meta sub-key">${v.subtask.key}</span>
 <span class="sub-service">${v.run ? html`<a href="/runs/${shortRunId(v.run.id)}">${v.subtask.service}</a>` : html`<b>${v.subtask.service}</b>`}${v.subtask.issue ? html`<span class="meta mono">${v.subtask.issue}</span>` : ""}</span>
-<span class="muted sub-task">${firstLine(v.subtask.task, 140)}${page.subtaskNow?.[v.subtask.key]?.detail && v.state !== "COMPLETED" ? html`<span class="meta sub-now">${page.subtaskNow[v.subtask.key]?.detail}</span>` : ""}</span>
+<span class="muted sub-task"><span class="sub-what" title="${firstLine(v.subtask.task, 600)}">${firstLine(v.subtask.task, 240)}</span>${page.subtaskNow?.[v.subtask.key]?.detail && v.state !== "COMPLETED" ? html`<span class="meta sub-now">${page.subtaskNow[v.subtask.key]?.detail}</span>` : ""}</span>
 <span class="sub-acts">${pill(v)}${v.state === "queued" ? act(v.subtask.key, "start", "Start now") : ""}${v.state === "blocked" ? act(v.subtask.key, "start", "Start now anyway") : ""}${v.published && !v.published.ok ? act(v.subtask.key, "publish", "Run publish-local again", true) : ""}${v.state === "CANCELLED" || v.state === "FAILED" ? act(v.subtask.key, "retry", "Retry") : ""}${v.state !== "COMPLETED" && v.state !== "dropped" ? act(v.subtask.key, "drop", "Drop") : ""}</span>
 ${page.subtaskPr?.[v.subtask.key] ? prLine(page.subtaskPr[v.subtask.key] as RunPr) : ""}${v.state === "blocked" ? html`<p class="hint sub-pub">Starts when ${(v.waitsFor ?? []).map(serviceOf).join(", ")} is accepted and published, against the new version. «Start now anyway» — against the version it has.</p>` : ""}${published(v)}
 </li>`,

@@ -471,9 +471,9 @@ a.ref{text-decoration:none}a.ref code{color:var(--accent)}a.ref:hover code{text-
 .pr-finalize summary{cursor:pointer;font-weight:500}.pr-finalize form{display:flex;flex-direction:column;gap:8px;margin-top:10px}
 .subtasks{padding:16px 18px;display:flex;flex-direction:column;gap:8px}.subtasks h2{margin:0}
 .sub-list{margin:0;padding:0;list-style:none;display:flex;flex-direction:column}
-.sub-row{display:grid;grid-template-columns:20px minmax(150px,220px) minmax(0,1fr) auto;gap:6px 14px;align-items:center;padding:12px 0;border-top:1px solid var(--line-soft)}
+.sub-row{display:grid;grid-template-columns:20px minmax(150px,220px) minmax(200px,1fr) auto;gap:6px 14px;align-items:center;padding:12px 0;border-top:1px solid var(--line-soft)}
 .sub-service{display:flex;flex-direction:column;gap:2px;font-weight:600;overflow-wrap:anywhere}.sub-service .meta{font-weight:400}
-.sub-task{min-width:0}.sub-acts{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:flex-end}.sub-acts form{margin:0}
+.sub-task{min-width:0;overflow-wrap:anywhere}.sub-task .sub-what{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;line-clamp:3;overflow:hidden}.sub-acts{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:flex-end;max-width:440px}.sub-acts form{margin:0}.sub-acts .pill{max-width:100%;white-space:normal;overflow-wrap:anywhere}
 .sub-row .sub-pub,.sub-row .sub-pr{grid-column:2 / -1;margin:0}
 @media (max-width:760px){.sub-row{grid-template-columns:20px minmax(0,1fr)}.sub-task,.sub-acts{grid-column:2}.sub-acts{justify-content:flex-start}}
 .pr-card{display:flex;flex-direction:column;gap:12px;max-width:760px;padding:16px;border:1px solid var(--line);border-radius:var(--r-lg);background:var(--sunken)}
@@ -672,7 +672,7 @@ form.clarify>.actions{margin:4px 0}
 .tpop .w{background:var(--accent)}.tpop .h{background:var(--warn-dot)}.tpop .b{background:var(--held)}.tpop .s{background:color-mix(in srgb,var(--accent) 40%,var(--chip))}.tpop .p{background:var(--faint)}
 .tpop table{border-collapse:collapse;width:100%}
 .timew.fam .tpop{width:600px;left:auto;right:-12px}.tpop tr.hd td{color:var(--muted);font-size:12px;padding-bottom:4px}.tpop tr.total td{border-top:1px solid var(--line);font-weight:600;padding-top:6px}.timew.fam .tpop td.v{text-align:right;white-space:nowrap;padding-left:12px}
-.sub-now{display:block;margin-top:2px;font-size:12.5px}
+.sub-now{display:block;margin-top:2px;font-size:12.5px;overflow-wrap:anywhere}
 .tpop td{padding:5px 0;vertical-align:top}
 .tpop td.k{display:flex;gap:8px;align-items:center}
 .tpop td.k i{width:10px;height:10px;border-radius:3px;display:inline-block;flex:none}
