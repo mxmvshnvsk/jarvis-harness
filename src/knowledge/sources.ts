@@ -129,10 +129,10 @@ export function loadSourceDocuments(roots: KnowledgeRoots): SourceDocument[] {
   return out;
 }
 
-/** `SKILL_invoice-events.md` → `invoice-events`; unique within the list. */
+/** `SKILL_invoice-events.md` (or `.mdx`) → `invoice-events`; unique within the list. */
 export function skillIdOf(path: string, taken: ReadonlySet<string>): string {
   const stem = basename(path)
-    .replace(/\.md$/i, "")
+    .replace(/\.mdx?$/i, "")
     .replace(/^SKILL[_-]/i, "")
     .toLowerCase()
     .replace(/[^a-z0-9._-]+/g, "-")
