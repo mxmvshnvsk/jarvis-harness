@@ -4,7 +4,7 @@ import { Writable } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createEngine } from "../../src/app/engine.ts";
 import { redoNotesFor } from "../../src/app/redo.ts";
-import { mainCourse, writesCode } from "../../src/app/restart.ts";
+import { mainCourse, restartPlanOf, writesCode } from "../../src/app/restart.ts";
 import { createRuntime } from "../../src/app/runtime.ts";
 import { run } from "../../src/cli/main.ts";
 import { loadConfig } from "../../src/core/config/load.ts";
@@ -114,6 +114,26 @@ describe("jarvis restart", () => {
     expect(again?.run.currentStep).toBe("impact");
     expect(again?.types).toEqual(["research", "spec"]);
     expect(again?.approved).toEqual(["spec"]);
+    // that run cancelled before it began: what it took on can be taken on again (pilot: «nothing»)
+    const second = (again?.run.id ?? "").slice(4, 12);
+    expect((await jarvis(["cancel", second])).code).toBe(0);
+    const loaded = await loadConfig({ cwd: sb.project, homeDir: sb.home, env: {} });
+    const rt = createRuntime(loaded, { env: {} });
+    try {
+      const run2 = rt.runs.get(again?.run.id ?? "");
+      const staged = loadWorkflows(sb.project).get("staged");
+      if (!run2 || !staged) throw new Error("no run");
+      const plan = restartPlanOf(rt, run2, staged);
+      expect(plan?.steps.filter((x) => x.startable).map((x) => x.id)).toEqual([
+        "research",
+        "spec",
+        "approve-spec",
+        "impact",
+      ]);
+      expect(plan?.steps.find((x) => x.id === "spec")?.approved).toBe(true);
+    } finally {
+      rt.close();
+    }
   });
 
   it("--from a later step takes the impact on too; it goes on to the end without asking for the spec again", async () => {
@@ -164,6 +184,20 @@ describe("jarvis restart", () => {
       expect(hint).toContain("— research, spec go in (spec approved)");
       expect(hint).not.toContain(':approve-spec"');
       expect(hint).toContain('name="from-mode" value="step" checked');
+      // stopped at a gate it was sent back from: the step before it is recommended, not «nothing»
+      const atGate = {
+        workflow: "staged",
+        startAt: "approve-spec",
+        steps: [
+          { id: "research", kind: "deterministic" as const, done: true, approved: false, startable: true },
+          { id: "spec", kind: "deterministic" as const, done: true, approved: false, startable: true },
+          { id: "approve-spec", kind: "approval" as const, done: false, approved: false, startable: true },
+          { id: "impact", kind: "deterministic" as const, done: false, approved: false, startable: false },
+        ],
+      };
+      expect(String(restartChoiceHtml([{ run: cancelled, plan: atGate }]))).toContain(
+        `value="${cancelled.id.slice(4, 12)}:spec" data-step="spec" checked`,
+      );
       // none to take anything on from: nothing is said; beside one that has, it says so
       expect(String(restartChoiceHtml([{ run: cancelled }]))).toBe("");
       expect(

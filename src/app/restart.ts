@@ -75,13 +75,18 @@ export function restartPlanOf(
   const history = runtime.history.list(run.id);
   const latest = runtime.artifacts.listLatest(run.id);
   const course = mainCourse(workflow);
+  // a run started again from a step (or gone on from another): what it took on is done, though it never
+  // ran those steps itself (pilot: a restart from spec offered nothing to start again from)
+  const created = runtime.events.list({ runId: run.id, kind: "run.created", limit: 1 })[0];
+  const tookOnUpTo = (created?.payload as { startAt?: unknown } | undefined)?.startAt;
+  const carriedUntil = typeof tookOnUpTo === "string" ? course.findIndex((s) => s.id === tookOnUpTo) : -1;
   const steps: RestartStep[] = [];
   let open = true;
-  for (const step of course) {
+  for (const [i, step] of course.entries()) {
     const last = history.filter((h) => h.stepId === step.id).at(-1);
     // a round that went back (`needs_research`, `request_changes`) is no result to go on from
     const back = last?.outcome !== undefined && last.outcome in step.transitions.onOutcome;
-    const done = last?.status === "success" && !back;
+    const done = (last?.status === "success" && !back) || (last === undefined && i < carriedUntil);
     const approved =
       done &&
       (step.kind === "approval" ||

@@ -577,8 +577,18 @@ export interface EarlierRun {
 
 /** The step to start from by default: right after the last approval, past any gate. */
 function recommendedOf(plan: RestartPlan): string | undefined {
-  const at = plan.steps.findIndex((s) => s.id === plan.startAt);
-  return plan.steps.slice(Math.max(at, 0)).find((s) => s.startable && s.kind !== "approval")?.id;
+  const at = Math.max(
+    plan.steps.findIndex((s) => s.id === plan.startAt),
+    0,
+  );
+  const usable = (s: RestartPlan["steps"][number], k: number) =>
+    k > 0 && s.startable && s.kind !== "approval";
+  // the step the plan names, or the next that is no gate; past the last one — the last before it
+  // (a run stopped at a gate it was sent back from: its spec again)
+  return (
+    plan.steps.find((s, k) => k >= at && usable(s, k))?.id ??
+    [...plan.steps.entries()].reverse().find(([k, s]) => k < at && usable(s, k))?.[1].id
+  );
 }
 
 const STEP_ICON = (s: RestartPlan["steps"][number], run: Run) =>
@@ -591,18 +601,19 @@ const STEP_ICON = (s: RestartPlan["steps"][number], run: Run) =>
  * button start there (`jarvis restart <run> --from <step>`).
  */
 export function restartChoiceHtml(earlier: readonly EarlierRun[], _actions?: Actions): Html {
-  const withPlan = earlier.filter((e) => e.plan);
+  const withPlan = earlier.filter((e) => e.plan && recommendedOf(e.plan));
   // nothing any of them did can be taken on: the task simply starts, nothing to say
   if (withPlan.length === 0) return html``;
+  // open and picked: the newest run there is something to take on from
   const first = withPlan[0];
-  const runHtml = (e: EarlierRun, i: number) => {
+  const runHtml = (e: EarlierRun) => {
     const r = e.run;
     const short = shortRunId(r.id);
     const plan = e.plan;
     const rec = plan ? recommendedOf(plan) : undefined;
     const choices = plan ? plan.steps.filter((s, k) => k > 0 && s.startable && s.kind !== "approval") : [];
     const state = r.state === "FAILED" ? t("failed") : r.state === "COMPLETED" ? t("done") : t("cancelled");
-    return html`<details class="erun"${i === 0 ? " open" : ""}>
+    return html`<details class="erun"${e === first ? " open" : ""}>
 <summary><span class="edot ${r.state.toLowerCase()}" aria-hidden="true"></span><a href="/runs/${short}"><b>${short}</b></a> <span class="muted">${state}${r.currentStep && r.state !== "COMPLETED" ? html` ${t("at")} <b>${r.currentStep}</b>` : ""} · ${wallClock(r.updatedAt).slice(0, 5)} ${r.updatedAt.slice(0, 10)}</span>${rec ? html`<span class="pill info">${t("can start from {step}", { step: rec })}</span>` : html`<span class="pill plain">${t("nothing to take on")}</span>`}<span class="car" aria-hidden="true">▾</span></summary>
 ${plan ? html`<ol class="esteps">${plan.steps.map((s) => html`<li class="${s.approved ? "approved" : s.done ? "done" : r.currentStep === s.id ? "stopped" : "none"}${s.kind === "approval" ? " gate" : ""}"><span aria-hidden="true">${STEP_ICON(s, r)}</span>${s.id}</li>`)}</ol>` : ""}
 ${
